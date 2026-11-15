@@ -524,6 +524,14 @@ two tiers (`--directive notinyinline` turns both off):
   only returns it, or a constant closure). That is the shape the splice pays
   for: the callee applies the closure, and the application becomes a call.
 
+A size is counted through `let v = e; v`, which is `e`: a wrapper that only
+passes a call's result on, as `errno` does (`let v = prim__errno w; v`, four
+nodes, two without the `let`), is as small as that call. Before this its
+`DualABI` worker stayed a function of its own, called from every site
+(`tests/Test179PassThrough`). The spliced body is then folded the same way where the call was
+an `RLet`'s value (`passThrough`): `let x = (let y = e; y)` becomes `let x = e`, so no copy of the
+result is left in the IR or the C.
+
 What it is for: a function generic over `Monad`/`HasIO` specialised to `IO`
 (`modifyIORef`, ...) calls the lifted `Monad IO` bind, a 3-line worker that
 `apply`s two arguments, with two freshly built capturing `partial`s. Those

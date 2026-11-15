@@ -184,6 +184,21 @@ eliminated branch) that reviving the removed tracking wasn't judged
 worth it yet. See `TODO.md`'s own entry on this for what reviving it
 would take.
 
+### Not written, but not pruned (`Emit`)
+
+The "can't arise" argument above is out of date: a `%foreign` declaration whose
+every call became an `RAppFFIInline` is left with no caller, and it does arise.
+`prim__SIGCONT` of `System.Posix.Signal` is one (its calls are `%inline`d
+constants, spliced as `(SIGCONT)`), and so is any `%foreign` used only through
+`%inline` wrappers. The def stays in the list, because `collectDeclarations`
+takes the `#include` and `-l` of every inlined call from it (Bugs found #1),
+and so does the struct table. `generateCSourceFile` instead leaves out its
+prototype and its C wrapper when no def names it (`usedFunctionNamesD`, the
+reachability test of this pass) and no `%export` does. Only in a whole-program
+run: a module compiled alone (`dropUnimplementableForeign`) is called from
+other modules, so it keeps every wrapper. `tests/Test179PassThrough` checks
+that the wrapper is gone and the header is still included.
+
 ## Bugs found and fixed
 
 1. **Pruning a still-referenced `MkRCForeign` drops its own header/library

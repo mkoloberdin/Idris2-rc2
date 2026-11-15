@@ -74,7 +74,16 @@ tinyAlwaysSize = 2
 ||| more nodes than that: a size test that stops counting at the limit.
 fits : Nat -> RCExp -> Maybe Nat
 fits Z _ = Nothing
+fits (S k) e@(RLet _ var _ value (RV _ v)) =
+    -- `let v = e; v` is `e`: a wrapper that only passes a call's result on is as small as the call
+    if v == RCLoc var then fits (S k) value else foldlM fits k (children e)
 fits (S k) e = foldlM fits k (children e)
+
+||| `let y = e; y` of a boxed `y` is `e`: what is left of a spliced wrapper that only
+||| passed a call's result on, as the value of the `let` the call was bound by.
+passThrough : RCExp -> RCExp
+passThrough e@(RLet _ y RBoxed value (RV _ (RCLoc y'))) = if y == y' then value else e
+passThrough e = e
 
 record Analysis where
   constructor MkAnalysis
@@ -541,7 +550,7 @@ inlineInto tiny defOf eligible tinyOnly self = go empty empty []
            then case lookup n defOf of
                      Just d => do
                          update SpliceCount S
-                         splicedValue <- spliceCall vfc reps d args
+                         splicedValue <- passThrough <$> spliceCall vfc reps d args
                          case promotableNativeLetRep loopSlots var splicedValue body of
                               Just ty => do
                                   body' <- go cl (insert var (RNative (TPrim ty)) reps) loopSlots body

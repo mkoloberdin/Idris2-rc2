@@ -48,6 +48,7 @@
 module Compiler.RC2.Emit
 
 import Compiler.RC2.RCExp
+import Compiler.RC2.DeadCode
 import Compiler.RC2.Pending
 import Compiler.RC2.Types
 import Compiler.RC2.Stage
@@ -1379,17 +1380,19 @@ declarationsOf _ (MkRCError _) = pure []
 ||| before `outn` is ever opened, so a failure leaves no half-written .c.
 collectDeclarations : {auto c : Ref Ctxt Defs} -> {auto lm : Ref LibraryMode Bool} -> {auto f : Ref FunctionDefinitions (List String)}
                    -> {auto hf : Ref HeaderFiles (SortedSet String)} -> {auto fl : Ref ForeignLibs (SortedSet String)}
-                   -> Name -> RCDef -> Core ()
-collectDeclarations n (MkRCError exp) = throw $ InternalError ("[rc2] Error with expression in " ++ show n)
-collectDeclarations n def@(MkRCForeign ccs fargs ret) = do
-    decls <- declarationsOf n def
+                   -> (unusedForeign : SortedSet Name) -> Name -> RCDef -> Core ()
+collectDeclarations _ n (MkRCError exp) = throw $ InternalError ("[rc2] Error with expression in " ++ show n)
+collectDeclarations unusedForeign n def@(MkRCForeign ccs fargs ret) = do
+    -- An unused wrapper gets no prototype, but still its headers and libraries:
+    -- the inlined calls of it need them.
+    decls <- if contains n unusedForeign then pure [] else declarationsOf n def
     update FunctionDefinitions $ \otherDefs => decls ++ otherDefs
     Just spec <- validateForeign n ccs fargs ret
         | Nothing => throw $ UserError "[rc2] %foreign declaration \{show n} has no implementation rc2 can call: it needs a \"CExpr:\", \"RC2:\", \"RefC:\" or \"C:\" alternative"
     let addAll = \xs, s => foldl (flip insert) (the (SortedSet String) s) xs
     update HeaderFiles (addAll (headerList spec))
     update ForeignLibs (addAll (mapMaybe linkLibName (libList spec)))
-collectDeclarations n def = do
+collectDeclarations _ n def = do
     decls <- declarationsOf n def
     update FunctionDefinitions $ \otherDefs => decls ++ otherDefs
 
@@ -1537,13 +1540,23 @@ generateCSourceFile defs0 exports noMain entryHelper dropUnimplementableForeign 
                              Data.SortedMap.empty defs
      _ <- newRef StructDefs structDefs
      _ <- newRef TrampolineFree (trampolineFree defs)
+     -- A `%foreign` wrapper nothing refers to (its every call was inlined, see
+     -- `inlineFFIWorkers`) is not emitted. Only a whole program can say so: a
+     -- module compiled alone (`dropUnimplementableForeign`) is called from others.
+     -- `keepforeign` writes every wrapper, for the tests that read their shape.
+     let referenced = SortedSet.fromList (map (\(n, _, _, _) => n) exports)
+                      `union` foldl (\acc, (_, d) => union acc (usedFunctionNamesD d)) Data.SortedSet.empty defs
+     let unusedForeign = if dropUnimplementableForeign || ("keepforeign" `elem` directiveList) then Data.SortedSet.empty
+                            else SortedSet.fromList (mapMaybe (\(n, d) => case d of
+                                                                   MkRCForeign {} => if contains n referenced then Nothing else Just n
+                                                                   _ => Nothing) defs)
      _ <- newRef LibraryMode library
      -- Pass 1: every declaration with a whole-program forward-reference
      -- requirement (function prototypes, plus the header/lib metadata
      -- and early validateForeign/MkRCError error detection that ride along --
      -- see `collectDeclarations`'s own doc comment), derived from each
      -- def's own signature alone, no body traversal.
-     traverse_ (uncurry collectDeclarations) defs
+     traverse_ (uncurry (collectDeclarations unusedForeign)) defs
      -- Forward-declare (as `extern`) every untagged constructor `defs`
      -- itself references but doesn't own -- a no-op set whenever `defs`
      -- really is the whole program (every such constructor is already
@@ -1582,7 +1595,7 @@ generateCSourceFile defs0 exports noMain entryHelper dropUnimplementableForeign 
      -- before the def's own body text that references them.
      traverse_ (\(n, d) => do
          put OutfileText DList.Nil
-         createCFunctions n d
+         when (not (contains n unusedForeign)) $ createCFunctions n d
          flushStagedDecls outn h
          flushEmitBuffer outn h) defs
      -- `%export` wrappers: additive, generated after every ordinary def

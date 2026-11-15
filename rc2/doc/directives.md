@@ -162,6 +162,11 @@ produced its result (unlike section 2's stage disables, which
   that never return a pending closure. See `doc/trampoline-elision.md`.
 - **`dumpcc`** -- prints the exact C compile/link command(s) about to
   run, to stdout.
+- **`keepforeign`** -- writes the C wrapper of every `%foreign` declaration,
+  also one no call names any more (its calls were all inlined). Without it a
+  whole-program build leaves such a wrapper out, headers and libraries kept
+  (`doc/dead-code-elim.md`, "Not written, but not pruned"). For the tests that
+  read a wrapper's shape.
 - **`dumplifts`** -- writes a `.lifts` file listing each lifted
   definition with the top-level definition it came from, whether it
   was a lambda or a `Delay` (with its `LazyReason`), and its own
