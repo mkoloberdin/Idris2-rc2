@@ -99,7 +99,13 @@ Directives that look like they belong on this list but don't:
   is dropped has no reference of its own -- the use-after-free a missing
   `RMemoize` case in the same function caused in `refc-suite/clock`
   (`doc/caf-memoization.md`).
-- **`latepushcon` is the one opt-in stage.** It turns *on*
+- **`listdivert` is an opt-in stage.** It turns *on* `Compiler.RC2.ListDivert`:
+  upstream's two-pass tail-recursive `++`/`map`/`filter`/`mapMaybe` are replaced by
+  naive definitions that TRMC makes one loop (`doc/list-divert.md`). Off by default
+  because a program of short lists gains nothing and its code grows (the compiler's
+  own executable by 5.5%), while list-heavy programs gain about a quarter of their
+  time. Whole-program compiles only. `verify.sh --directive listdivert` exercises it.
+- **`latepushcon` is the other opt-in stage.** It turns *on*
   `Compiler.RC2.PushCon`'s post-RC push (`applyPushConRC`), right after
   the later `LateInline` run: the same case-into-tails push, with each
   known tail folded against its alt by explicit ownership transfer
