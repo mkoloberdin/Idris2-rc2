@@ -72,12 +72,32 @@ tinyAlwaysSize = 2
 
 ||| What is left of `budget` after the nodes of `e`, or `Nothing` once `e` has
 ||| more nodes than that: a size test that stops counting at the limit.
-fits : Nat -> RCExp -> Maybe Nat
-fits Z _ = Nothing
-fits (S k) e@(RLet _ var _ value (RV _ v)) =
-    -- `let v = e; v` is `e`: a wrapper that only passes a call's result on is as small as the call
-    if v == RCLoc var then fits (S k) value else foldlM fits k (children e)
-fits (S k) e = foldlM fits k (children e)
+fits : SortedSet Int -> Nat -> RCExp -> Maybe Nat
+fits ps n e = case e of
+    -- A `dup` or `drop` of a parameter costs nothing here: the caller owns those, and `PushDown`
+    -- and `DupMerge`, much later, cancel most of them against its own. One of a local the body
+    -- made stays counted (a `postDrop` is a field, not a node).
+    RDup _ v _ k => if isParam v then fits ps n k else count
+    RDrop _ vs k => if all isParam vs then fits ps n k else count
+    _ => count
+  where
+    isParam : RCLocal -> Bool
+    isParam (RCLoc i) = contains i ps
+    isParam _ = False
+
+    count : Maybe Nat
+    count = case n of
+                 Z => Nothing
+                 S m => case e of
+                             -- `let v = e; v` is `e`: a wrapper that only passes a call's result on
+                             -- is as small as the call
+                             RLet _ var _ value (RV _ v) =>
+                                 if v == RCLoc var then fits ps n value else foldlM (fits ps) m (children e)
+                             _ => foldlM (fits ps) m (children e)
+
+||| The parameters of a function, for `fits`.
+paramSet : List (Int, Rep) -> SortedSet Int
+paramSet args = SortedSet.fromList (map fst args)
 
 ||| `let y = e; y` of a boxed `y` is `e`: what is left of a spliced wrapper that only
 ||| passed a call's result on, as the value of the `let` the call was bound by.
@@ -164,7 +184,7 @@ analyse tiny early seed prev dirty refs defOf defs =
                               then Just n else Nothing)
               (SortedMap.toList counts')
         smallTiny : SortedSet Name = SortedSet.fromList $ filter (\n => case lookup n defOf of
-                                                                       Just (MkRCFun _ _ _ b) => isJust (fits tinyAlwaysSize b)
+                                                                       Just (MkRCFun as _ _ b) => isJust (fits (paramSet as) tinyAlwaysSize b)
                                                                        _ => False)
                                                                 (Prelude.toList tinyOnly)
     in (MkAnalysis eligible tinyOnly smallTiny order', MkCarried info' counts' order' (map fst defs) refs)
@@ -183,7 +203,7 @@ analyse tiny early seed prev dirty refs defOf defs =
 
     isTiny : SortedMap Name RCDef -> Name -> Bool
     isTiny defOf n = case lookup n defOf of
-                          Just (MkRCFun _ _ _ body) => isJust (fits tiny body) && not (hasLoop body)
+                          Just (MkRCFun as _ _ body) => isJust (fits (paramSet as) tiny body) && not (hasLoop body)
                           _ => False
 
     callsIn : CalleeInfo -> Name -> List (Name, Nat)
@@ -506,7 +526,7 @@ inlineInto tiny defOf eligible tinyOnly self = go empty empty []
     -- in the round may have grown it, and a grown body is not a tiny one.
     fitsNow : Nat -> Name -> Bool
     fitsNow limit n = case lookup n defOf of
-                           Just (MkRCFun _ _ _ b) => isJust (fits limit b)
+                           Just (MkRCFun as _ _ b) => isJust (fits (paramSet as) limit b)
                            _ => False
 
     -- A call is spliced when its callee is `eligible`, or `tinyOnly` and either

@@ -524,6 +524,15 @@ two tiers (`--directive notinyinline` turns both off):
   only returns it, or a constant closure). That is the shape the splice pays
   for: the callee applies the closure, and the application becomes a call.
 
+A `dup` or `drop` of the callee's own parameter is not counted: `PushDown` and
+`DupMerge`, long after this pass, cancel most of them against the caller's, so
+counting them sized a body by what would have been removed. One of a local the
+body made is counted, and so is every `dup` and `drop` that was cancelled by
+nothing. Measured on the compiler's own `prelude` build: no splice changes
+(27,963.8 M instructions either way, the executable 16 bytes larger); not
+counting every `dup` and `drop` was no different. Kept as the sizing that
+matches what is left in the end.
+
 A size is counted through `let v = e; v`, which is `e`: a wrapper that only
 passes a call's result on, as `errno` does (`let v = prim__errno w; v`, four
 nodes, two without the `let`), is as small as that call. Before this its
