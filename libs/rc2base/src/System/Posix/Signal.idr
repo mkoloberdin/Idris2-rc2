@@ -36,133 +36,133 @@ Ord Signal where
 %inline %foreign "CExpr:(SIGHUP),libc,signal.h"
 prim__SIGHUP : Int32
 ||| Hangup detected on the controlling terminal.
-public export SIGHUP : Signal
+%inline public export SIGHUP : Signal
 SIGHUP = MkSignal prim__SIGHUP
 
 %inline %foreign "CExpr:(SIGINT),libc,signal.h"
 prim__SIGINT : Int32
 ||| Interrupt from the keyboard.
-public export SIGINT : Signal
+%inline public export SIGINT : Signal
 SIGINT = MkSignal prim__SIGINT
 
 %inline %foreign "CExpr:(SIGQUIT),libc,signal.h"
 prim__SIGQUIT : Int32
 ||| Quit from the keyboard (core dump).
-public export SIGQUIT : Signal
+%inline public export SIGQUIT : Signal
 SIGQUIT = MkSignal prim__SIGQUIT
 
 %inline %foreign "CExpr:(SIGILL),libc,signal.h"
 prim__SIGILL : Int32
 ||| Illegal instruction.
-public export SIGILL : Signal
+%inline public export SIGILL : Signal
 SIGILL = MkSignal prim__SIGILL
 
 %inline %foreign "CExpr:(SIGTRAP),libc,signal.h"
 prim__SIGTRAP : Int32
 ||| Trace or breakpoint trap.
-public export SIGTRAP : Signal
+%inline public export SIGTRAP : Signal
 SIGTRAP = MkSignal prim__SIGTRAP
 
 %inline %foreign "CExpr:(SIGABRT),libc,signal.h"
 prim__SIGABRT : Int32
 ||| Abort signal from `abort(3)`.
-public export SIGABRT : Signal
+%inline public export SIGABRT : Signal
 SIGABRT = MkSignal prim__SIGABRT
 
 %inline %foreign "CExpr:(SIGBUS),libc,signal.h"
 prim__SIGBUS : Int32
 ||| Bus error (bad memory access).
-public export SIGBUS : Signal
+%inline public export SIGBUS : Signal
 SIGBUS = MkSignal prim__SIGBUS
 
 %inline %foreign "CExpr:(SIGFPE),libc,signal.h"
 prim__SIGFPE : Int32
 ||| Arithmetic exception.
-public export SIGFPE : Signal
+%inline public export SIGFPE : Signal
 SIGFPE = MkSignal prim__SIGFPE
 
 %inline %foreign "CExpr:(SIGKILL),libc,signal.h"
 prim__SIGKILL : Int32
 ||| Kill; cannot be caught, blocked or ignored.
-public export SIGKILL : Signal
+%inline public export SIGKILL : Signal
 SIGKILL = MkSignal prim__SIGKILL
 
 %inline %foreign "CExpr:(SIGUSR1),libc,signal.h"
 prim__SIGUSR1 : Int32
 ||| User-defined signal 1.
-public export SIGUSR1 : Signal
+%inline public export SIGUSR1 : Signal
 SIGUSR1 = MkSignal prim__SIGUSR1
 
 %inline %foreign "CExpr:(SIGSEGV),libc,signal.h"
 prim__SIGSEGV : Int32
 ||| Invalid memory reference.
-public export SIGSEGV : Signal
+%inline public export SIGSEGV : Signal
 SIGSEGV = MkSignal prim__SIGSEGV
 
 %inline %foreign "CExpr:(SIGUSR2),libc,signal.h"
 prim__SIGUSR2 : Int32
 ||| User-defined signal 2.
-public export SIGUSR2 : Signal
+%inline public export SIGUSR2 : Signal
 SIGUSR2 = MkSignal prim__SIGUSR2
 
 %inline %foreign "CExpr:(SIGPIPE),libc,signal.h"
 prim__SIGPIPE : Int32
 ||| Write to a pipe or socket with no reader.
-public export SIGPIPE : Signal
+%inline public export SIGPIPE : Signal
 SIGPIPE = MkSignal prim__SIGPIPE
 
 %inline %foreign "CExpr:(SIGALRM),libc,signal.h"
 prim__SIGALRM : Int32
 ||| Timer signal from `alarm(2)`.
-public export SIGALRM : Signal
+%inline public export SIGALRM : Signal
 SIGALRM = MkSignal prim__SIGALRM
 
 %inline %foreign "CExpr:(SIGTERM),libc,signal.h"
 prim__SIGTERM : Int32
 ||| Termination request.
-public export SIGTERM : Signal
+%inline public export SIGTERM : Signal
 SIGTERM = MkSignal prim__SIGTERM
 
 %inline %foreign "CExpr:(SIGSTKFLT),libc,signal.h"
 prim__SIGSTKFLT : Int32
 ||| Stack fault on a coprocessor. Linux only (not on BSD); not in POSIX. See `signal(7)`.
-public export SIGSTKFLT : Signal
+%inline public export SIGSTKFLT : Signal
 SIGSTKFLT = MkSignal prim__SIGSTKFLT
 
 %inline %foreign "CExpr:(SIGCHLD),libc,signal.h"
 prim__SIGCHLD : Int32
 ||| Child stopped or terminated.
-public export SIGCHLD : Signal
+%inline public export SIGCHLD : Signal
 SIGCHLD = MkSignal prim__SIGCHLD
 
 %inline %foreign "CExpr:(SIGCONT),libc,signal.h"
 prim__SIGCONT : Int32
 ||| Continue if stopped.
-public export SIGCONT : Signal
+%inline public export SIGCONT : Signal
 SIGCONT = MkSignal prim__SIGCONT
 
 %inline %foreign "CExpr:(SIGSTOP),libc,signal.h"
 prim__SIGSTOP : Int32
 ||| Stop the process; cannot be caught, blocked or ignored.
-public export SIGSTOP : Signal
+%inline public export SIGSTOP : Signal
 SIGSTOP = MkSignal prim__SIGSTOP
 
 %inline %foreign "CExpr:(SIGTSTP),libc,signal.h"
 prim__SIGTSTP : Int32
 ||| Stop typed at the terminal.
-public export SIGTSTP : Signal
+%inline public export SIGTSTP : Signal
 SIGTSTP = MkSignal prim__SIGTSTP
 
 %inline %foreign "CExpr:(SIGTTIN),libc,signal.h"
 prim__SIGTTIN : Int32
 ||| Background process read from the terminal.
-public export SIGTTIN : Signal
+%inline public export SIGTTIN : Signal
 SIGTTIN = MkSignal prim__SIGTTIN
 
 %inline %foreign "CExpr:(SIGTTOU),libc,signal.h"
 prim__SIGTTOU : Int32
 ||| Background process wrote to the terminal.
-public export SIGTTOU : Signal
+%inline public export SIGTTOU : Signal
 SIGTTOU = MkSignal prim__SIGTTOU
 
 
@@ -264,13 +264,13 @@ prim__SIG_UNBLOCK : Int32
 prim__SIG_SETMASK : Int32
 
 ||| Add the set to the blocked signals.
-export SIG_BLOCK : MaskHow
+%inline export SIG_BLOCK : MaskHow
 SIG_BLOCK = MkMaskHow prim__SIG_BLOCK
 ||| Remove the set from the blocked signals.
-export SIG_UNBLOCK : MaskHow
+%inline export SIG_UNBLOCK : MaskHow
 SIG_UNBLOCK = MkMaskHow prim__SIG_UNBLOCK
 ||| Replace the blocked signals with the set.
-export SIG_SETMASK : MaskHow
+%inline export SIG_SETMASK : MaskHow
 SIG_SETMASK = MkMaskHow prim__SIG_SETMASK
 
 %inline %foreign "CExpr:(sigprocmask($1, (sigset_t *)($2), (sigset_t *)($3))),libc,signal.h"
@@ -385,26 +385,26 @@ prim__SIGWINCH : Int32
 prim__SIGIO : Int32
 
 ||| Urgent condition on a socket.
-public export SIGURG : Signal
+%inline public export SIGURG : Signal
 SIGURG = MkSignal prim__SIGURG
 ||| CPU time limit exceeded.
-public export SIGXCPU : Signal
+%inline public export SIGXCPU : Signal
 SIGXCPU = MkSignal prim__SIGXCPU
 ||| File size limit exceeded.
-public export SIGXFSZ : Signal
+%inline public export SIGXFSZ : Signal
 SIGXFSZ = MkSignal prim__SIGXFSZ
 ||| Virtual alarm clock.
-public export SIGVTALRM : Signal
+%inline public export SIGVTALRM : Signal
 SIGVTALRM = MkSignal prim__SIGVTALRM
 ||| Profiling timer expired.
-public export SIGPROF : Signal
+%inline public export SIGPROF : Signal
 SIGPROF = MkSignal prim__SIGPROF
 ||| Bad system call.
-public export SIGSYS : Signal
+%inline public export SIGSYS : Signal
 SIGSYS = MkSignal prim__SIGSYS
 ||| The terminal window was resized (not in POSIX; Linux and BSD).
-public export SIGWINCH : Signal
+%inline public export SIGWINCH : Signal
 SIGWINCH = MkSignal prim__SIGWINCH
 ||| I/O is possible on a descriptor (not in POSIX; Linux and BSD).
-public export SIGIO : Signal
+%inline public export SIGIO : Signal
 SIGIO = MkSignal prim__SIGIO

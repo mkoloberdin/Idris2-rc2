@@ -33,7 +33,7 @@ Show Errno where
 prim__errno : PrimIO Int32
 
 ||| Return the current value of `errno`.
-public export errno : IO Errno
+%inline public export errno : IO Errno
 errno = MkErrno <$> primIO prim__errno
 
 
