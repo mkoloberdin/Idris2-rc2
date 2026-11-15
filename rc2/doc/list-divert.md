@@ -84,6 +84,11 @@ it into one loop that allocates only the result.
   (`g` and the accumulator, `z`, or the count) and the list. `foldl` and `length` are tail
   calls, so the loop never builds the list at all; `foldr` keeps the call it had, which makes
   the result. `sum` and the like are `foldl` once `Foldable` is specialised.
+- **`foldMap`** of a chain is a call of `rc2_foldMap_<stages>`, which is upstream's own
+  definition (`foldl (\acc, elem => (<+>) acc (f elem)) neutral`, the monoid a record of the
+  two) with the `foldl` over the chain made one loop. It takes the stage functions, the monoid,
+  `f` and the list. A small caller usually has `foldMap` inlined into a `foldl` already, and
+  that is fused as one; this is the case where it was not (23 uses in the compiler).
 - **Twice.** Inlining makes the shapes `length (filter p xs)` and `sum (map f xs)` have: a
   function's list argument becomes a `let` the body reads once (`let l = chain in
   lengthPlus [0, l]`). So the pass runs a second time after `InlineCExp`, and treats a `let`
@@ -124,6 +129,7 @@ call of a definition added to the program, named after its stages, first applied
 | `foldl g z (map f xs)` (`sum (map f xs)`) | `rc2_foldl_m f g z xs` |
 | `foldr g z (filter p xs)` | `rc2_foldr_f p g z xs` |
 | `length (filter p (map f xs))` (`lengthPlus 0 …`) | `rc2_length_mf f p 0 xs` |
+| `foldMap h (map f xs)` | `rc2_foldMap_m f monoid h xs` |
 
 **Through a `let`**, which is what inlining leaves: `let l = <chain or call> in <call> [.., l]`
 where the last argument of the call is `l` and nothing else reads `l` is the call with the
@@ -191,8 +197,7 @@ tail calls, which `Loop` does; `foldr` is as deep as upstream's.
 - a list read twice (`let ys = map f xs in (map g ys, filter p ys)`): `ys` has two readers;
 - a list that crosses a function the inliner did not take apart (`sum (chain n)` where `chain`
   is a function of its own), since the pass sees a call, not a chain;
-- `foldMap`, `foldl'`-like functions of their own, `all`, `any`, `elem`: not on the list of
-  consumers;
+- `foldl'`-like functions of their own, `all`, `any`, `elem`: not on the list of consumers;
 - a consumer applied to a chain with an end (`length (map f xs ++ ys)`).
 
 ### Design decision: the order of effects is not kept
@@ -211,7 +216,7 @@ loops (`traverse_`, `forM_`, `mapM_`) are other functions and are not touched; a
 
 Survey of the compiler's own NamedCExp (static, 3,350 diverted calls): about 70 chains of
 two, 126 `++` whose first argument is `map`, `filter` or `mapMaybe`, and 63 folds
-(`foldMap`, `foldr`, `foldl`) that read one directly. `foldMap` is not fused.
+(`foldMap`, `foldr`, `foldl`) that read one directly.
 
 | | `listdivert` | `listfuse` |
 |---|---|---|

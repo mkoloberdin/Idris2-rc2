@@ -56,6 +56,13 @@ fr xs = foldr (\x, acc => x :: acc) [] (map (+ 1) (filter (> 2) xs))
 jl : List Int -> Nat
 jl xs = length (mapMaybe (\x => if x > 4 then Just x else Nothing) (map (+ 1) xs))
 
+-- foldMap of a chain: a monoid whose `<+>` is not commutative
+fmL : List Int -> List Int
+fmL xs = foldMap (\x => [x, x + 1]) (filter (> 2) (map (* 2) xs))
+
+fmS : List Int -> String
+fmS xs = foldMap show (map (+ 1) xs)
+
 main : IO ()
 main = do
   let xs : List Int = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
@@ -79,3 +86,5 @@ main = do
     printLn (fl l)
     printLn (fr l)
     printLn (jl l)
+    printLn (fmL l)
+    printLn (fmS l)
