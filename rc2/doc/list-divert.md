@@ -79,8 +79,121 @@ it into one loop that allocates only the result.
 - **Where.** Bottom-up in the call rewriting that makes the diverted calls, so an inner chain is
   fused before the one that reads it, and an inner chain that has an end list is not extended
   (`map f (xs ++ ys)` is not `map f xs ++ map f ys`).
+- **Consumers.** `foldl`, `foldr` and `length` (`lengthPlus`) of a chain are one loop too
+  (`rc2_foldl_mf`, `rc2_foldr_m`, `rc2_length_f`): the stages, the consumer's own parameters
+  (`g` and the accumulator, `z`, or the count) and the list. `foldl` and `length` are tail
+  calls, so the loop never builds the list at all; `foldr` keeps the call it had, which makes
+  the result. `sum` and the like are `foldl` once `Foldable` is specialised.
+- **Twice.** Inlining makes the shapes `length (filter p xs)` and `sum (map f xs)` have: a
+  function's list argument becomes a `let` the body reads once (`let l = chain in
+  lengthPlus [0, l]`). So the pass runs a second time after `InlineCExp`, and treats a `let`
+  that only its body's last argument reads as the call's argument; the second run adds no
+  definition the first made.
 - **Intermediate lists are never shared.** A chain is only a call nested directly in the
   argument of the next, so the intermediate list has no other reader.
+
+### What becomes what
+
+Written as source, with the rewritten expression on the right. `xs` is any list expression that is
+not itself a chain. In the NamedCExp the calls are `rc2_map f xs` and so on; the fused loop is a
+call of a definition added to the program, named after its stages, first applied first
+(`m` map, `f` filter, `j` mapMaybe), with `_t` when the loop ends in a list.
+
+**Chains of `map`, `filter`, `mapMaybe`** (the stage functions, innermost first, then the list):
+
+| before | after |
+|---|---|
+| `map f (map g xs)` | `rc2_fuse_mm g f xs` |
+| `map f (filter p xs)` | `rc2_fuse_fm p f xs` |
+| `filter p (map g xs)` | `rc2_fuse_mf g p xs` |
+| `filter p (filter q xs)` | `rc2_fuse_ff q p xs` |
+| `mapMaybe h (map g xs)` | `rc2_fuse_mj g h xs` |
+| `map f (filter p (map g xs))` | `rc2_fuse_mfm g p f xs` |
+
+**A chain followed by `++`** (the loop ends in `ys`; the stage functions, `xs`, then `ys`):
+
+| before | after |
+|---|---|
+| `map f xs ++ ys` | `rc2_fuse_m_t f xs ys` |
+| `map f (filter p xs) ++ ys` | `rc2_fuse_fm_t p f xs ys` |
+
+**A fold or `length` of a chain** (the stage functions, the consumer's parameters, then the list):
+
+| before | after |
+|---|---|
+| `foldl g z (map f xs)` (`sum (map f xs)`) | `rc2_foldl_m f g z xs` |
+| `foldr g z (filter p xs)` | `rc2_foldr_f p g z xs` |
+| `length (filter p (map f xs))` (`lengthPlus 0 …`) | `rc2_length_mf f p 0 xs` |
+
+**Through a `let`**, which is what inlining leaves: `let l = <chain or call> in <call> [.., l]`
+where the last argument of the call is `l` and nothing else reads `l` is the call with the
+chain for its last argument, and then one of the rows above. `length (filter p xs)` in a function
+that inlining took apart is `let l = rc2_filter p xs in lengthPlus [0, l]`, and becomes
+`rc2_length_f p 0 xs`.
+
+The loops the rewrite calls are these (`B8 1` is `True`; `f0`, `f1`, ... are the stage functions in
+order):
+
+```
+rc2_fuse_fm f0 f1 xs        -- map f1 (filter f0 xs)
+  = case xs of
+      []        => []
+      x :: rest => case f0 x of
+                     1 => let v1 = f1 x in v1 :: rc2_fuse_fm f0 f1 rest
+                     0 => rc2_fuse_fm f0 f1 rest
+
+rc2_fuse_mj f0 f1 xs        -- mapMaybe f1 (map f0 xs)
+  = case xs of
+      []        => []
+      x :: rest => let v0 = f0 x in
+                   case f1 v0 of
+                     Just w1 => w1 :: rc2_fuse_mj f0 f1 rest
+                     Nothing => rc2_fuse_mj f0 f1 rest
+
+rc2_fuse_m_t f0 xs ys       -- map f0 xs ++ ys
+  = case xs of
+      []        => ys
+      x :: rest => f0 x :: rc2_fuse_m_t f0 rest ys
+
+rc2_foldl_m f0 g acc xs     -- foldl g acc (map f0 xs)
+  = case xs of
+      []        => acc
+      x :: rest => rc2_foldl_m f0 g ((g acc) (f0 x)) rest
+
+rc2_foldr_f f0 g z xs       -- foldr g z (filter f0 xs)
+  = case xs of
+      []        => z
+      x :: rest => case f0 x of
+                     1 => (g x) (rc2_foldr_f f0 g z rest)
+                     0 => rc2_foldr_f f0 g z rest
+
+rc2_length_f f0 n xs        -- length of filter f0 xs, `n` the count so far
+  = case xs of
+      []        => n
+      x :: rest => case f0 x of
+                     1 => rc2_length_f f0 (n + 1) rest
+                     0 => rc2_length_f f0 n rest
+```
+
+A stage that drops the element (`filter` false, `mapMaybe` `Nothing`) goes on to the rest of the
+list; one that keeps it passes its result to the next stage; after the last, the element is
+emitted (consed, folded in, counted). The recursive call of the `++` and chain loops is the last
+field of the `::`, which is what `Compiler.RC2.Trmc` turns into a loop; `foldl` and `length` are
+tail calls, which `Loop` does; `foldr` is as deep as upstream's.
+
+**Left as they are:**
+
+- a chain of one stage, with no `++` and no consumer (`rc2_map f xs`);
+- `map f (xs ++ ys)`: the inner chain has an end, and is not extended;
+- `(map f xs ++ ys) ++ zs`, and `xs ++ (map f ys)` (nothing to fuse: the second list of a
+  `++` is not read by it);
+- a chain of more than six stages;
+- a list read twice (`let ys = map f xs in (map g ys, filter p ys)`): `ys` has two readers;
+- a list that crosses a function the inliner did not take apart (`sum (chain n)` where `chain`
+  is a function of its own), since the pass sees a call, not a chain;
+- `foldMap`, `foldl'`-like functions of their own, `all`, `any`, `elem`: not on the list of
+  consumers;
+- a consumer applied to a chain with an end (`length (map f xs ++ ys)`).
 
 ### Design decision: the order of effects is not kept
 
@@ -98,16 +211,17 @@ loops (`traverse_`, `forM_`, `mapM_`) are other functions and are not touched; a
 
 Survey of the compiler's own NamedCExp (static, 3,350 diverted calls): about 70 chains of
 two, 126 `++` whose first argument is `map`, `filter` or `mapMaybe`, and 63 folds
-(`foldMap`, `foldr`, `foldl`) that read one directly. The folds are not fused yet.
+(`foldMap`, `foldr`, `foldl`) that read one directly. `foldMap` is not fused.
 
 | | `listdivert` | `listfuse` |
 |---|---|---|
-| `BenchListFuse` (chains of 3 and `++`, 500k, 40 times) | 2.86 s | 2.28 s (-20%) |
+| `BenchListFuse` (four chains of 500k, two of them consumed by `sum` and `length`, 40 times) | 6.54 s | 5.44 s (-17%) |
 
 The compiler's own `prelude` build (short lists; self-built with the directive, instructions
 and executable size): off 27.964 G, 15.68 MB; `listdivert` 27.984 G, 16.56 MB; `listfuse`
-27.979 G, 16.55 MB. Fusion neither helps nor costs there, and the executable is a little
-smaller than with `listdivert` alone (one loop for a chain instead of one per stage).
+27.990 G, 16.56 MB with the consumers (27.979 G, 16.55 MB before them). Fusion neither helps
+nor costs there.
 
-`Test180ListFuse`: nine fused shapes, with and without an end list, over a list, `[]` and a
-list a filter empties; the output is the same as without the directive.
+`Test180ListFuse`: nine fused shapes, with and without an end list, and a `foldl`, `foldr` and
+`length` over a chain, over a list, `[]` and a list a filter empties; the output is the same as
+without the directive.
