@@ -1,0 +1,35 @@
+# Asks GitHub Copilot for a review of a pull request when it opens or is marked ready.
+#
+# Requesting Copilot as a reviewer is done on behalf of a user that has Copilot code review
+# (the plan decides: it is not in Copilot Free), so it needs a token of that user:
+# the secret COPILOT_REVIEW_TOKEN, a personal access token that may write pull requests.
+# Without the secret this does nothing. The repository setting that asks Copilot for every
+# pull request (Settings, Rules, Rulesets, "Automatically request Copilot code review") does the
+# same without a workflow, and `.github/copilot-instructions.md` is what Copilot reads either way.
+name: Copilot review
+
+on:
+  pull_request:
+    types: [opened, ready_for_review]
+
+permissions:
+  contents: read
+
+jobs:
+  request:
+    if: github.event.pull_request.draft == false
+    runs-on: ubuntu-latest
+    steps:
+      - name: Request a review from Copilot
+        env:
+          GH_TOKEN: ${{ secrets.COPILOT_REVIEW_TOKEN }}
+          REPO: ${{ github.repository }}
+          PR: ${{ github.event.pull_request.number }}
+        run: |
+          if [ -z "$GH_TOKEN" ]; then
+            echo "No COPILOT_REVIEW_TOKEN secret: not asking Copilot."
+            exit 0
+          fi
+          gh api --method POST "repos/$REPO/pulls/$PR/requested_reviewers" \
+              -f 'reviewers[]=copilot-pull-request-reviewer[bot]' >/dev/null \
+            || echo "::warning::Copilot could not be asked for a review (is Copilot code review on for this token's plan?)"

@@ -1,0 +1,70 @@
+# Builds the pinned Idris 2 (cached), then the rc2 compiler and its runtime, and runs
+# rc2/tests/verify.sh. Called by ci.yml (every PR) and ci-full.yml (nightly).
+name: rc2 build and verify
+
+on:
+  workflow_call:
+    inputs:
+      verify-args:
+        description: "Arguments of rc2/tests/verify.sh"
+        type: string
+        default: ""
+      timeout-minutes:
+        type: number
+        default: 90
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: ${{ inputs.timeout-minutes }}
+    steps:
+      - name: Check out
+        uses: actions/checkout@v4
+
+      - name: Install packages
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends chezscheme gcc make libgmp-dev pkg-config valgrind
+
+      # The Idris 2 of the pinned commit is the slow part (a Chez bootstrap); install/ is
+      # kept for as long as the pin, the script that builds it and the runner image stay.
+      - name: Restore Idris 2
+        id: idris2-cache
+        uses: actions/cache/restore@v4
+        with:
+          path: install
+          key: idris2-${{ runner.os }}-${{ env.ImageOS }}-${{ hashFiles('.github/ci/idris2-rev', '.github/ci/setup-idris2.sh') }}
+
+      - name: Build Idris 2
+        run: .github/ci/setup-idris2.sh
+
+      - name: Save Idris 2
+        if: steps.idris2-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: install
+          key: ${{ steps.idris2-cache.outputs.cache-primary-key }}
+
+      - name: Build rc2 and rc2base
+        run: .github/ci/build-rc2.sh
+
+      - name: Verify
+        run: |
+          source env.sh
+          rc2/tests/verify.sh --skip-build ${{ inputs.verify-args }}
+
+      # The binaries of a run are large; the logs and diffs say what failed.
+      - name: Keep the logs of a failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: verify-logs
+          retention-days: 7
+          path: |
+            rc2/tests/build/**/*.log
+            rc2/tests/build/**/*.diff
+            rc2/tests/refc-suite/**/diff.log
+            rc2/tests/refc-suite/**/compile.log
