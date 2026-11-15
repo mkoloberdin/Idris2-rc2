@@ -45,6 +45,7 @@ import Compiler.RC2.DeadVars
 import Compiler.RC2.DupMerge
 import Compiler.RC2.LeafTail
 import Compiler.RC2.LibraryFiles
+import Compiler.RC2.ListDivert
 import Compiler.RC2.Pending
 import Compiler.RC2.KnownPartial
 import Compiler.RC2.PushApply
@@ -770,7 +771,10 @@ compileExprWhole c s _ outputDir tm outfile =
      -- Top-level `Delay` definitions onto CAF memoization; whole program
      -- only, since another module's references are out of sight
      -- (doc/lazy-memoization.md).
-     let (mainLz, namedLz) = applyLazyCaf (Just (forget (mainExpr cdata))) (namedDefs cdata)
+     let (mainLz0, namedLz0) = applyLazyCaf (Just (forget (mainExpr cdata))) (namedDefs cdata)
+     -- rc2/doc/list-divert.md: upstream's tail-recursive list functions, replaced by naive ones
+     -- that TRMC makes one loop. Opt-in (`listdivert`), whole program only.
+     let (mainLz, namedLz) = if optInOn ListDivert directiveList then applyListDivert mainLz0 namedLz0 else (mainLz0, namedLz0)
      (mainInl, namedInl) <- inlineNamed disabledStages (Just (SortedSet.fromList exportNames)) mainLz namedLz
      (mainIn, namedIn) <- if stageOff NoDeadArgs disabledStages
                              then pure (mainInl, namedInl)

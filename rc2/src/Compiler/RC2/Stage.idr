@@ -199,15 +199,17 @@ inAllStages NoInlineCalls = There (There (There (There (There (There (There (The
 public export
 data OptIn : Type where
      LatePushCon : OptIn
+     ListDivert : OptIn
 
 export
 optInDirective : OptIn -> String
 optInDirective LatePushCon = "latepushcon"
+optInDirective ListDivert = "listdivert"
 
 ||| Every `OptIn`.
 export
 allOptIns : List OptIn
-allOptIns = [LatePushCon]
+allOptIns = [LatePushCon, ListDivert]
 
 ||| The directive strings `compileExpr` keeps for `toRCDefs` (`Compiler.RC2.RC2`).
 export
