@@ -5,9 +5,9 @@
 ||| before any rc2 pass runs) can leave a definition genuinely dead only
 ||| after `Inline`/`DualABI` rewrite it (confirmed via
 ||| `rc2/tests/Test114Inline/DeadCodeInline.idr`), and its "Scope" section for
-||| why only `MkRCFun` is ever pruned here -- `MkRCForeign` structurally
-||| can't actually lose every caller via `Inline`/`DualABI` alone (tracking
-||| it anyway removes nothing); `MkRCCon`/`MkRCError` simply aren't a currently-observed
+||| why only `MkRCFun` is ever pruned here -- an unreferenced `MkRCForeign` is
+||| kept (its header and libraries are still needed by the inlined calls) and left out of
+||| the C file by `Compiler.RC2.Emit` instead; `MkRCCon`/`MkRCError` simply aren't a currently-observed
 ||| source of dead code.
 |||
 ||| Copyright 2026, Hattori,Hiroki. All rights reserved.
@@ -36,6 +36,7 @@ import Data.SortedSet
 ||| Collected as a `List Name` (a plain append per node) and turned into a
 ||| set once at the end: a `SortedSet` monoid unions at every node, which
 ||| was the dominant cost of every `pruneDeadDefsCached` round.
+export
 usedFunctionNamesD : RCDef -> SortedSet Name
 usedFunctionNamesD d =
     SortedSet.fromList $ foldRCNamesD {m = List Name} ({ onAppName      := \n, _ => [n]

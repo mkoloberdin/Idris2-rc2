@@ -13,6 +13,9 @@ import Test118FFI.FFIMalloc
 import Test118FFI.FFIInteger
 import Test118FFI.FFICExpr
 
+-- The checks read each wrapper's C shape; a wrapper nothing calls is otherwise left out.
+%cg rc2 keepforeign
+
 main : IO ()
 main = do
     FFIStrings.run

@@ -15,6 +15,7 @@ module Main
 -- worker for the tail-call section to pin down; this test is about the shapes
 -- DualABI produces for such a function, so it asks for them.
 %cg rc2 notinyinline
+%cg rc2 keepforeign
 
 -- `eligibleAdd` calls the foreign `prim__abs`, so Criterion A' (rc2/doc/inlining.md) would splice
 -- it too; the worker it gets from DualABI is what the checks below look for.
