@@ -75,12 +75,13 @@ decodeFused (MN s 0) =
 decodeFused _ = Nothing
 
 ||| A consumer of a list that a chain can feed without the list being built.
-data Consumer = CFoldl | CFoldr | CLength
+data Consumer = CFoldl | CFoldr | CLength | CFoldMap
 
 consumerTag : Consumer -> String
 consumerTag CFoldl = "foldl"
 consumerTag CFoldr = "foldr"
 consumerTag CLength = "length"
+consumerTag CFoldMap = "foldMap"
 
 ||| The loop of a consumer over the chain of these stages, `rc2_foldl_mf`.
 consumerName : Consumer -> List Kind -> Name
@@ -206,6 +207,7 @@ consume fc rfc f args = case args of
     [g, z, xs] =>
         if isFun "Prelude.Types.foldl" f then go CFoldl [g, z] xs
         else if isFun "Prelude.Types.foldr" f then go CFoldr [g, z] xs
+        else if isFun "Prelude.Types.foldMap" f then go CFoldMap [g, z] xs
         else Nothing
     [n, xs] => if isFun "Prelude.Types.List.lengthPlus" f then go CLength [n] xs else Nothing
     _ => Nothing
@@ -217,7 +219,10 @@ consume fc rfc f args = case args of
             in if isJust ch.end || null ks || length ks > maxStages
                   then Nothing
                   else Just (NmApp fc (NmRef rfc (consumerName c ks)) (map snd ch.stages ++ own ++ [ch.list]),
-                             SortedMap.singleton (show (consumerName c ks)) (WConsume c ks))
+                             unionUsed (SortedMap.singleton (show (consumerName c ks)) (WConsume c ks))
+                                       (case c of
+                                             CFoldMap => SortedMap.singleton (show (consumerName CFoldl ks)) (WConsume CFoldl ks)
+                                             _ => noUsed))
         Nothing => Nothing
 
 ||| The direct subexpressions of `e`.
@@ -430,6 +435,15 @@ consumerDefinition c ks =
             CFoldr => loopDefinition ks ["g", "z"] (var "z")
                           (\v => NmApp emptyFC (NmApp emptyFC (var "g") [v]) [recur [var "g", var "z"]])
                           (recur [var "g", var "z"])
+            -- upstream's `foldMap`: `foldl (\acc, elem => (<+>) acc (f elem)) neutral`, the monoid a record
+            -- of those two (its `foldMap` body, as the named IR shows it)
+            CFoldMap =>
+                let monoid = \k => NmConCase emptyFC (var "m")
+                                         [ MkNConAlt (builtin "CONS") CONS (Just 1) [local "e1", local "e2"] k ] Nothing
+                    step = NmLam emptyFC (local "acc") $ NmLam emptyFC (local "elem") $
+                               monoid (NmApp emptyFC (NmApp emptyFC (var "e1") [var "acc"]) [NmApp emptyFC (var "f") [var "elem"]])
+                in MkNmFun (map (local . stageName) (indices ks) ++ [local "m", local "f", local "xs"])
+                           (call (consumerName CFoldl ks) (fs ++ [step, monoid (var "e2"), var "xs"]))
             CLength => loopDefinition ks ["n"] (var "n")
                           (\v => recur [NmOp emptyFC (Add IntegerType) [var "n", NmPrimVal emptyFC (BI 1)]])
                           (recur [var "n"])
