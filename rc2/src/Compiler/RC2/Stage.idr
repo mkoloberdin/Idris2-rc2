@@ -59,6 +59,7 @@ data Stage : Type where
      NoStackCon : Stage
      NoInlineCalls : Stage
      NoNatMagic : Stage
+     NoDeadFields : Stage
 
 
 ||| The directive that disables `s`.
@@ -105,6 +106,7 @@ stageDirective NoReuseRecheck = "noreuserecheck"
 stageDirective NoStackCon = "nostackcon"
 stageDirective NoInlineCalls = "noinlinecalls"
 stageDirective NoNatMagic = "nonatmagic"
+stageDirective NoDeadFields = "nodeadfields"
 
 
 ||| Every `Stage`; `inAllStages` proves the list is complete.
@@ -150,7 +152,8 @@ allStages = [
     NoReuseRecheck,
     NoStackCon,
     NoInlineCalls,
-    NoNatMagic
+    NoNatMagic,
+    NoDeadFields
   ]
 
 
@@ -198,6 +201,7 @@ inAllStages NoReuseRecheck = There (There (There (There (There (There (There (Th
 inAllStages NoStackCon = There (There (There (There (There (There (There (There (There (There (There (There (There (There (There (There (There (There (There (There (There (There (There (There (There (There (There (There (There (There (There (There (There (There (There (There (There Here))))))))))))))))))))))))))))))))))))
 inAllStages NoInlineCalls = There (There (There (There (There (There (There (There (There (There (There (There (There (There (There (There (There (There (There (There (There (There (There (There (There (There (There (There (There (There (There (There (There (There (There (There (There (There Here)))))))))))))))))))))))))))))))))))))
 inAllStages NoNatMagic = There (There (There (There (There (There (There (There (There (There (There (There (There (There (There (There (There (There (There (There (There (There (There (There (There (There (There (There (There (There (There (There (There (There (There (There (There (There (There Here))))))))))))))))))))))))))))))))))))))
+inAllStages NoDeadFields = There (There (There (There (There (There (There (There (There (There (There (There (There (There (There (There (There (There (There (There (There (There (There (There (There (There (There (There (There (There (There (There (There (There (There (There (There (There (There (There Here)))))))))))))))))))))))))))))))))))))))
 
 ||| A stage that runs only when its directive is given.
 public export

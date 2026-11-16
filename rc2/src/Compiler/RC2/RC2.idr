@@ -47,6 +47,7 @@ import Compiler.RC2.LeafTail
 import Compiler.RC2.LibraryFiles
 import Compiler.RC2.ListDivert
 import Compiler.RC2.NatMagic
+import Compiler.RC2.DeadFields
 import Compiler.RC2.Pending
 import Compiler.RC2.KnownPartial
 import Compiler.RC2.PushApply
@@ -781,7 +782,10 @@ compileExprWhole c s _ outputDir tm outfile =
      (mainInl0, namedInl0) <- inlineNamed disabledStages (Just (SortedSet.fromList exportNames)) mainLz namedLz
      -- Again after inlining, with `listfuse`: it passes a list to a loop through a `let`, which only
      -- inlining makes (`length (filter p xs)`).
-     let (mainInl, namedInl) = if optInOn ListFuse directiveList then applyListDivert True mainInl0 namedInl0 else (mainInl0, namedInl0)
+     let (mainInl1, namedInl1) = if optInOn ListFuse directiveList then applyListDivert True mainInl0 namedInl0 else (mainInl0, namedInl0)
+     -- rc2/doc/dead-fields.md: a result taken apart at once, some fields unread, from a copy that
+     -- does not make them. Whole program only: the copies are of any module's functions.
+     let (mainInl, namedInl) = if stageOff NoDeadFields directiveList then (mainInl1, namedInl1) else applyDeadFields mainInl1 namedInl1
      (mainIn, namedIn) <- if stageOff NoDeadArgs disabledStages
                              then pure (mainInl, namedInl)
                              else logTime 2 "rc2: Dead arguments" $
