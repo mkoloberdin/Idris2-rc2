@@ -2,17 +2,18 @@
 
 | Workflow | When | What |
 |---|---|---|
-| `ci.yml` | every pull request, and master (not for a change of `*.md` only) | builds the compiler and runs `rc2/tests/verify.sh --no-valgrind --no-tsan` |
-| `ci-full.yml` | 03:00 JST every day, and by hand (Actions, "CI full") | the whole of `verify.sh`, valgrind and ThreadSanitizer included |
-| `rc2-verify.yml` | called by the two above | the steps below |
+| `ci.yml` | every pull request, and master (not for a change of `*.md` only) | builds the compiler and runs `rc2/tests/verify.sh --no-valgrind --no-tsan`; in parallel rc2 builds the compiler (`selfhost.sh stage1`) |
+| `ci-full.yml` | 03:00 JST every day, and by hand (Actions, "CI full") | the whole of `verify.sh`, valgrind and ThreadSanitizer included; in parallel all of `selfhost.sh` |
+| `rc2-verify.yml`, `rc2-selfhost.yml` | called by the two above | the steps below, then `verify.sh` or `selfhost.sh` |
 | `copilot-review.yml` | a pull request opens or is marked ready | asks Copilot for a review, if the secret `COPILOT_REVIEW_TOKEN` exists |
 | `claude-code-review.yml`, `claude.yml` | | Claude review and `@claude` |
 
-`rc2-verify.yml` installs Chez Scheme, gcc, gmp and valgrind with apt, builds the Idris 2 of the
+The action `.github/actions/setup-rc2` (both reusable workflows start with it) installs Chez Scheme, gcc, gmp and valgrind with apt, builds the Idris 2 of the
 pinned upstream commit (`setup-idris2.sh`, about 12 minutes, cached in `install/` for as long as the
 pin, the script and the runner image stay), builds and installs rc2, `libs/rc2base` and `libs/control-async`
-(`build-rc2.sh`, about 5 minutes), and runs `verify.sh --skip-build` from `rc2/tests`. The logs of
-a failed run are kept as the artifact `verify-logs`.
+(`build-rc2.sh`, about 5 minutes). `rc2-verify.yml` then runs `verify.sh --skip-build` and
+`rc2-selfhost.yml` runs `selfhost.sh`, both from `rc2/tests`. The logs of a failed run are kept as the
+artifacts `verify-logs` and `selfhost-logs`.
 
 The two scripts are what a person runs too; they only need `scheme` on `PATH`:
 

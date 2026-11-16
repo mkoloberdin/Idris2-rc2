@@ -24,32 +24,8 @@ jobs:
       - name: Check out
         uses: actions/checkout@v4
 
-      - name: Install packages
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y --no-install-recommends chezscheme gcc make libgmp-dev pkg-config valgrind
-
-      # The Idris 2 of the pinned commit is the slow part (a Chez bootstrap); install/ is
-      # kept for as long as the pin, the script that builds it and the runner image stay.
-      - name: Restore Idris 2
-        id: idris2-cache
-        uses: actions/cache/restore@v4
-        with:
-          path: install
-          key: idris2-${{ runner.os }}-${{ env.ImageOS }}-${{ hashFiles('.github/ci/idris2-rev', '.github/ci/setup-idris2.sh') }}
-
-      - name: Build Idris 2
-        run: .github/ci/setup-idris2.sh
-
-      - name: Save Idris 2
-        if: steps.idris2-cache.outputs.cache-hit != 'true'
-        uses: actions/cache/save@v4
-        with:
-          path: install
-          key: ${{ steps.idris2-cache.outputs.cache-primary-key }}
-
-      - name: Build rc2 and rc2base
-        run: .github/ci/build-rc2.sh
+      - name: Set up rc2
+        uses: ./.github/actions/setup-rc2
 
       - name: Verify
         run: |

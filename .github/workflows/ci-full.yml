@@ -1,4 +1,6 @@
-# The whole of rc2/tests/verify.sh, valgrind and ThreadSanitizer included: every night
+# The whole of rc2/tests/verify.sh, valgrind and ThreadSanitizer included, and all of
+# rc2/tests/selfhost.sh (the self-hosted compiler builds the libraries and itself, and gives the
+# same C as the Chez-built one): every night
 # on master, and by hand (Actions, "CI full", on any branch).
 name: CI full
 
@@ -19,4 +21,10 @@ jobs:
     uses: ./.github/workflows/rc2-verify.yml
     with:
       verify-args: ""
+      timeout-minutes: 240
+
+  selfhost:
+    uses: ./.github/workflows/rc2-selfhost.yml
+    with:
+      stage: all
       timeout-minutes: 240

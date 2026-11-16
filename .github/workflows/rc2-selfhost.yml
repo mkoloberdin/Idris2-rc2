@@ -1,0 +1,44 @@
+# The self-hosted compiler: rc2 compiles the compiler (idris2-rc2-norepl), and for `all` the result
+# builds the libraries and the compiler's API package, builds itself again to the same C, and gives
+# the same C as the Chez-built compiler for every test program (rc2/tests/selfhost.sh,
+# rc2/doc/self-hosting.md). Called by ci.yml (the build) and ci-full.yml (all of it).
+name: rc2 self-host
+
+on:
+  workflow_call:
+    inputs:
+      stage:
+        description: "Argument of rc2/tests/selfhost.sh: stage1, libs, api, fixed, diff or all"
+        type: string
+        default: all
+      timeout-minutes:
+        type: number
+        default: 240
+
+permissions:
+  contents: read
+
+jobs:
+  selfhost:
+    runs-on: ubuntu-latest
+    timeout-minutes: ${{ inputs.timeout-minutes }}
+    steps:
+      - name: Check out
+        uses: actions/checkout@v4
+
+      - name: Set up rc2
+        uses: ./.github/actions/setup-rc2
+
+      - name: Build the compiler with rc2 (${{ inputs.stage }})
+        run: |
+          source env.sh
+          cd rc2/tests
+          ./selfhost.sh ${{ inputs.stage }}
+
+      - name: Keep the logs of a failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: selfhost-logs
+          retention-days: 7
+          path: rc2/build/selfhost/**/*.log
