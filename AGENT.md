@@ -173,7 +173,8 @@ See `rc2/tests/verify.sh`'s own header comment for the full version
 See `README.md`'s own "Building and running" and "Testing" sections for
 the actual commands and flags (`idris2 --build rc2.ipkg`,
 `rc2/tests/verify.sh`, `rc2/tests/bench.sh`) — don't duplicate them
-here.
+here. CI (GitHub Actions: build, `verify.sh`, the pinned upstream Idris 2) is
+described in `.github/ci/README.md`.
 
 ## Conventions
 
