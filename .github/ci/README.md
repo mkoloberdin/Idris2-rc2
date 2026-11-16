@@ -10,7 +10,7 @@
 
 `rc2-verify.yml` installs Chez Scheme, gcc, gmp and valgrind with apt, builds the Idris 2 of the
 pinned upstream commit (`setup-idris2.sh`, about 12 minutes, cached in `install/` for as long as the
-pin, the script and the runner image stay), builds and installs rc2 and `libs/rc2base`
+pin, the script and the runner image stay), builds and installs rc2, `libs/rc2base` and `libs/control-async`
 (`build-rc2.sh`, about 5 minutes), and runs `verify.sh --skip-build` from `rc2/tests`. The logs of
 a failed run are kept as the artifact `verify-logs`.
 
