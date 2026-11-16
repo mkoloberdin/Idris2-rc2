@@ -1,0 +1,22 @@
+# The whole of rc2/tests/verify.sh, valgrind and ThreadSanitizer included: every night
+# on master, and by hand (Actions, "CI full", on any branch).
+name: CI full
+
+on:
+  schedule:
+    - cron: "0 18 * * *" # 03:00 JST
+  workflow_dispatch:
+
+concurrency:
+  group: ci-full-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    uses: ./.github/workflows/rc2-verify.yml
+    with:
+      verify-args: ""
+      timeout-minutes: 240

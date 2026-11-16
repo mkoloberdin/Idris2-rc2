@@ -1,0 +1,48 @@
+# Builds the pinned Idris 2 (cached), then the rc2 compiler and its runtime, and runs
+# rc2/tests/verify.sh. Called by ci.yml (every PR) and ci-full.yml (nightly).
+name: rc2 build and verify
+
+on:
+  workflow_call:
+    inputs:
+      verify-args:
+        description: "Arguments of rc2/tests/verify.sh"
+        type: string
+        default: ""
+      timeout-minutes:
+        type: number
+        default: 90
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: ${{ inputs.timeout-minutes }}
+    steps:
+      - name: Check out
+        uses: actions/checkout@v4
+
+      - name: Set up rc2
+        uses: ./.github/actions/setup-rc2
+
+      - name: Verify
+        run: |
+          source env.sh
+          # from rc2/tests: the multi-module tests name their modules by the path from here
+          cd rc2/tests
+          ./verify.sh --skip-build ${{ inputs.verify-args }}
+
+      # The binaries of a run are large; the logs and diffs say what failed.
+      - name: Keep the logs of a failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: verify-logs
+          retention-days: 7
+          path: |
+            rc2/tests/build/**/*.log
+            rc2/tests/build/**/*.diff
+            rc2/tests/refc-suite/**/diff.log
+            rc2/tests/refc-suite/**/compile.log
