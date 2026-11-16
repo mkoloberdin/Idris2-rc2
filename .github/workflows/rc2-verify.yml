@@ -54,7 +54,9 @@ jobs:
       - name: Verify
         run: |
           source env.sh
-          rc2/tests/verify.sh --skip-build ${{ inputs.verify-args }}
+          # from rc2/tests: the multi-module tests name their modules by the path from here
+          cd rc2/tests
+          ./verify.sh --skip-build ${{ inputs.verify-args }}
 
       # The binaries of a run are large; the logs and diffs say what failed.
       - name: Keep the logs of a failure
