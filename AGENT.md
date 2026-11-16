@@ -97,7 +97,7 @@ history, not there.
   calling a known function directly from a tail position, instead of
   through a closure, unless the call stays inside a cycle of tail calls, `library-output.md` for building the `%export`ed functions into a static or shared library, `trampoline-elision.md` for leaving out the
   trampoline around a call whose callee never returns a pending closure, `static-closures.md` for closures over
-  constants only built once as file-scope statics, `list-divert.md` for replacing upstream's two-pass tail-recursive list functions by naive ones TRMC makes one loop, `trmc.md` for tail recursion
+  constants only built once as file-scope statics, `list-divert.md` for replacing upstream's two-pass tail-recursive list functions by naive ones TRMC makes one loop, `nat-magic.md` for `Data.Nat.isLTE` and `lte` in constant time, `trmc.md` for tail recursion
   modulo constructor, which turns `x :: f xs`-shaped recursion into a
   loop that fills each cell's hole, `closure-accumulator.md` for
   its sibling that keeps a `c . (y ::)` difference list as such a chain

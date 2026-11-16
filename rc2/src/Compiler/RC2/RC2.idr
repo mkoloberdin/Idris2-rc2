@@ -46,6 +46,7 @@ import Compiler.RC2.DupMerge
 import Compiler.RC2.LeafTail
 import Compiler.RC2.LibraryFiles
 import Compiler.RC2.ListDivert
+import Compiler.RC2.NatMagic
 import Compiler.RC2.Pending
 import Compiler.RC2.KnownPartial
 import Compiler.RC2.PushApply
@@ -771,7 +772,9 @@ compileExprWhole c s _ outputDir tm outfile =
      -- Top-level `Delay` definitions onto CAF memoization; whole program
      -- only, since another module's references are out of sight
      -- (doc/lazy-memoization.md).
-     let (mainLz0, namedLz0) = applyLazyCaf (Just (forget (mainExpr cdata))) (namedDefs cdata)
+     -- rc2/doc/nat-magic.md: `Data.Nat.isLTE` and `lte` compare once instead of recursing.
+     let natDefs = if stageOff NoNatMagic directiveList then namedDefs cdata else applyNatMagic (namedDefs cdata)
+     let (mainLz0, namedLz0) = applyLazyCaf (Just (forget (mainExpr cdata))) natDefs
      -- rc2/doc/list-divert.md: upstream's tail-recursive list functions, replaced by naive ones
      -- that TRMC makes one loop. Opt-in (`listdivert`), whole program only.
      let (mainLz, namedLz) = if optInOn ListDivert directiveList || optInOn ListFuse directiveList then applyListDivert (optInOn ListFuse directiveList) mainLz0 namedLz0 else (mainLz0, namedLz0)
@@ -1015,7 +1018,7 @@ incCompile : Ref Ctxt Defs -> Ref Syn SyntaxInfo ->
              (sourceFile : String) -> Core (Maybe (String, List String))
 incCompile c s sourceFile = do
     cdata <- getIncCompileData False Cases
-    ndefs <- incrementalCse !(currentNS <$> get Ctxt) (namedDefs cdata)
+    ndefs <- incrementalCse !(currentNS <$> get Ctxt) (if stageOff NoNatMagic !rc2Directives then namedDefs cdata else applyNatMagic (namedDefs cdata))
     if isNil ndefs
        then pure (Just ("", []))
             -- No code to generate, but still record that the module
