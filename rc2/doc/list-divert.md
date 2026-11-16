@@ -94,8 +94,24 @@ it into one loop that allocates only the result.
   lengthPlus [0, l]`). So the pass runs a second time after `InlineCExp`, and treats a `let`
   that only its body's last argument reads as the call's argument; the second run adds no
   definition the first made.
+- **A fold over `++`.** `foldl`, `foldr`, `length` or `foldMap` of `xs ++ ys` (up to four lists,
+  each a chain or not) folds `xs` and goes on into `ys` with what it made, so the list `++` makes is
+  never built. `foldr` goes the other way round (the fold of `ys` is the start of the fold of
+  `xs`), so its function still runs on the last element first. The function that does the split
+  is small and inlined; what is left is a call of each list's loop (`rc2_foldl_` for a list that is
+  no chain).
+- **Walkers.** A function of the program, under any name, whose body takes one of its parameters
+  apart as a list (`case p of [] => onNil; x :: rest => onCons`) and passes `rest` on only once,
+  to a call of itself at the same position, can be fed by a chain: `rc2_thru_<f>_<stages>` is
+  its own definition with each element first through the stages. An element a stage drops goes
+  on to the rest with every other argument as it was, which is what the function would have done
+  with that element not in the list; a kept one is its `x`. This holds whatever the function does
+  with `x` and its other parameters (an accumulator, a result built with `::`, a counter), as long
+  as the rest of the list is read only by that one call: a function that reads `rest` twice would
+  run the stages twice, and is left alone. Not one of the functions this pass adds.
 - **Intermediate lists are never shared.** A chain is only a call nested directly in the
-  argument of the next, so the intermediate list has no other reader.
+  argument of the next, or a `let` whose one reader is that argument, so the intermediate list
+  has no other reader.
 
 ### What becomes what
 
@@ -131,9 +147,23 @@ call of a definition added to the program, named after its stages, first applied
 | `length (filter p (map f xs))` (`lengthPlus 0 …`) | `rc2_length_mf f p 0 xs` |
 | `foldMap h (map f xs)` | `rc2_foldMap_m f monoid h xs` |
 
-**Through a `let`**, which is what inlining leaves: `let l = <chain or call> in <call> [.., l]`
-where the last argument of the call is `l` and nothing else reads `l` is the call with the
-chain for its last argument, and then one of the rows above. `length (filter p xs)` in a function
+**A fold over `++`** (each list's loop, the result of one the start of the next):
+
+| before | after |
+|---|---|
+| `sum (map f xs ++ filter p ys)` | `rc2_foldl_f p g (rc2_foldl_m f g z xs) ys` |
+| `length (xs ++ ys)` | `rc2_length_ (rc2_length_ 0 xs) ys` |
+| `foldr g z (map f xs ++ ys)` | `rc2_foldr_m f g (rc2_foldr_ g z ys) xs` |
+
+**A walker** (any function of that shape; here `sumSq acc [] = acc; sumSq acc (x :: xs) = sumSq (acc + x * x) xs`):
+
+| before | after |
+|---|---|
+| `sumSq 0 (map f (filter p xs))` | `rc2_thru_Main.sumSq_fm p f 0 xs` |
+
+**Through a `let`**, which is what inlining leaves: `let l = <chain or call> in <call> [.., l, ..]`
+where one argument of the call is `l` and nothing else reads `l` is the call with the chain for
+that argument, and then one of the rows above. `length (filter p xs)` in a function
 that inlining took apart is `let l = rc2_filter p xs in lengthPlus [0, l]`, and becomes
 `rc2_length_f p 0 xs`.
 
@@ -198,7 +228,10 @@ tail calls, which `Loop` does; `foldr` is as deep as upstream's.
 - a list that crosses a function the inliner did not take apart (`sum (chain n)` where `chain`
   is a function of its own), since the pass sees a call, not a chain;
 - `foldl'`-like functions of their own, `all`, `any`, `elem`: not on the list of consumers;
-- a consumer applied to a chain with an end (`length (map f xs ++ ys)`).
+- a function that reads the rest of its list more than once, or passes it to another function;
+- a fold whose list comes out of a dictionary method that is not resolved: `fromList` of
+  `Data.SortedMap` folds through a `Foldable` record it was given, and the record is known (a
+  `let` of the instance) but the pass does not take a method out of it.
 
 ### Design decision: the order of effects is not kept
 
@@ -211,6 +244,14 @@ crashed on, not at all. The pass does not look for them: such a function is writ
 it may be treated as pure, as it is by every other pass, and the whole stage is opt-in. IO
 loops (`traverse_`, `forM_`, `mapM_`) are other functions and are not touched; a list of
 `IO` actions is only built by `map`, and running them is later.
+
+In an IO loop that a walker is (`printAll (x :: xs) = do printLn x; printAll xs`), the IO effects
+keep their order: the loop's own body is not changed, only where an element goes through the
+stages. The stage functions now run between the loop's effects, one element at a time, instead of
+all of them before the loop. So `printAll (map boom xs)`, with `boom` crashing on the fifth element,
+prints four lines and then crashes, where without fusion it crashes before printing anything; an
+action that is run twice runs its stages twice, and one that is never run never runs them. This is
+the same decision (a stage function is taken to be pure), and was kept for IO loops too.
 
 ### Measured
 
