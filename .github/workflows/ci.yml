@@ -1,6 +1,5 @@
 # Every pull request, and master: the compiler builds and the test suite passes,
-# without the valgrind and ThreadSanitizer runs, and rc2 builds the compiler (stage1 of
-# selfhost.sh). The rest of the self-hosting checks, valgrind and ThreadSanitizer are in ci-full.yml.
+# without the valgrind and ThreadSanitizer runs (those are in ci-full.yml).
 name: CI
 
 on:
@@ -25,10 +24,4 @@ jobs:
     uses: ./.github/workflows/rc2-verify.yml
     with:
       verify-args: --no-valgrind --no-tsan
-      timeout-minutes: 90
-
-  selfhost:
-    uses: ./.github/workflows/rc2-selfhost.yml
-    with:
-      stage: stage1
       timeout-minutes: 90

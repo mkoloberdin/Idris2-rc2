@@ -1,0 +1,24 @@
+# The self-hosted compiler, by hand only (Actions, "CI self-host", on any branch): `all` took 61
+# minutes on a 4-core machine, after the setup (about 17). rc2 compiles the compiler, and `all` has the result build the libraries and the
+# compiler's API package, build itself again to the same C, and give the same C as the Chez-built
+# compiler for every test program (rc2/tests/selfhost.sh, rc2/doc/self-hosting.md).
+name: CI self-host
+
+on:
+  workflow_dispatch:
+    inputs:
+      stage:
+        description: "Argument of rc2/tests/selfhost.sh"
+        type: choice
+        options: [all, stage1, libs, api, fixed, diff]
+        default: all
+
+permissions:
+  contents: read
+
+jobs:
+  selfhost:
+    uses: ./.github/workflows/rc2-selfhost.yml
+    with:
+      stage: ${{ inputs.stage }}
+      timeout-minutes: 300

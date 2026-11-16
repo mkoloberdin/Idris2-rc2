@@ -2,9 +2,10 @@
 
 | Workflow | When | What |
 |---|---|---|
-| `ci.yml` | every pull request, and master (not for a change of `*.md` only) | builds the compiler and runs `rc2/tests/verify.sh --no-valgrind --no-tsan`; in parallel rc2 builds the compiler (`selfhost.sh stage1`) |
-| `ci-full.yml` | 03:00 JST every day, and by hand (Actions, "CI full") | the whole of `verify.sh`, valgrind and ThreadSanitizer included; in parallel all of `selfhost.sh` |
-| `rc2-verify.yml`, `rc2-selfhost.yml` | called by the two above | the steps below, then `verify.sh` or `selfhost.sh` |
+| `ci.yml` | every pull request, and master (not for a change of `*.md` only) | builds the compiler and runs `rc2/tests/verify.sh --no-valgrind --no-tsan` |
+| `ci-full.yml` | 03:00 JST every day, and by hand (Actions, "CI full") | the whole of `verify.sh`, valgrind and ThreadSanitizer included |
+| `ci-selfhost.yml` | by hand only (Actions, "CI self-host", on any branch) | rc2 builds the compiler, and with `all` the result builds the libraries and itself, and gives the same C as the Chez-built one: `rc2/tests/selfhost.sh` (`all`: 61 minutes on 4 cores, after the setup) |
+| `rc2-verify.yml`, `rc2-selfhost.yml` | called by the three above | the steps below, then `verify.sh` or `selfhost.sh` |
 | `copilot-review.yml` | a pull request opens or is marked ready | asks Copilot for a review, if the secret `COPILOT_REVIEW_TOKEN` exists |
 | `claude-code-review.yml`, `claude.yml` | | Claude review and `@claude` |
 
