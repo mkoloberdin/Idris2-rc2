@@ -63,6 +63,22 @@ fmL xs = foldMap (\x => [x, x + 1]) (filter (> 2) (map (* 2) xs))
 fmS : List Int -> String
 fmS xs = foldMap show (map (+ 1) xs)
 
+-- a fold over `++`: the second list goes on from what the first made, no list is joined
+slA : List Int -> Int
+slA xs = sum (map (* 2) xs ++ filter (> 3) xs)
+
+lnA : List Int -> Nat
+lnA xs = length (xs ++ [1, 2] ++ map (+ 1) xs)
+
+flA : List Int -> List Int
+flA xs = foldl (\acc, x => x :: acc) [] (filter (> 2) xs ++ map (* 10) xs)
+
+frA : List Int -> List Int
+frA xs = foldr (\x, acc => x :: acc) [100] (map (+ 1) xs ++ [0] ++ filter (> 5) xs)
+
+fmA : List Int -> String
+fmA xs = foldMap show (map (+ 1) xs ++ xs)
+
 main : IO ()
 main = do
   let xs : List Int = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
@@ -88,3 +104,8 @@ main = do
     printLn (jl l)
     printLn (fmL l)
     printLn (fmS l)
+    printLn (slA l)
+    printLn (lnA l)
+    printLn (flA l)
+    printLn (frA l)
+    putStrLn (fmA l)

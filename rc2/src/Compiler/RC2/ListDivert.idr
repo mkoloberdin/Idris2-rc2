@@ -89,6 +89,16 @@ consumerName c ks = MN ("rc2_" ++ consumerTag c ++ "_" ++ pack (map kindCode ks)
 
 ||| A definition the program needs.
 data Wanted = WDiv Diverted | WFuse (List Kind) Bool | WConsume Consumer (List Kind)
+           | WSeg Consumer (List (List Kind))
+
+||| The consumer over a list made of segments, `xs ++ ys ++ ...`, each a chain of these stages
+||| (none for a plain list): `rc2_foldl_seg_m-` is `foldl` over `map f xs ++ ys`.
+segName : Consumer -> List (List Kind) -> Name
+segName c kss = MN ("rc2_" ++ consumerTag c ++ "_seg_" ++ joinBy "-" (map (pack . map kindCode) kss)) 0
+
+||| The most segments one consumer is split into.
+maxSegments : Nat
+maxSegments = 4
 
 ||| The definitions the rewritten calls name, by name.
 Used : Type
@@ -188,6 +198,18 @@ parseChain (NmApp _ (NmRef _ n) args) =
                                   _ => Nothing
 parseChain _ = Nothing
 
+||| The segments of the list `e` is, `++` by `++`: a chain each, or a list that is not one (a chain
+||| of no stages). One segment when `e` is no `++`.
+segments : NamedCExp -> List Chain
+segments e = case parseChain e of
+    Just ch => case ch.end of
+                    Just ys => { end := Nothing } ch :: segments ys
+                    Nothing => [ch]
+    Nothing => case e of
+                    NmApp _ (NmRef _ n) [a, b] =>
+                        if n == divertedName DAppend then segments a ++ segments b else [MkChain [] e Nothing]
+                    _ => [MkChain [] e Nothing]
+
 ||| The call of one fused loop for `c`, when that saves a list: two stages or more, or one
 ||| and an end.
 fuseChain : FC -> FC -> Chain -> Maybe (NamedCExp, Used)
@@ -212,8 +234,25 @@ consume fc rfc f args = case args of
     [n, xs] => if isFun "Prelude.Types.List.lengthPlus" f then go CLength [n] xs else Nothing
     _ => Nothing
   where
-    go : Consumer -> List NamedCExp -> NamedCExp -> Maybe (NamedCExp, Used)
-    go c own xs = case parseChain xs of
+    -- the loop each segment is folded with: a foldMap is a foldl
+    loopOf : Consumer -> Consumer
+    loopOf CFoldMap = CFoldl
+    loopOf c = c
+
+    -- `xs ++ ys`: the consumer of `xs` goes on with what it made into `ys`, so the list `++` makes
+    -- is never built (doc/list-divert.md, "Fusion")
+    split : Consumer -> List NamedCExp -> List Chain -> Maybe (NamedCExp, Used)
+    split c own segs =
+        let kss = map (\ch => map fst ch.stages) segs
+            name = segName c kss
+        in if length segs < 2 || length segs > maxSegments || any (\ks => length ks > maxStages) kss
+              then Nothing
+              else Just (NmApp fc (NmRef rfc name) (concatMap (\ch => map snd ch.stages) segs ++ own ++ map (.list) segs),
+                         foldl (\u, ks => unionUsed u (SortedMap.singleton (show (consumerName (loopOf c) ks)) (WConsume (loopOf c) ks)))
+                               (SortedMap.singleton (show name) (WSeg c kss)) kss)
+
+    single : Consumer -> List NamedCExp -> NamedCExp -> Maybe (NamedCExp, Used)
+    single c own xs = case parseChain xs of
         Just ch =>
             let ks = map fst ch.stages
             in if isJust ch.end || null ks || length ks > maxStages
@@ -224,6 +263,9 @@ consume fc rfc f args = case args of
                                              CFoldMap => SortedMap.singleton (show (consumerName CFoldl ks)) (WConsume CFoldl ks)
                                              _ => noUsed))
         Nothing => Nothing
+
+    go : Consumer -> List NamedCExp -> NamedCExp -> Maybe (NamedCExp, Used)
+    go c own xs = maybe (single c own xs) Just (split c own (segments xs))
 
 ||| The direct subexpressions of `e`.
 subs : NamedCExp -> List NamedCExp
@@ -422,6 +464,16 @@ fusedDefinition ks withTail =
             MkNmFun args body => MkNmFun (if withTail then args ++ [local "ys"] else args) body
             other => other
 
+||| `case m of (e1, e2) => k`: the monoid `m` of a `foldMap`, a record of `(<+>)` and `neutral`.
+monoidCase : NamedCExp -> NamedCExp
+monoidCase k = NmConCase emptyFC (var "m") [ MkNConAlt (builtin "CONS") CONS (Just 1) [local "e1", local "e2"] k ] Nothing
+
+||| upstream's `foldMap`: `foldl (\acc, elem => (<+>) acc (f elem)) neutral` (its body, as the named IR
+||| shows it); this is the function it folds with, of the locals `m` and `f`.
+foldMapStep : NamedCExp
+foldMapStep = NmLam emptyFC (local "acc") $ NmLam emptyFC (local "elem") $
+                  monoidCase (NmApp emptyFC (NmApp emptyFC (var "e1") [var "acc"]) [NmApp emptyFC (var "f") [var "elem"]])
+
 ||| The loop of a consumer over a chain.
 consumerDefinition : Consumer -> List Kind -> NamedDef
 consumerDefinition c ks =
@@ -438,25 +490,64 @@ consumerDefinition c ks =
             -- upstream's `foldMap`: `foldl (\acc, elem => (<+>) acc (f elem)) neutral`, the monoid a record
             -- of those two (its `foldMap` body, as the named IR shows it)
             CFoldMap =>
-                let monoid = \k => NmConCase emptyFC (var "m")
-                                         [ MkNConAlt (builtin "CONS") CONS (Just 1) [local "e1", local "e2"] k ] Nothing
-                    step = NmLam emptyFC (local "acc") $ NmLam emptyFC (local "elem") $
-                               monoid (NmApp emptyFC (NmApp emptyFC (var "e1") [var "acc"]) [NmApp emptyFC (var "f") [var "elem"]])
-                in MkNmFun (map (local . stageName) (indices ks) ++ [local "m", local "f", local "xs"])
-                           (call (consumerName CFoldl ks) (fs ++ [step, monoid (var "e2"), var "xs"]))
+                MkNmFun (map (local . stageName) (indices ks) ++ [local "m", local "f", local "xs"])
+                        (call (consumerName CFoldl ks) (fs ++ [foldMapStep, monoidCase (var "e2"), var "xs"]))
             CLength => loopDefinition ks ["n"] (var "n")
                           (\v => recur [NmOp emptyFC (Add IntegerType) [var "n", NmPrimVal emptyFC (BI 1)]])
                           (recur [var "n"])
+
+||| The consumer over segments: each segment folded by its own loop, the result of one the start of
+||| the next (`foldr` the other way round, so its function still runs on the last element first).
+segDefinition : Consumer -> List (List Kind) -> NamedDef
+segDefinition c kss =
+    MkNmFun (map local (concatMap stageParams numbered ++ own ++ map listName numbered)) $
+        case c of
+             CFoldl => foldl (\acc, sg => seg sg (\a => [var "g", a]) acc) (var "acc") numbered
+             CFoldr => foldr (\sg, acc => seg sg (\a => [var "g", a]) acc) (var "z") numbered
+             CLength => foldl (\acc, sg => seg sg (\a => [a]) acc) (var "n") numbered
+             CFoldMap => NmLet emptyFC (local "step") foldMapStep $
+                             foldl (\acc, sg => seg sg (\a => [var "step", a]) acc) (monoidCase (var "e2")) numbered
+  where
+    numberedFrom : Nat -> List (List Kind) -> List (Nat, List Kind)
+    numberedFrom _ [] = []
+    numberedFrom i (ks :: rest) = (i, ks) :: numberedFrom (S i) rest
+
+    numbered : List (Nat, List Kind)
+    numbered = numberedFrom 0 kss
+
+    stageParams : (Nat, List Kind) -> List String
+    stageParams (i, ks) = map (\j => "s" ++ show i ++ "f" ++ show j) (indices ks)
+
+    listName : (Nat, List Kind) -> String
+    listName (i, _) = "l" ++ show i
+
+    own : List String
+    own = case c of
+               CFoldl => ["g", "acc"]
+               CFoldr => ["g", "z"]
+               CLength => ["n"]
+               CFoldMap => ["m", "f"]
+
+    loopC : Consumer
+    loopC = case c of
+                 CFoldMap => CFoldl
+                 other => other
+
+    -- the loop of one segment, `own'` its own arguments around the accumulator
+    seg : (Nat, List Kind) -> (NamedCExp -> List NamedCExp) -> NamedCExp -> NamedCExp
+    seg sg own' acc = call (consumerName loopC (snd sg)) (map var (stageParams sg) ++ own' acc ++ [var (listName sg)])
 
 wantedName : Wanted -> Name
 wantedName (WDiv d) = divertedName d
 wantedName (WFuse ks t) = fusedName ks t
 wantedName (WConsume c ks) = consumerName c ks
+wantedName (WSeg c kss) = segName c kss
 
 wantedDefinition : Wanted -> NamedDef
 wantedDefinition (WDiv d) = definition d
 wantedDefinition (WFuse ks t) = fusedDefinition ks t
 wantedDefinition (WConsume c ks) = consumerDefinition c ks
+wantedDefinition (WSeg c kss) = segDefinition c kss
 
 ||| Every program definition rewritten, and the diverted functions that are called
 ||| added (each calls itself, so its own body needs no rewriting).
