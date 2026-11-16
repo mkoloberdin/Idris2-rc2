@@ -4,7 +4,7 @@
 ||| `case isLTE ...` that only rebuilt them becomes a tail call, and the recursion a loop. A field is
 ||| left out only when computing it can do nothing but produce the value (a local, a constant, a
 ||| constructor, a lambda, arithmetic): never a call, a primitive of the world, a `force` or a
-||| `crash`, so no IO is lost. Disable with `--directive nodeadfields`.
+||| `crash`, so no IO is lost. Off by default: `--directive deadfields` turns it on.
 |||
 ||| Copyright 2026, Hattori,Hiroki. All rights reserved.
 ||| This module was licensed by BSD3. see LICENSE file for detail.

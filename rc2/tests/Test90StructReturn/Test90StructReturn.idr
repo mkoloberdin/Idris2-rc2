@@ -4,10 +4,6 @@ module Main
 -- workers return a struct in the dump; the output itself is diffed against
 -- refc.
 
--- The checks look for the struct-returning workers of these functions by name; a caller that
--- reads one half of a result would otherwise call a copy (rc2/doc/dead-fields.md).
-%cg rc2 nodeadfields
-
 -- Every level cases on the level below and rebuilds the same Either:
 -- eligible (a one-field constructor in every tail), and its own
 -- recursive call is a site that gains. Every `Right` carries a native

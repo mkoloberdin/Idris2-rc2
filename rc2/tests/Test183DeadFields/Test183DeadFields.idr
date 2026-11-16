@@ -7,6 +7,8 @@ module Main
 
 import Data.Nat
 
+%cg rc2 deadfields
+
 -- upstream's isLTE under another name: a recursion that rebuilds its proof
 myLTE : (m, n : Nat) -> Dec (LTE m n)
 myLTE Z n = Yes LTEZero

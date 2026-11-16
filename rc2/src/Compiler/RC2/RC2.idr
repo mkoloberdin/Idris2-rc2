@@ -784,8 +784,8 @@ compileExprWhole c s _ outputDir tm outfile =
      -- inlining makes (`length (filter p xs)`).
      let (mainInl1, namedInl1) = if optInOn ListFuse directiveList then applyListDivert True mainInl0 namedInl0 else (mainInl0, namedInl0)
      -- rc2/doc/dead-fields.md: a result taken apart at once, some fields unread, from a copy that
-     -- does not make them. Whole program only: the copies are of any module's functions.
-     let (mainInl, namedInl) = if stageOff NoDeadFields directiveList then (mainInl1, namedInl1) else applyDeadFields mainInl1 namedInl1
+     -- does not make them. Opt-in (`deadfields`); whole program only: the copies are of any module's functions.
+     let (mainInl, namedInl) = if optInOn DeadFields directiveList then applyDeadFields mainInl1 namedInl1 else (mainInl1, namedInl1)
      (mainIn, namedIn) <- if stageOff NoDeadArgs disabledStages
                              then pure (mainInl, namedInl)
                              else logTime 2 "rc2: Dead arguments" $

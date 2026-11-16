@@ -39,24 +39,25 @@ division (it may fail). When a field cannot be erased, the copy is not made.
 The pass erases a field's expression, never a binding: a field that is a local bound to an IO
 action (`let y = unsafePerformIO (...) in (x + 1, y)`) is erased, and the action still runs.
 
-`--directive nodeadfields` turns the pass off.
+Off by default (`--directive deadfields` turns it on): on the two programs measured below it
+changed nothing measurable.
 
 `Test183DeadFields`: a `Dec` recursion of the program (upstream's `isLTE` under another name)
 gets a copy that makes no proof and calls itself; a pair of which one half is read gets a copy
-that does not count; a field made by an IO action is erased and the action still prints. The same
-output as with `nodeadfields`. With `myLTE 3000000 3000001` instead, the program built with
-`nodeadfields` overflows the stack (three million frames that each rebuild a `Yes`); with the
+that does not count; a field made by an IO action is erased and the action still prints. The test turns the pass on (`%cg rc2 deadfields`); the same
+output as without the pass. With `myLTE 3000000 3000001` instead, the program built without it
+overflows the stack (three million frames that each rebuild a `Yes`); with the
 pass it returns in 8 ms.
 
 ## Measured
 
 | | instructions | code (`.text`) |
 |---|---|---|
-| compiler's own `prelude` build, `nodeadfields` | 27.971 G | 14.19 MB |
+| compiler's own `prelude` build, off (default) | 27.971 G | 14.19 MB |
 | without the size bound (every copy kept) | 27.990 G | 14.91 MB (+5.0%) |
-| with it (default) | 27.972 G | 14.19 MB (the same executable) |
-| lambda-rogue's tests, `nodeadfields` | 21.014 G | 4.11 MB |
-| with the size bound (default) | 21.012 G | 4.14 MB (+0.7%) |
+| with it (`deadfields`) | 27.972 G | 14.19 MB (the same executable) |
+| lambda-rogue's tests, off (default) | 21.014 G | 4.11 MB |
+| with the size bound (`deadfields`) | 21.012 G | 4.14 MB (+0.7%) |
 
 Without the bound, 45 copies of the compiler's functions were made, and six of them, whole large
 functions, were most of the code; the instructions grew a little. With it, 26 small copies are made
