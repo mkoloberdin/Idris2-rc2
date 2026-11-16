@@ -35,5 +35,6 @@ test "$(git -C "$src" rev-parse HEAD)" = "$rev"
 
 make -C "$src" bootstrap SCHEME=scheme PREFIX="$prefix"
 make -C "$src" install SCHEME=scheme PREFIX="$prefix"
-make -C "$src" install-api SCHEME=scheme PREFIX="$prefix"
+# install-api runs the `idris2` that was just installed
+PATH="$prefix/bin:$PATH" make -C "$src" install-api SCHEME=scheme PREFIX="$prefix"
 echo "$rev" > "$prefix/.idris2-rev"
