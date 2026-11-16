@@ -87,8 +87,37 @@ consumerTag CFoldMap = "foldMap"
 consumerName : Consumer -> List Kind -> Name
 consumerName c ks = MN ("rc2_" ++ consumerTag c ++ "_" ++ pack (map kindCode ks)) 0
 
+||| A function of the program that takes one of its parameters apart as a list and passes the rest
+||| of it on only to one call of itself: `f ps = case p of [] => onNil; elem :: rest => onCons`, `p`
+||| the parameter at `pos` (doc/list-divert.md, "Walkers"). Whatever else it does, a chain can feed it.
+record Walker where
+  constructor MkWalker
+  params : List Name
+  pos : Nat
+  onNil : NamedCExp
+  elem : Name
+  rest : Name
+  onCons : NamedCExp
+
+Walkers : Type
+Walkers = SortedMap Name Walker
+
+||| The copy of the walker `f` that a chain of these stages feeds.
+thruName : Name -> List Kind -> Name
+thruName f ks = MN ("rc2_thru_" ++ show f ++ "_" ++ pack (map kindCode ks)) 0
+
 ||| A definition the program needs.
 data Wanted = WDiv Diverted | WFuse (List Kind) Bool | WConsume Consumer (List Kind)
+           | WSeg Consumer (List (List Kind)) | WThru Name Walker (List Kind)
+
+||| The consumer over a list made of segments, `xs ++ ys ++ ...`, each a chain of these stages
+||| (none for a plain list): `rc2_foldl_seg_m-` is `foldl` over `map f xs ++ ys`.
+segName : Consumer -> List (List Kind) -> Name
+segName c kss = MN ("rc2_" ++ consumerTag c ++ "_seg_" ++ joinBy "-" (map (pack . map kindCode) kss)) 0
+
+||| The most segments one consumer is split into.
+maxSegments : Nat
+maxSegments = 4
 
 ||| The definitions the rewritten calls name, by name.
 Used : Type
@@ -188,6 +217,18 @@ parseChain (NmApp _ (NmRef _ n) args) =
                                   _ => Nothing
 parseChain _ = Nothing
 
+||| The segments of the list `e` is, `++` by `++`: a chain each, or a list that is not one (a chain
+||| of no stages). One segment when `e` is no `++`.
+segments : NamedCExp -> List Chain
+segments e = case parseChain e of
+    Just ch => case ch.end of
+                    Just ys => { end := Nothing } ch :: segments ys
+                    Nothing => [ch]
+    Nothing => case e of
+                    NmApp _ (NmRef _ n) [a, b] =>
+                        if n == divertedName DAppend then segments a ++ segments b else [MkChain [] e Nothing]
+                    _ => [MkChain [] e Nothing]
+
 ||| The call of one fused loop for `c`, when that saves a list: two stages or more, or one
 ||| and an end.
 fuseChain : FC -> FC -> Chain -> Maybe (NamedCExp, Used)
@@ -212,8 +253,25 @@ consume fc rfc f args = case args of
     [n, xs] => if isFun "Prelude.Types.List.lengthPlus" f then go CLength [n] xs else Nothing
     _ => Nothing
   where
-    go : Consumer -> List NamedCExp -> NamedCExp -> Maybe (NamedCExp, Used)
-    go c own xs = case parseChain xs of
+    -- the loop each segment is folded with: a foldMap is a foldl
+    loopOf : Consumer -> Consumer
+    loopOf CFoldMap = CFoldl
+    loopOf c = c
+
+    -- `xs ++ ys`: the consumer of `xs` goes on with what it made into `ys`, so the list `++` makes
+    -- is never built (doc/list-divert.md, "Fusion")
+    split : Consumer -> List NamedCExp -> List Chain -> Maybe (NamedCExp, Used)
+    split c own segs =
+        let kss = map (\ch => map fst ch.stages) segs
+            name = segName c kss
+        in if length segs < 2 || length segs > maxSegments || any (\ks => length ks > maxStages) kss
+              then Nothing
+              else Just (NmApp fc (NmRef rfc name) (concatMap (\ch => map snd ch.stages) segs ++ own ++ map (.list) segs),
+                         foldl (\u, ks => unionUsed u (SortedMap.singleton (show (consumerName (loopOf c) ks)) (WConsume (loopOf c) ks)))
+                               (SortedMap.singleton (show name) (WSeg c kss)) kss)
+
+    single : Consumer -> List NamedCExp -> NamedCExp -> Maybe (NamedCExp, Used)
+    single c own xs = case parseChain xs of
         Just ch =>
             let ks = map fst ch.stages
             in if isJust ch.end || null ks || length ks > maxStages
@@ -224,6 +282,9 @@ consume fc rfc f args = case args of
                                              CFoldMap => SortedMap.singleton (show (consumerName CFoldl ks)) (WConsume CFoldl ks)
                                              _ => noUsed))
         Nothing => Nothing
+
+    go : Consumer -> List NamedCExp -> NamedCExp -> Maybe (NamedCExp, Used)
+    go c own xs = maybe (single c own xs) Just (split c own (segments xs))
 
 ||| The direct subexpressions of `e`.
 subs : NamedCExp -> List NamedCExp
@@ -244,10 +305,82 @@ mentions : Name -> NamedCExp -> Bool
 mentions x (NmLocal _ y) = x == y
 mentions x e = any (mentions x) (subs e)
 
+||| `e` with `g` applied to each of its direct subexpressions.
+mapSubs : (NamedCExp -> NamedCExp) -> NamedCExp -> NamedCExp
+mapSubs g (NmLet fc x v b) = NmLet fc x (g v) (g b)
+mapSubs g (NmApp fc f as) = NmApp fc (g f) (map g as)
+mapSubs g (NmLam fc x b) = NmLam fc x (g b)
+mapSubs g (NmCon fc n ci t as) = NmCon fc n ci t (map g as)
+mapSubs g (NmOp fc op as) = NmOp fc op (map g as)
+mapSubs g (NmExtPrim fc p as) = NmExtPrim fc p (map g as)
+mapSubs g (NmForce fc lr t) = NmForce fc lr (g t)
+mapSubs g (NmDelay fc lr t) = NmDelay fc lr (g t)
+mapSubs g (NmConCase fc sc alts def) =
+    NmConCase fc (g sc) (map (\(MkNConAlt n ci t as b) => MkNConAlt n ci t as (g b)) alts) (map g def)
+mapSubs g (NmConstCase fc sc alts def) =
+    NmConstCase fc (g sc) (map (\(MkNConstAlt c b) => MkNConstAlt c (g b)) alts) (map g def)
+mapSubs _ e = e
+
+||| How many times the local `x` is read in `e`.
+readsOf : Name -> NamedCExp -> Nat
+readsOf x (NmLocal _ y) = if x == y then 1 else 0
+readsOf x e = sum (map (readsOf x) (subs e))
+
+||| `xs` with its element at `i` replaced.
+replaceAt : Nat -> a -> List a -> List a
+replaceAt _ _ [] = []
+replaceAt Z v (_ :: rest) = v :: rest
+replaceAt (S i) v (x :: rest) = x :: replaceAt i v rest
+
+||| Whether `e` is a call of `f` with `n` arguments, the one at `pos` the local `rest`.
+isRestCall : Name -> Nat -> Nat -> Name -> NamedCExp -> Bool
+isRestCall f n pos rest (NmApp _ (NmRef _ g) as) =
+    g == f && length as == n && (case drop pos as of
+                                      (NmLocal _ y :: _) => y == rest
+                                      _ => False)
+isRestCall _ _ _ _ _ = False
+
+restCalls : Name -> Nat -> Nat -> Name -> NamedCExp -> Nat
+restCalls f n pos rest e = (if isRestCall f n pos rest e then 1 else 0) + sum (map (restCalls f n pos rest) (subs e))
+
+||| What `f`, with this definition, is as a walker, if it is one. Not one of the definitions this pass
+||| adds, which it already knows.
+walkerOf : Name -> NamedDef -> Maybe Walker
+walkerOf f (MkNmFun args (NmConCase _ (NmLocal _ p) [a1, a2] Nothing)) =
+    if isPrefixOf "{rc2_" (show f) then Nothing else
+    case (findIndex (== p) args, listAlts a1 a2) of
+         (Just k, Just (nilB, x, rest, consB)) =>
+             let n = length args
+                 pos = finToNat k
+             in if not (mentions p nilB) && not (mentions p consB)
+                     && readsOf rest consB == 1 && restCalls f n pos rest consB == 1
+                   then Just (MkWalker args pos nilB x rest consB)
+                   else Nothing
+         _ => Nothing
+  where
+    listAlts : NamedConAlt -> NamedConAlt -> Maybe (NamedCExp, Name, Name, NamedCExp)
+    listAlts (MkNConAlt _ NIL _ [] nb) (MkNConAlt _ CONS _ [x, r] cb) = Just (nb, x, r, cb)
+    listAlts (MkNConAlt _ CONS _ [x, r] cb) (MkNConAlt _ NIL _ [] nb) = Just (nb, x, r, cb)
+    listAlts _ _ = Nothing
+walkerOf _ _ = Nothing
+
+||| The call of the walker `f` whose list is a chain, as a call of its copy that the chain feeds.
+walkerCall : Walkers -> FC -> FC -> Name -> List NamedCExp -> Maybe (NamedCExp, Used)
+walkerCall ws fc rfc f args = do
+    w <- lookup f ws
+    guard (length args == length w.params)
+    a <- head' (drop w.pos args)
+    ch <- parseChain a
+    let ks = map fst ch.stages
+    guard (isNothing ch.end && not (null ks) && length ks <= maxStages)
+    let name = thruName f ks
+    pure (NmApp fc (NmRef rfc name) (map snd ch.stages ++ replaceAt w.pos ch.list args),
+          SortedMap.singleton (show name) (WThru f w ks))
+
 ||| What the call `f args` (the arguments already rewritten) becomes: a diverted upstream call, a
 ||| fused loop for a chain of rc2's own, or a consumer's loop; `Nothing` when it stays as it is.
-tryCall : (fuse : Bool) -> FC -> FC -> Name -> List NamedCExp -> Maybe (NamedCExp, Used)
-tryCall fuse fc rfc f args =
+tryCall : (fuse : Bool) -> Walkers -> FC -> FC -> Name -> List NamedCExp -> Maybe (NamedCExp, Used)
+tryCall fuse ws fc rfc f args =
     case divert fc f args of
          Just (d, dargs) =>
              let call' = NmApp fc (NmRef rfc (divertedName d)) dargs
@@ -259,24 +392,33 @@ tryCall fuse fc rfc f args =
              if not fuse then Nothing
              else case the (Maybe (NamedCExp, Used)) (parseChain (NmApp fc (NmRef rfc f) args) >>= fuseChain fc rfc) of
                        Just r => Just r
-                       Nothing => consume fc rfc f args
+                       Nothing => maybe (walkerCall ws fc rfc f args) Just (consume fc rfc f args)
 
-||| `let x = e in call [.., x]` where nothing else reads `x`: the call with `e` for its last
-||| argument (the list), when that is a call to rewrite.
-letCall : (fuse : Bool) -> Name -> NamedCExp -> NamedCExp -> Maybe (NamedCExp, Used)
-letCall fuse x v (NmApp fc (NmRef rfc f) args) =
+||| `let x = e in call [.., x, ..]` where nothing else reads `x`: the call with `e` for that argument,
+||| when that is a call to rewrite.
+letCall : (fuse : Bool) -> Walkers -> Name -> NamedCExp -> NamedCExp -> Maybe (NamedCExp, Used)
+letCall fuse ws x v (NmApp fc (NmRef rfc f) args) =
     if not fuse then Nothing else
-    case reverse args of
-         (NmLocal _ y :: backFront) =>
-             let front = reverse backFront
-             in if x == y && not (any (mentions x) front) then tryCall fuse fc rfc f (front ++ [v]) else Nothing
-         _ => Nothing
-letCall _ _ _ _ = Nothing
+    let numbered : List (Nat, NamedCExp) = zip (natsFrom 0 args) args
+        at : List Nat = map (\(i, _) => i) (filter (\(_, a) => isX a) numbered)
+    in case at of
+            [i] => if all (\(j, a) => j == i || not (mentions x a)) numbered
+                      then tryCall fuse ws fc rfc f (replaceAt i v args) else Nothing
+            _ => Nothing
+  where
+    isX : NamedCExp -> Bool
+    isX (NmLocal _ y) = y == x
+    isX _ = False
+
+    natsFrom : Nat -> List NamedCExp -> List Nat
+    natsFrom _ [] = []
+    natsFrom i (_ :: rest) = i :: natsFrom (S i) rest
+letCall _ _ _ _ _ = Nothing
 
 ||| `e` with every upstream call made a call of the diverted function, and the set
 ||| of those used.
-divertCalls : (fuse : Bool) -> NamedCExp -> (NamedCExp, Used)
-divertCalls fuse = go
+divertCalls : (fuse : Bool) -> Walkers -> NamedCExp -> (NamedCExp, Used)
+divertCalls fuse ws = go
   where
    mutual
     goList : List NamedCExp -> (List NamedCExp, Used)
@@ -285,7 +427,7 @@ divertCalls fuse = go
     go : NamedCExp -> (NamedCExp, Used)
     go (NmApp fc (NmRef rfc f) args) =
         let (args', s) = goList args
-        in case tryCall fuse fc rfc f args' of
+        in case tryCall fuse ws fc rfc f args' of
                 Just (e', u) => (e', unionUsed s u)
                 Nothing => (NmApp fc (NmRef rfc f) args', s)
     go (NmApp fc g args) = let (g', s1) = go g; (args', s2) = goList args in (NmApp fc g' args', unionUsed s1 s2)
@@ -293,7 +435,7 @@ divertCalls fuse = go
     go (NmLet fc x v b) =
         let (v', s1) = go v
             (b', s2) = go b
-        in case letCall fuse x v' b' of
+        in case letCall fuse ws x v' b' of
                 Just (fused, u) => (fused, unionUsed (unionUsed s1 s2) u)
                 Nothing => (NmLet fc x v' b', unionUsed s1 s2)
     go (NmCon fc n ci t args) = let (args', s) = goList args in (NmCon fc n ci t args', s)
@@ -384,6 +526,25 @@ indices ks = go 0 ks
 stageName : Nat -> String
 stageName i = "f" ++ show i
 
+||| The element `v` through the stages from the `i`th on: a stage that drops it gives `skip`, the
+||| last one's result gives `emit` of it.
+buildStages : Nat -> List Kind -> NamedCExp -> (emit : NamedCExp -> NamedCExp) -> (skip : NamedCExp) -> NamedCExp
+buildStages _ [] v emit _ = emit v
+buildStages i (KMap :: more) v emit skip =
+    NmLet emptyFC (local ("v" ++ show i)) (NmApp emptyFC (var (stageName i)) [v])
+          (buildStages (S i) more (var ("v" ++ show i)) emit skip)
+buildStages i (KFilter :: more) v emit skip =
+    NmConstCase emptyFC (NmApp emptyFC (var (stageName i)) [v])
+        -- a Bool is a `B8` constant (upstream's `Compiler.Opts.Constructor.enumTag`)
+        [ MkNConstAlt (B8 1) (buildStages (S i) more v emit skip)
+        , MkNConstAlt (B8 0) skip ]
+        Nothing
+buildStages i (KMapMaybe :: more) v emit skip =
+    NmConCase emptyFC (NmApp emptyFC (var (stageName i)) [v])
+        [ MkNConAlt (builtin "JUST") JUST (Just 1) [local ("w" ++ show i)] (buildStages (S i) more (var ("w" ++ show i)) emit skip)
+        , MkNConAlt (builtin "NOTHING") NOTHING (Just 0) [] skip ]
+        Nothing
+
 ||| The loop over a chain: `name`, with the stage functions, `extra` parameters, and the list
 ||| `xs`. One element goes through the stages in turn; a stage that drops it, or the list
 ||| ending, leaves the rest to `skip` (the call for the rest of the list), and one that
@@ -392,24 +553,7 @@ stageName i = "f" ++ show i
 loopDefinition : List Kind -> (extra : List String) -> (onNil : NamedCExp) -> (emit : NamedCExp -> NamedCExp) -> (skip : NamedCExp) -> NamedDef
 loopDefinition ks extra onNil emit skip =
     MkNmFun (map (local . stageName) (indices ks) ++ map local extra ++ [local "xs"]) $
-        listCase (var "xs") onNil (build 0 ks (var "x"))
-  where
-    build : Nat -> List Kind -> NamedCExp -> NamedCExp
-    build _ [] v = emit v
-    build i (KMap :: more) v =
-        NmLet emptyFC (local ("v" ++ show i)) (NmApp emptyFC (var (stageName i)) [v])
-              (build (S i) more (var ("v" ++ show i)))
-    build i (KFilter :: more) v =
-        NmConstCase emptyFC (NmApp emptyFC (var (stageName i)) [v])
-            -- a Bool is a `B8` constant (upstream's `Compiler.Opts.Constructor.enumTag`)
-            [ MkNConstAlt (B8 1) (build (S i) more v)
-            , MkNConstAlt (B8 0) skip ]
-            Nothing
-    build i (KMapMaybe :: more) v =
-        NmConCase emptyFC (NmApp emptyFC (var (stageName i)) [v])
-            [ MkNConAlt (builtin "JUST") JUST (Just 1) [local ("w" ++ show i)] (build (S i) more (var ("w" ++ show i)))
-            , MkNConAlt (builtin "NOTHING") NOTHING (Just 0) [] skip ]
-            Nothing
+        listCase (var "xs") onNil (buildStages 0 ks (var "x") emit skip)
 
 ||| The loop of a fused chain: the stage functions, the list, and for `xs ++ ys` that list too.
 fusedDefinition : List Kind -> Bool -> NamedDef
@@ -421,6 +565,16 @@ fusedDefinition ks withTail =
     in case loopDefinition ks [] (if withTail then var "ys" else nil) (\v => cons v recur) recur of
             MkNmFun args body => MkNmFun (if withTail then args ++ [local "ys"] else args) body
             other => other
+
+||| `case m of (e1, e2) => k`: the monoid `m` of a `foldMap`, a record of `(<+>)` and `neutral`.
+monoidCase : NamedCExp -> NamedCExp
+monoidCase k = NmConCase emptyFC (var "m") [ MkNConAlt (builtin "CONS") CONS (Just 1) [local "e1", local "e2"] k ] Nothing
+
+||| upstream's `foldMap`: `foldl (\acc, elem => (<+>) acc (f elem)) neutral` (its body, as the named IR
+||| shows it); this is the function it folds with, of the locals `m` and `f`.
+foldMapStep : NamedCExp
+foldMapStep = NmLam emptyFC (local "acc") $ NmLam emptyFC (local "elem") $
+                  monoidCase (NmApp emptyFC (NmApp emptyFC (var "e1") [var "acc"]) [NmApp emptyFC (var "f") [var "elem"]])
 
 ||| The loop of a consumer over a chain.
 consumerDefinition : Consumer -> List Kind -> NamedDef
@@ -438,25 +592,103 @@ consumerDefinition c ks =
             -- upstream's `foldMap`: `foldl (\acc, elem => (<+>) acc (f elem)) neutral`, the monoid a record
             -- of those two (its `foldMap` body, as the named IR shows it)
             CFoldMap =>
-                let monoid = \k => NmConCase emptyFC (var "m")
-                                         [ MkNConAlt (builtin "CONS") CONS (Just 1) [local "e1", local "e2"] k ] Nothing
-                    step = NmLam emptyFC (local "acc") $ NmLam emptyFC (local "elem") $
-                               monoid (NmApp emptyFC (NmApp emptyFC (var "e1") [var "acc"]) [NmApp emptyFC (var "f") [var "elem"]])
-                in MkNmFun (map (local . stageName) (indices ks) ++ [local "m", local "f", local "xs"])
-                           (call (consumerName CFoldl ks) (fs ++ [step, monoid (var "e2"), var "xs"]))
+                MkNmFun (map (local . stageName) (indices ks) ++ [local "m", local "f", local "xs"])
+                        (call (consumerName CFoldl ks) (fs ++ [foldMapStep, monoidCase (var "e2"), var "xs"]))
             CLength => loopDefinition ks ["n"] (var "n")
                           (\v => recur [NmOp emptyFC (Add IntegerType) [var "n", NmPrimVal emptyFC (BI 1)]])
                           (recur [var "n"])
+
+||| The consumer over segments: each segment folded by its own loop, the result of one the start of
+||| the next (`foldr` the other way round, so its function still runs on the last element first).
+segDefinition : Consumer -> List (List Kind) -> NamedDef
+segDefinition c kss =
+    MkNmFun (map local (concatMap stageParams numbered ++ own ++ map listName numbered)) $
+        case c of
+             CFoldl => foldl (\acc, sg => seg sg (\a => [var "g", a]) acc) (var "acc") numbered
+             CFoldr => foldr (\sg, acc => seg sg (\a => [var "g", a]) acc) (var "z") numbered
+             CLength => foldl (\acc, sg => seg sg (\a => [a]) acc) (var "n") numbered
+             CFoldMap => NmLet emptyFC (local "step") foldMapStep $
+                             foldl (\acc, sg => seg sg (\a => [var "step", a]) acc) (monoidCase (var "e2")) numbered
+  where
+    numberedFrom : Nat -> List (List Kind) -> List (Nat, List Kind)
+    numberedFrom _ [] = []
+    numberedFrom i (ks :: rest) = (i, ks) :: numberedFrom (S i) rest
+
+    numbered : List (Nat, List Kind)
+    numbered = numberedFrom 0 kss
+
+    stageParams : (Nat, List Kind) -> List String
+    stageParams (i, ks) = map (\j => "s" ++ show i ++ "f" ++ show j) (indices ks)
+
+    listName : (Nat, List Kind) -> String
+    listName (i, _) = "l" ++ show i
+
+    own : List String
+    own = case c of
+               CFoldl => ["g", "acc"]
+               CFoldr => ["g", "z"]
+               CLength => ["n"]
+               CFoldMap => ["m", "f"]
+
+    loopC : Consumer
+    loopC = case c of
+                 CFoldMap => CFoldl
+                 other => other
+
+    -- the loop of one segment, `own'` its own arguments around the accumulator
+    seg : (Nat, List Kind) -> (NamedCExp -> List NamedCExp) -> NamedCExp -> NamedCExp
+    seg sg own' acc = call (consumerName loopC (snd sg)) (map var (stageParams sg) ++ own' acc ++ [var (listName sg)])
+
+||| The walker `f` with a chain of these stages for its list: its own definition, each element first
+||| through the stages. One a stage drops goes on to the rest with every other argument as it was;
+||| a kept one is the walker's element, and its one call of itself on the rest a call of this copy.
+thruDefinition : Name -> Walker -> List Kind -> NamedDef
+thruDefinition f w ks =
+    MkNmFun (map (local . stageName) (indices ks) ++ w.params) $
+        NmConCase emptyFC (NmLocal emptyFC listParam)
+            [ MkNConAlt (builtin "NIL") NIL (Just 0) [] w.onNil
+            , MkNConAlt (builtin "CONS") CONS (Just 1) [xin, w.rest]
+                  (buildStages 0 ks (NmLocal emptyFC xin) (\v => NmLet emptyFC w.elem v onCons') skip) ]
+            Nothing
+  where
+    name : Name
+    name = thruName f ks
+
+    fs : List NamedCExp
+    fs = map (var . stageName) (indices ks)
+
+    xin : Name
+    xin = local "rc2_x"
+
+    listParam : Name
+    listParam = fromMaybe xin (head' (drop w.pos w.params))
+
+    skip : NamedCExp
+    skip = call name (fs ++ replaceAt w.pos (NmLocal emptyFC w.rest) (map (NmLocal emptyFC) w.params))
+
+    retarget : NamedCExp -> NamedCExp
+    retarget e = if isRestCall f (length w.params) w.pos w.rest e
+                    then (case e of
+                               NmApp fc _ as => NmApp fc (NmRef fc name) (fs ++ as)
+                               other => other)
+                    else mapSubs retarget e
+
+    onCons' : NamedCExp
+    onCons' = retarget w.onCons
 
 wantedName : Wanted -> Name
 wantedName (WDiv d) = divertedName d
 wantedName (WFuse ks t) = fusedName ks t
 wantedName (WConsume c ks) = consumerName c ks
+wantedName (WSeg c kss) = segName c kss
+wantedName (WThru f _ ks) = thruName f ks
 
 wantedDefinition : Wanted -> NamedDef
 wantedDefinition (WDiv d) = definition d
 wantedDefinition (WFuse ks t) = fusedDefinition ks t
 wantedDefinition (WConsume c ks) = consumerDefinition c ks
+wantedDefinition (WSeg c kss) = segDefinition c kss
+wantedDefinition (WThru f w ks) = thruDefinition f w ks
 
 ||| Every program definition rewritten, and the diverted functions that are called
 ||| added (each calls itself, so its own body needs no rewriting).
@@ -464,7 +696,7 @@ export
 applyListDivert : (fuse : Bool) -> Maybe NamedCExp -> List (Name, FC, NamedDef) -> (Maybe NamedCExp, List (Name, FC, NamedDef))
 applyListDivert fuse main defs =
     let (main', s0) = the (Maybe NamedCExp, Used) $ case main of
-                           Just m => let (m', s) = divertCalls fuse m in (Just m', s)
+                           Just m => let (m', s) = divertCalls fuse ws m in (Just m', s)
                            Nothing => (Nothing, noUsed)
         (defs', used) = foldr (\(n, fc, d), (acc, s) => let (d', s') = rewriteDef d in ((n, fc, d') :: acc, unionUsed s s')) (the (List (Name, FC, NamedDef)) [], s0) defs
         have = SortedSet.fromList (map (\(n, _, _) => n) defs)
@@ -472,7 +704,10 @@ applyListDivert fuse main defs =
         added = [ (wantedName w, emptyFC, wantedDefinition w) | (_, w) <- SortedMap.toList used, not (contains (wantedName w) have) ]
     in (main', defs' ++ added)
   where
+    ws : Walkers
+    ws = if fuse then SortedMap.fromList (mapMaybe (\(n, _, d) => map (\w => (n, w)) (walkerOf n d)) defs) else SortedMap.empty
+
     rewriteDef : NamedDef -> (NamedDef, Used)
-    rewriteDef (MkNmFun args b) = let (b', s) = divertCalls fuse b in (MkNmFun args b', s)
-    rewriteDef (MkNmError b) = let (b', s) = divertCalls fuse b in (MkNmError b', s)
+    rewriteDef (MkNmFun args b) = let (b', s) = divertCalls fuse ws b in (MkNmFun args b', s)
+    rewriteDef (MkNmError b) = let (b', s) = divertCalls fuse ws b in (MkNmError b', s)
     rewriteDef d = (d, noUsed)

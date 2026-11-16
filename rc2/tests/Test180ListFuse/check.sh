@@ -37,6 +37,14 @@ if [ "$consumers" -ge 4 ]; then
 else
     fail "listfuse: $consumers fold/length loops (want >= 4) in $on.named"
 fi
+# a fold over `++` is split into the folds of its lists; the split itself is small and inlined,
+# what shows is the loop of a list that is no chain (a fold of no stages: rc2_foldl_, ...)
+segs="$(grep -o 'rc2_\(foldl\|foldr\|length\)_:0' "$on.named" | sort -u | wc -l)"
+if [ "$segs" -ge 3 ]; then
+    pass "listfuse: foldl, foldr and length over a ++ split into the folds of its lists"
+else
+    fail "listfuse: $segs kinds of split fold over ++ (want 3) in $on.named"
+fi
 if "$on" | cmp -s - "$here/$name.expected"; then
     pass "listfuse -- same output"
 else
