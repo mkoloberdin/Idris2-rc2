@@ -629,8 +629,13 @@ parameter of such a type can be kept boxed, whatever its reads say. What it take
 - a loop variable has no declared type. The fold's accumulator is `foldl`'s `b`, a plain variable,
   and vetoing every type variable would also take `foldl (+) 0` on `Int` away.
 
-So the declared type is not a guarantee either. What can be guaranteed is the strict rule above,
-at the cost of the accumulators; TODO.md plans it as a directive, opt-in until measured.
+So the declared type is not a guarantee by itself, and neither is looking for the values whose
+type depends on another value: a type variable is the same thing (the fold's `b` was `Dom o`), a
+polymorphic field's type is lost with the scrutinee's type arguments, and a lambda's binder has no
+type at all. What can be built is positive evidence only: a declared type whose representation is
+fixed (a newtype judged by its field), or producers that are all native values of one type, and
+everything else unknown and kept boxed across boundaries. TODO.md plans it as a directive, opt-in
+until measured.
 
 ## Bugs found and fixed (chronological, see `git log`/`BENCHMARKS.md` for commit-level detail)
 

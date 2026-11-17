@@ -386,4 +386,5 @@ main = do
 (`VT`, `Key`, `vt`, `Value` and `dflt` as in `rc2/tests/Test184DependentParam`.) Issue #343, shape 2.
 
 Fix: no local check settles it, and the declared type does not either (the doc says why). TODO.md
-plans a directive that promotes only what can be shown safe, a native read on every path.
+plans a directive that promotes only what can be shown safe: a declared type whose
+representation is fixed, or producers that are all native values of one type.
