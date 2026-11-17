@@ -22,6 +22,28 @@ CAFへの参照を含むフィールドも消せ、`DeadArgs`は外した引数�
 `unsafePerformIO`で書いたログや初期化が、値を使わないと実行されなくなる。どちらにするか、
 どの範囲(純粋な関数の呼び出しだけか、CAFも含むか)まで緩めるかを決める。
 
+## 安全と保証できない昇格を拒否するディレクティブ(2026-11-17)
+
+値の型が別の引数で決まる場合(`Value (vt k)`、`Dom o`)、ある分岐での native な読み方は
+その経路でしか正しくない。今の検査(`NativeUse.consistentNative`、
+`rc2/doc/native-type-inference.md`の"Types that depend on a value")は、別の型での読み方や
+分解という矛盾が見えるときだけ昇格をやめる。値を渡す・返すだけの分岐があると矛盾が見えず、
+誤った昇格が残る(KNOWN-BUGS.md、#343の形2)。宣言された型を見る方法も、clone・lift・
+inlining後のループ変数には型がなく、型変数の具体化も追えないので、保証にならない。
+
+やること: 安全と言える形の昇格だけを許すディレクティブ(例: `strictnative`)を足す。
+有効なときは、局所変数を使う経路のすべてに同じ型での native な読み方がある場合だけ昇格する。
+値を渡すだけ、返すだけの経路がひとつでもあれば箱付きのままにする。自分自身への末尾呼び出しで
+同じ位置に渡す場合と`RLoopContinue`は中立とし、触れない経路の扱いも決める(`to_u8`などは
+ポインタを参照外ししないが、`to_i64`/`to_u64`は heap オブジェクトを読む)。
+判定を置く場所は`consistentNative`と同じで、`nativeArgType*`・`paramEligibility`・
+`callArgOrOpNativeTy`・`nativePromotionFor`の全部が通る1か所にする。
+
+代償: accumulator(`go acc n = if n == 0 then acc else ...`の`acc`)は、返すだけの経路が
+あるので昇格しなくなる。既定にするかは、verifyの件数チェックとコンパイラ本体・lambda-rogue
+での昇格数・実行時間の差を測ってから決める。依存型を使うプログラムで既定の昇格が壊れたときの
+逃げ道として、まずは opt-in で入れる。
+
 ## IR: `dup`・`drop`・`postDrop`の対象を変数IDだけにする(アイデア)
 
 `RDup`・`RDrop`・`postDrop`・`prologueDrop`・`RReuseOffer`の`dupOnShared`/`dropOnUnique`などは、

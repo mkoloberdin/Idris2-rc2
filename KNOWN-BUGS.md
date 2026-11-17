@@ -385,5 +385,5 @@ main = do
 
 (`VT`, `Key`, `vt`, `Value` and `dflt` as in `rc2/tests/Test184DependentParam`.) Issue #343, shape 2.
 
-Fix, if it is worth it: keep a parameter boxed when its declared type is a stuck type-level
-application; the doc says what that takes.
+Fix: no local check settles it, and the declared type does not either (the doc says why). TODO.md
+plans a directive that promotes only what can be shown safe, a native read on every path.

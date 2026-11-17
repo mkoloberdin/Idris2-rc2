@@ -622,6 +622,9 @@ parameter of such a type can be kept boxed, whatever its reads say. What it take
 - a loop variable has no declared type. The fold's accumulator is `foldl`'s `b`, a plain variable,
   and vetoing every type variable would also take `foldl (+) 0` on `Int` away.
 
+So the declared type is not a guarantee either. What can be guaranteed is the strict rule above,
+at the cost of the accumulators; TODO.md plans it as a directive, opt-in until measured.
+
 ## Bugs found and fixed (chronological, see `git log`/`BENCHMARKS.md` for commit-level detail)
 
 1. **`Cast Integer Int` memory corruption.** `opResultRep (Cast i o)`
