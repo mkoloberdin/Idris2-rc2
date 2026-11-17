@@ -109,6 +109,15 @@ it into one loop that allocates only the result.
   with `x` and its other parameters (an accumulator, a result built with `::`, a counter), as long
   as the rest of the list is read only by that one call: a function that reads `rest` twice would
   run the stages twice, and is left alone. Not one of the functions this pass adds.
+
+  The call the rest goes to need not be of the function itself: it may be of another walker, at
+  that walker's list (`intersperse sep (x :: xs) = x :: mergeReplicate sep xs`, or two functions that
+  pass the rest to each other). The walkers are the least set closed under that, and a chain fed
+  to one feeds the copies of every walker its rest reaches, for the same stages.
+- **`zipWith`.** Upstream's `zipWith` is naive, but its case tree tests `xs` and then `ys` through
+  default branches, so it is no walker. The pass replaces its calls by `rc2_zipWith`, which tests
+  them in the same order with one `case` each, and is a walker of its first list (`zip` is a
+  `zipWith`). A chain fed to the second list is not fused.
 - **Intermediate lists are never shared.** A chain is only a call nested directly in the
   argument of the next, or a `let` whose one reader is that argument, so the intermediate list
   has no other reader.
@@ -160,6 +169,13 @@ call of a definition added to the program, named after its stages, first applied
 | before | after |
 |---|---|
 | `sumSq 0 (map f (filter p xs))` | `rc2_thru_Main.sumSq_fm p f 0 xs` |
+
+**A walker reached through another, and `zipWith`:**
+
+| before | after |
+|---|---|
+| `intersperse sep (map f xs)` | `rc2_thru_Data.List.intersperse_m f sep xs`, whose rest goes to `rc2_thru_Data.List.mergeReplicate_m` |
+| `zipWith g (filter p xs) ys` | `rc2_thru_{rc2_zipWith:0}_f p g xs ys` |
 
 **Through a `let`**, which is what inlining leaves: `let l = <chain or call> in <call> [.., l, ..]`
 where one argument of the call is `l` and nothing else reads `l` is the call with the chain for
@@ -228,7 +244,13 @@ tail calls, which `Loop` does; `foldr` is as deep as upstream's.
 - a list that crosses a function the inliner did not take apart (`sum (chain n)` where `chain`
   is a function of its own), since the pass sees a call, not a chain;
 - `foldl'`-like functions of their own, `all`, `any`, `elem`: not on the list of consumers;
-- a function that reads the rest of its list more than once, or passes it to another function;
+- a function that reads the rest of its list more than once, or passes it to a function that is
+  no walker;
+- the second list of `zipWith`;
+- a range (`[a .. b]`): `rangeFromTo` takes its `Range` dictionary and works through it, so no
+  chain is seen until known dictionaries are resolved;
+- a fold of what a general producer builds (`foldMap f (intersperse sep xs)`): the consumer side
+  knows only the chains of `map`, `filter` and `mapMaybe`;
 - a fold whose list comes out of a dictionary method that is not resolved: `fromList` of
   `Data.SortedMap` folds through a `Foldable` record it was given, and the record is known (a
   `let` of the instance) but the pass does not take a method out of it.
