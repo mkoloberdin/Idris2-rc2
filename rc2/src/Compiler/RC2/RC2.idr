@@ -46,6 +46,8 @@ import Compiler.RC2.DupMerge
 import Compiler.RC2.LeafTail
 import Compiler.RC2.LibraryFiles
 import Compiler.RC2.ListDivert
+import Compiler.RC2.NatMagic
+import Compiler.RC2.DeadFields
 import Compiler.RC2.Pending
 import Compiler.RC2.KnownPartial
 import Compiler.RC2.PushApply
@@ -771,14 +773,19 @@ compileExprWhole c s _ outputDir tm outfile =
      -- Top-level `Delay` definitions onto CAF memoization; whole program
      -- only, since another module's references are out of sight
      -- (doc/lazy-memoization.md).
-     let (mainLz0, namedLz0) = applyLazyCaf (Just (forget (mainExpr cdata))) (namedDefs cdata)
+     -- rc2/doc/nat-magic.md: `Data.Nat.isLTE` and `lte` compare once instead of recursing.
+     let natDefs = if stageOff NoNatMagic directiveList then namedDefs cdata else applyNatMagic (namedDefs cdata)
+     let (mainLz0, namedLz0) = applyLazyCaf (Just (forget (mainExpr cdata))) natDefs
      -- rc2/doc/list-divert.md: upstream's tail-recursive list functions, replaced by naive ones
      -- that TRMC makes one loop. Opt-in (`listdivert`), whole program only.
      let (mainLz, namedLz) = if optInOn ListDivert directiveList || optInOn ListFuse directiveList then applyListDivert (optInOn ListFuse directiveList) mainLz0 namedLz0 else (mainLz0, namedLz0)
      (mainInl0, namedInl0) <- inlineNamed disabledStages (Just (SortedSet.fromList exportNames)) mainLz namedLz
      -- Again after inlining, with `listfuse`: it passes a list to a loop through a `let`, which only
      -- inlining makes (`length (filter p xs)`).
-     let (mainInl, namedInl) = if optInOn ListFuse directiveList then applyListDivert True mainInl0 namedInl0 else (mainInl0, namedInl0)
+     let (mainInl1, namedInl1) = if optInOn ListFuse directiveList then applyListDivert True mainInl0 namedInl0 else (mainInl0, namedInl0)
+     -- rc2/doc/dead-fields.md: a result taken apart at once, some fields unread, from a copy that
+     -- does not make them. Opt-in (`deadfields`); whole program only: the copies are of any module's functions.
+     let (mainInl, namedInl) = if optInOn DeadFields directiveList then applyDeadFields mainInl1 namedInl1 else (mainInl1, namedInl1)
      (mainIn, namedIn) <- if stageOff NoDeadArgs disabledStages
                              then pure (mainInl, namedInl)
                              else logTime 2 "rc2: Dead arguments" $
@@ -1015,7 +1022,7 @@ incCompile : Ref Ctxt Defs -> Ref Syn SyntaxInfo ->
              (sourceFile : String) -> Core (Maybe (String, List String))
 incCompile c s sourceFile = do
     cdata <- getIncCompileData False Cases
-    ndefs <- incrementalCse !(currentNS <$> get Ctxt) (namedDefs cdata)
+    ndefs <- incrementalCse !(currentNS <$> get Ctxt) (if stageOff NoNatMagic !rc2Directives then namedDefs cdata else applyNatMagic (namedDefs cdata))
     if isNil ndefs
        then pure (Just ("", []))
             -- No code to generate, but still record that the module

@@ -1,0 +1,10 @@
+0 0: Yes 0, lte True, gte True, lt False
+0 5: Yes 0, lte True, gte False, lt True
+3 5: Yes 3, lte True, gte False, lt True
+5 5: Yes 5, lte True, gte True, lt False
+6 5: No, lte False, gte True, lt False
+5 0: No, lte False, gte True, lt False
+4000 4001: Yes 4000, lte True, gte False, lt True
+4001 4000: No, lte False, gte True, lt False
+Just 0 Nothing Just 79 Nothing
+isLT Yes 3

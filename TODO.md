@@ -5,6 +5,23 @@ scattered code comments. Nothing below is a known correctness bug in
 what's implemented -- see `rc2/tests/refc-suite/README.md` for bugs that
 were found and already fixed.
 
+## 方針: 使われない値の計算を消してよいか(検討中、2026-11-16)
+
+`unsafePerformIO`と`crash`は純粋とみなし、その効果のタイミングがずれることは許している
+(`listfuse`の段の関数、IOのループの融合。`rc2/doc/list-divert.md`の"Design decision")。
+一方、効果が「ずれる」のではなく「なくなる」変形は、今はしていない。
+
+- `DeadArgs`は、外す引数が計算を伴うとき、先に`let`で束縛して元の位置で1回評価する。
+- `DeadFields`(`rc2/doc/dead-fields.md`)は、関数呼び出しや`force`を含むフィールドを消さない。
+  CAFへの参照も、初回にCAFを評価する計算なので消さない。複製に呼び出し元が移って元の関数が
+  使われなくなっても、複製は消したフィールド以外の本体をそのまま持つので、CAFの評価は残る。
+
+検討すること: もっと緩い方針、「使われない値は、`unsafePerformIO`の効果ごと評価しなくてよい」
+(遅延評価の言語で要らない値を評価しないのと同じ)にするか。そうすれば、`DeadFields`は呼び出しや
+CAFへの参照を含むフィールドも消せ、`DeadArgs`は外した引数を束縛せずに捨てられる。ただし、
+`unsafePerformIO`で書いたログや初期化が、値を使わないと実行されなくなる。どちらにするか、
+どの範囲(純粋な関数の呼び出しだけか、CAFも含むか)まで緩めるかを決める。
+
 ## IR: `dup`・`drop`・`postDrop`の対象を変数IDだけにする(アイデア)
 
 `RDup`・`RDrop`・`postDrop`・`prologueDrop`・`RReuseOffer`の`dupOnShared`/`dropOnUnique`などは、
