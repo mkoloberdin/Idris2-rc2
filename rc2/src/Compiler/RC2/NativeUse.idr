@@ -245,6 +245,101 @@ nativeArgTypesFor tracked (RLoop _ loopParams initial _ body) =
     in fromInitial `unionMaps` nativeArgTypesFor tracked body
 nativeArgTypesFor _ _ = empty
 
+||| The type each operand position of `op` requires, whatever its own result representation (boxed or
+||| native): a cast's source type; a string op's string and index positions; the op's own type otherwise.
+opOperandTypes : PrimFn arity -> Vect arity RCLocal -> List (RCLocal, PrimType)
+opOperandTypes (Cast i _) [a] = [(a, i)]
+opOperandTypes StrIndex [s, i] = [(s, StringType), (i, IntType)]
+opOperandTypes StrCons [c, s] = [(c, CharType), (s, StringType)]
+opOperandTypes StrSubstr [i, n, s] = [(i, IntType), (n, IntType), (s, StringType)]
+opOperandTypes op args = maybe [] (\ty => map (, ty) (toList args)) (ownType op)
+  where
+    ownType : PrimFn n -> Maybe PrimType
+    ownType (Add ty) = Just ty
+    ownType (Sub ty) = Just ty
+    ownType (Mul ty) = Just ty
+    ownType (Div ty) = Just ty
+    ownType (Mod ty) = Just ty
+    ownType (Neg ty) = Just ty
+    ownType (ShiftL ty) = Just ty
+    ownType (ShiftR ty) = Just ty
+    ownType (BAnd ty) = Just ty
+    ownType (BOr ty) = Just ty
+    ownType (BXOr ty) = Just ty
+    ownType (LT ty) = Just ty
+    ownType (LTE ty) = Just ty
+    ownType (EQ ty) = Just ty
+    ownType (GTE ty) = Just ty
+    ownType (GT ty) = Just ty
+    ownType StrLength = Just StringType
+    ownType StrHead = Just StringType
+    ownType StrTail = Just StringType
+    ownType StrReverse = Just StringType
+    ownType StrAppend = Just StringType
+    ownType BelieveMe = Nothing   -- no vote, as Crash
+    ownType Crash = Nothing
+    ownType _ = Just DoubleType   -- the Double functions
+
+||| Every primitive type at which each of `tracked` is read anywhere in `e`, boxed reads included: an
+||| operand of a primitive op or a fused comparison, or the scrutinee of a constant `case` (the type of its
+||| literals). Unlike `nativeArgTypes`, which counts only the reads Emit renders natively, this counts every
+||| typed read, so a conflict between branches is visible.
+primReadTypesFor : SortedSet Int -> RCExp -> SortedMap Int (SortedSet PrimType)
+primReadTypesFor tracked e = foldr (\(a, ty), acc => addTracked tracked a ty acc) (concatMaps (map (primReadTypesFor tracked) (children e))) (here e)
+  where
+    constTy : Constant -> Maybe PrimType
+    constTy (Str _) = Just StringType
+    constTy (BI _) = Just IntegerType
+    constTy c = litRep c
+    here : RCExp -> List (RCLocal, PrimType)
+    here (ROp _ _ op args _) = opOperandTypes op args
+    here (RCmpCase _ op args _ _ _) = map (, cmpOpTy op) (toList args)
+    here (RConstCase _ sc alts _) = mapMaybe (\(MkRConstAlt c _) => map (sc,) (constTy c)) alts
+    here _ = []
+
+||| Those of `tracked` that are the scrutinee of a constructor `case` with an alternative that binds fields
+||| anywhere in `e`: there the local is a heap constructor (`Maybe`, a record, a list), never a native value,
+||| even if another branch reads it as one (a parameter of type `Dom o r`: a `Bool` for one `o`, a
+||| `Maybe (List r)` for another). An enumeration's case (every alternative field-less, as `Bool`'s) does not
+||| count.
+takenApartFor : SortedSet Int -> RCExp -> SortedSet Int
+takenApartFor tracked e = foldr union (here e) (map (takenApartFor tracked) (children e))
+  where
+    binds : RConAlt -> Bool
+    binds (MkRConAlt _ _ _ args _) = not (null args)
+    here : RCExp -> SortedSet Int
+    here (RConCase _ (RCLoc i) alts _) = if contains i tracked && any binds alts then singleton i else empty
+    here _ = empty
+
+||| Whether `ty`, chosen for `p` from some of its reads, is consistent with the typed reads and the cases.
+fits : SortedMap Int (SortedSet PrimType) -> SortedSet Int -> Int -> NativeTy -> Bool
+fits reads apart p ty =
+    not (contains p apart) &&
+    (let tys = maybe [] Prelude.toList (lookup p reads)
+     in case ty of
+             TPrim t => all (== t) tys
+             _ => null tys)   -- a pointer or an erased value is no primitive's operand
+
+||| Whether native type `ty`, chosen from `p`'s reads, is consistent with every other read of `p` in `body`: every
+||| typed primitive read agrees with it (`primReadTypesFor`; none for a pointer), and no branch takes `p` apart as
+||| a constructor with fields (`takenApartFor`). A value whose type depends on another argument (`Value (vt k)`,
+||| `Dom o r`) fails one or the other when its branches disagree; promoting it at one branch's type hands the
+||| others a byte. See rc2/doc/native-type-inference.md's "Types that depend on a value".
+export
+consistentNative : (p : Int) -> RCExp -> NativeTy -> Bool
+consistentNative p body ty =
+    let one = SortedSet.singleton p
+    in fits (primReadTypesFor one body) (takenApartFor one body) p ty
+
+||| `consistentNative` for every entry of `chosen` at once, in one walk of `body` for all of them.
+export
+consistentNatives : RCExp -> SortedMap Int NativeTy -> SortedMap Int NativeTy
+consistentNatives body chosen =
+    let ids = SortedSet.fromList (keys chosen)
+        reads = primReadTypesFor ids body
+        apart = takenApartFor ids body
+    in SortedMap.fromList (filter (\(p, ty) => fits reads apart p ty) (SortedMap.toList chosen))
+
 ||| The single native `PrimType` top-level parameter `p` should be
 ||| shadowed at, if `body` reads it that way at all, and consistently
 ||| (every native-context use agrees on the same type) -- `Nothing` if
@@ -255,84 +350,11 @@ nativeArgTypesFor _ _ = empty
 ||| just asked about a whole function's own parameters rather than only
 ||| the ones an enclosing `RLoop` carries) -- one definition of this
 ||| analysis, not two kept in sync by hand.
-||| Every primitive type at which local `p` is an operand of a primitive op or a fused comparison anywhere in
-||| `e`, whatever the op's own result representation (boxed or native): the type that operand position
-||| requires (a cast's source type; a string op's string and index positions; the op's own type otherwise).
-||| Unlike `nativeArgTypes`, which counts only the reads Emit renders natively, this
-||| counts every typed read, so a conflict between branches is visible.
-export
-primReadTypes : (p : Int) -> RCExp -> SortedSet PrimType
-primReadTypes p e = fromList (here e) `union` concat (map (primReadTypes p) (children e))
-  where
-    at : RCLocal -> PrimType -> List PrimType
-    at a ty = if a == RCLoc p then [ty] else []
-    each : PrimType -> List RCLocal -> List PrimType
-    each ty = concatMap (\a => at a ty)
-    opReads : PrimFn arity -> Vect arity RCLocal -> List PrimType
-    opReads (Cast i _) [a] = at a i
-    opReads StrLength args = each StringType (toList args)
-    opReads StrHead args = each StringType (toList args)
-    opReads StrTail args = each StringType (toList args)
-    opReads StrReverse args = each StringType (toList args)
-    opReads StrAppend args = each StringType (toList args)
-    opReads StrIndex [s, i] = at s StringType ++ at i IntType
-    opReads StrCons [c, s] = at c CharType ++ at s StringType
-    opReads StrSubstr [i, n, s] = at i IntType ++ at n IntType ++ at s StringType
-    opReads (Add ty) args = each ty (toList args)
-    opReads (Sub ty) args = each ty (toList args)
-    opReads (Mul ty) args = each ty (toList args)
-    opReads (Div ty) args = each ty (toList args)
-    opReads (Mod ty) args = each ty (toList args)
-    opReads (Neg ty) args = each ty (toList args)
-    opReads (ShiftL ty) args = each ty (toList args)
-    opReads (ShiftR ty) args = each ty (toList args)
-    opReads (BAnd ty) args = each ty (toList args)
-    opReads (BOr ty) args = each ty (toList args)
-    opReads (BXOr ty) args = each ty (toList args)
-    opReads (LT ty) args = each ty (toList args)
-    opReads (LTE ty) args = each ty (toList args)
-    opReads (EQ ty) args = each ty (toList args)
-    opReads (GTE ty) args = each ty (toList args)
-    opReads (GT ty) args = each ty (toList args)
-    opReads _ _ = []   -- the Double functions, BelieveMe and Crash: no vote
-    -- a constant `case` on `p`: the type of its literals
-    constTy : Constant -> Maybe PrimType
-    constTy (Str _) = Just StringType
-    constTy (BI _) = Just IntegerType
-    constTy c = litRep c
-    here : RCExp -> List PrimType
-    here (ROp _ _ op args _) = opReads op args
-    here (RCmpCase _ op args _ _ _) = each (cmpOpTy op) (toList args)
-    here (RConstCase _ sc alts _) = if sc == RCLoc p then mapMaybe (\(MkRConstAlt c _) => constTy c) alts else []
-    here _ = []
-
-||| Whether local `p` is the scrutinee of a constructor `case` with an alternative that binds fields anywhere in
-||| `e`: then `p` is a heap constructor in that branch (`Maybe`, a record, a list), never a native value, even if
-||| another branch reads it as one (a parameter of type `Dom o r`: a `Bool` for one `o`, a `Maybe (List r)` for
-||| another). An enumeration's case (every alternative field-less, as `Bool`'s) does not count.
-export
-takenApart : (p : Int) -> RCExp -> Bool
-takenApart p e = here e || any (takenApart p) (children e)
-  where
-    binds : RConAlt -> Bool
-    binds (MkRConAlt _ _ _ args _) = not (null args)
-    here : RCExp -> Bool
-    here (RConCase _ sc alts _) = sc == RCLoc p && any binds alts
-    here _ = False
-
-||| Whether native type `ty`, chosen from `p`'s native reads, is consistent with every other read of `p` in `body`:
-||| every typed primitive read agrees with it (`primReadTypes`), and no branch takes `p` apart as a constructor
-||| with fields (`takenApart`). A value whose type depends on another argument (`Value (vt k)`, `Dom o r`) fails
-||| one or the other when its branches disagree; promoting it at one branch's type hands the others a byte.
-export
-consistentNative : (p : Int) -> RCExp -> PrimType -> Bool
-consistentNative p body ty = all (== ty) (Prelude.toList (primReadTypes p body)) && not (takenApart p body)
-
 export
 nativeArgType : Int -> RCExp -> Maybe PrimType
 nativeArgType p body =
     case Prelude.toList (nativeArgTypes p body) of
-         [ty] => if consistentNative p body ty then Just ty else Nothing
+         [ty] => if consistentNative p body (TPrim ty) then Just ty else Nothing
          _ => Nothing
 
 ||| Batch version of `nativeArgType`: every one of `ps`'s own verdict,
@@ -347,5 +369,8 @@ export
 nativeArgTypeBatch : List Int -> RCExp -> SortedMap Int PrimType
 nativeArgTypeBatch ps body =
     let found = nativeArgTypesFor (SortedSet.fromList ps) body
-    in SortedMap.fromList $ mapMaybe (\p => singleTypeFrom found p >>= \ty => if consistentNative p body ty then Just (p, ty) else Nothing) ps
+        chosen = SortedMap.fromList (mapMaybe (\p => map (\ty => (p, TPrim ty)) (singleTypeFrom found p)) ps)
+    in SortedMap.fromList (mapMaybe (\(p, ty) => case ty of
+                                                     TPrim t => Just (p, t)
+                                                     _ => Nothing) (SortedMap.toList (consistentNatives body chosen)))
 

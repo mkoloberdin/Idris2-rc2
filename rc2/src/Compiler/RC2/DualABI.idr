@@ -79,25 +79,22 @@ findLoopThroughLets _ _ = Nothing
 export
 paramEligibility : List Int -> RCExp -> List (Int, Maybe PrimType)
 paramEligibility argIds body =
-    map (\(p, mty) => (p, mty >>= agreesWithEveryRead p)) $
     case findLoopThroughLets empty body of
+         -- The loop slots' types may come from a loop spliced in after `Loop` ran, so they are checked
+         -- here; `nativeArgTypeBatch` checks its own (rc2/doc/native-type-inference.md's "Types that
+         -- depend on a value").
          Just (letReps, loopParams) =>
              let m = foldl (\mp, (i, r) => insert i r mp) letReps loopParams
-             in map (\p => (p, case lookup p m of
-                                     Just (RNative (TPrim ty)) => Just ty
-                                     Just (RInlineNative (TPrim ty)) => Just ty
+                 chosen = SortedMap.fromList (mapMaybe (\p => case lookup p m of
+                                                                  Just (RNative ty) => Just (p, ty)
+                                                                  Just (RInlineNative ty) => Just (p, ty)
+                                                                  _ => Nothing) argIds)
+                 ok = consistentNatives body chosen
+             in map (\p => (p, case lookup p ok of
+                                     Just (TPrim ty) => Just ty
                                      _ => Nothing)) argIds
          Nothing => let found = nativeArgTypeBatch argIds body
                     in map (\p => (p, lookup p found)) argIds
-  where
-    -- The native type the native reads chose stands only if no other primitive read of `p` -- a boxed one
-    -- included -- wants a different type. A parameter whose type depends on another argument
-    -- (`(k : Key) -> Value (vt k) -> ...`) holds a different primitive in each branch of a case on that
-    -- argument: a Bool read natively in one, an Integer cast or a String op in another. Promoting it at the
-    -- one branch's type hands every other branch a byte.
-    agreesWithEveryRead : Int -> PrimType -> Maybe PrimType
-    agreesWithEveryRead p ty =
-        if consistentNative p body ty then Just ty else Nothing
 
 
 ||| Every genuine (non-`RLoopContinue`) tail-position leaf of `e`, mapped
@@ -854,7 +851,7 @@ applyDualABI boolReturn nullTable defs = do
              let argIds = map fst args
                  params = paramEligibility argIds body
                  byCalls = callNativeParams ptrTable argIds body
-                 byNull = fromMaybe empty (lookup n nullTable)
+                 byNull = consistentNatives body (fromMaybe empty (lookup n nullTable))
                  eligible = mapMaybe (\(p, mty) => case mty of
                                                          Just ty => Just (p, TPrim ty)
                                                          Nothing => map (p,) (lookup p byCalls <|> lookup p byNull)) params
@@ -1094,12 +1091,8 @@ nativePromotionFor workers mLoopParams var ty body =
                   `union` callArgNativeReads workers var body)
                   `union` fromLoop
     in case Prelude.toList found of
-            [ty'] => if ty' == ty && consistent ty then Just ty else Nothing
+            [ty'] => if ty' == ty && consistentNative var body ty then Just ty else Nothing
             _ => Nothing
-  where
-    consistent : NativeTy -> Bool
-    consistent (TPrim t) = consistentNative var body t
-    consistent _ = not (takenApart var body)
 
 ||| Rewrite every direct, saturated, non-tail-position call in `e`
 ||| targeting a function `workers` has a worker for. `reps` threads the

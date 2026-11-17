@@ -4,7 +4,7 @@ module Main
 -- different primitive in each branch of the case on that argument. The constant-key call made DualABI
 -- promote it to the one branch's native type (uint8_t, read as a Bool), and the run-time-key calls then
 -- handed the Nat and the String branches a byte: a segfault. A promotion now stands only if every typed
--- read of the parameter agrees with it (`DualABI.primReadTypes`).
+-- read of the parameter agrees with it (`NativeUse.consistentNative`).
 
 data VT = AFlag | ACount | AText
 

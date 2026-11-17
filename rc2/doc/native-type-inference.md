@@ -559,19 +559,26 @@ was expected, a segfault. A fold over `Dom o` (`Bool` or `Maybe (List Nat)`) gav
 `NativeUse.consistentNative p body ty` keeps a native `ty` only if no read of `p` anywhere in
 `body` contradicts it:
 
-- every primitive type `p` is read at (`primReadTypes`) agrees with `ty`. Boxed reads count too:
-  an operand of an op (a cast's source type, a string op's positions, the op's own type otherwise;
-  the `Double` functions have no say), of a fused comparison, or the scrutinee of a constant
-  `case` (the type of its literals);
-- no constructor `case` on `p` has an alternative that binds fields (`takenApart`). There `p` is
-  a `Maybe`, a record or a list.
+- every primitive type `p` is read at agrees with `ty` (`primReadTypesFor`), and a pointer or an
+  erased value is read at none. Boxed reads count too: an operand of an op (a cast's source type, a
+  string op's positions, the op's own type otherwise, `Double` for the `Double` functions), of a
+  fused comparison, or the scrutinee of a constant `case` (the type of its literals);
+- no constructor `case` on `p` has an alternative that binds fields (`takenApartFor`). There `p`
+  is a `Maybe`, a record or a list.
 
 In code where each local has one type, no local is read at two types (`believe_me` aside), so
-the check costs nothing there. Every place that settles a native type asks it: `nativeArgType`,
-`nativeArgTypeBatch`, `DualABI.paramEligibility` (also for the loop slots it takes over, which
-can come from a loop spliced in after `Loop` ran), `CalleeTable.callArgOrOpNativeTy` (the loop
-variables `Loop` shadows) and `DualABI.nativePromotionFor`. `Test184DependentParam` (a worker),
-`Test185DependentFold` (a loop variable).
+the check costs nothing there. Every place that settles a native type asks it:
+
+- `nativeArgType` and `nativeArgTypeBatch` (the operand reads);
+- `CalleeTable.callNativeParams`, so `ptrParams` and `ptrCalleeTable` (a pointer passed on to a
+  pointer parameter), and `callArgOrOpNativeTy` (the loop variables `Loop` shadows);
+- `DualABI.paramEligibility` for the loop slots it takes over, which can come from a loop spliced
+  in after `Loop` ran, the parameters that only hold the world or an erased value, and
+  `nativePromotionFor`.
+
+`consistentNatives` checks a whole map of choices in one walk of the body. Tests:
+`Test184DependentParam` (a worker), `Test185DependentFold` (a loop variable),
+`Test186DependentPtr` (a pointer).
 
 ### What it does not catch
 
