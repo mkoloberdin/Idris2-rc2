@@ -23,19 +23,21 @@ import Data.Vect
 %default covering
 
 ||| The functions rc2 defines in place of upstream's.
-data Diverted = DAppend | DMap | DFilter | DMapMaybe
+data Diverted = DAppend | DMap | DFilter | DMapMaybe | DZipWith
 
 divertedName : Diverted -> Name
 divertedName DAppend = MN "rc2_append" 0
 divertedName DMap = MN "rc2_map" 0
 divertedName DFilter = MN "rc2_filter" 0
 divertedName DMapMaybe = MN "rc2_mapMaybe" 0
+divertedName DZipWith = MN "rc2_zipWith" 0
 
 divertedKey : Diverted -> String
 divertedKey DAppend = "append"
 divertedKey DMap = "map"
 divertedKey DFilter = "filter"
 divertedKey DMapMaybe = "mapMaybe"
+divertedKey DZipWith = "zipWith"
 
 ||| One stage of a fused loop: what one of the three element-wise functions does to an element.
 data Kind = KMap | KFilter | KMapMaybe
@@ -88,8 +90,9 @@ consumerName : Consumer -> List Kind -> Name
 consumerName c ks = MN ("rc2_" ++ consumerTag c ++ "_" ++ pack (map kindCode ks)) 0
 
 ||| A function of the program that takes one of its parameters apart as a list and passes the rest
-||| of it on only to one call of itself: `f ps = case p of [] => onNil; elem :: rest => onCons`, `p`
-||| the parameter at `pos` (doc/list-divert.md, "Walkers"). Whatever else it does, a chain can feed it.
+||| of it on only once, as the list of a walker (itself, or another one): `f ps = case p of [] =>
+||| onNil; elem :: rest => onCons`, `p` the parameter at `pos` (doc/list-divert.md, "Walkers").
+||| Whatever else it does, a chain can feed it.
 record Walker where
   constructor MkWalker
   params : List Name
@@ -98,6 +101,11 @@ record Walker where
   elem : Name
   rest : Name
   onCons : NamedCExp
+  ||| the walker the rest goes to (`f` itself, or another walker, as `intersperse`'s
+  ||| `mergeReplicate`), its number of arguments, and the position of the rest among them
+  next : Name
+  nextArity : Nat
+  nextPos : Nat
 
 Walkers : Type
 Walkers = SortedMap Name Walker
@@ -130,7 +138,7 @@ unionUsed : Used -> Used -> Used
 unionUsed = mergeLeft
 
 allDiverted : List Diverted
-allDiverted = [DAppend, DMap, DFilter, DMapMaybe]
+allDiverted = [DAppend, DMap, DFilter, DMapMaybe, DZipWith]
 
 isFun : String -> Name -> Bool
 isFun s n = show n == s
@@ -159,7 +167,10 @@ divert fc f args = case args of
                      _ => Nothing
            else Nothing
     [z, g, xs] =>
-        if not (isNil z) then Nothing
+        -- upstream's zipWith is naive already, but tests `xs` then `ys` through defaults, so it is
+        -- no walker; `rc2_zipWith` tests them in the same order as one `case` each
+        if isFun "Data.List.zipWith" f then Just (DZipWith, [z, g, xs])
+        else if not (isNil z) then Nothing
         else if isFun "Prelude.Types.List.mapAppend" f then Just (DMap, [g, xs])
         else if isFun "Prelude.Types.List.filterAppend" f then Just (DFilter, [g, xs])
         else if isFun "Prelude.Types.List.mapMaybeAppend" f then Just (DMapMaybe, [g, xs])
@@ -340,21 +351,39 @@ isRestCall f n pos rest (NmApp _ (NmRef _ g) as) =
                                       _ => False)
 isRestCall _ _ _ _ _ = False
 
-restCalls : Name -> Nat -> Nat -> Name -> NamedCExp -> Nat
-restCalls f n pos rest e = (if isRestCall f n pos rest e then 1 else 0) + sum (map (restCalls f n pos rest) (subs e))
 
-||| What `f`, with this definition, is as a walker, if it is one. Not one of the definitions this pass
-||| adds, which it already knows.
+||| The one call in `e` that has the local `rest` as an argument: the callee, its number of
+||| arguments and the position of `rest`.
+restCallIn : Name -> NamedCExp -> Maybe (Name, Nat, Nat)
+restCallIn rest e =
+    case e of
+         NmApp _ (NmRef _ g) as =>
+             case findIndex isRest as of
+                  Just i => Just (g, length as, finToNat i)
+                  Nothing => below
+         _ => below
+  where
+    isRest : NamedCExp -> Bool
+    isRest (NmLocal _ y) = y == rest
+    isRest _ = False
+
+    below : Maybe (Name, Nat, Nat)
+    below = case mapMaybe (restCallIn rest) (subs e) of
+                 (r :: _) => Just r
+                 [] => Nothing
+
+||| What `f`, with this definition, is as a walker, if the function its rest goes to is one too
+||| (`walkersOf` decides that). Not one of the definitions this pass adds, which it already knows.
 walkerOf : Name -> NamedDef -> Maybe Walker
 walkerOf f (MkNmFun args (NmConCase _ (NmLocal _ p) [a1, a2] Nothing)) =
-    if isPrefixOf "{rc2_" (show f) then Nothing else
+    if isPrefixOf "{rc2_" (show f) && f /= divertedName DZipWith then Nothing else
     case (findIndex (== p) args, listAlts a1 a2) of
          (Just k, Just (nilB, x, rest, consB)) =>
-             let n = length args
-                 pos = finToNat k
-             in if not (mentions p nilB) && not (mentions p consB)
-                     && readsOf rest consB == 1 && restCalls f n pos rest consB == 1
-                   then Just (MkWalker args pos nilB x rest consB)
+             let pos = finToNat k
+             in if not (mentions p nilB) && not (mentions p consB) && readsOf rest consB == 1
+                   then case restCallIn rest consB of
+                             Just (g, ga, gpos) => Just (MkWalker args pos nilB x rest consB g ga gpos)
+                             Nothing => Nothing
                    else Nothing
          _ => Nothing
   where
@@ -363,6 +392,31 @@ walkerOf f (MkNmFun args (NmConCase _ (NmLocal _ p) [a1, a2] Nothing)) =
     listAlts (MkNConAlt _ CONS _ [x, r] cb) (MkNConAlt _ NIL _ [] nb) = Just (nb, x, r, cb)
     listAlts _ _ = Nothing
 walkerOf _ _ = Nothing
+
+||| The walkers of `defs`: the functions of that shape whose rest goes to a walker, at its list,
+||| with as many arguments as it takes; the least set closed under that (a function whose rest
+||| goes to one that is not a walker is not one either).
+walkersOf : List (Name, FC, NamedDef) -> Walkers
+walkersOf defs = fix (SortedMap.fromList (mapMaybe (\(n, _, d) => map (\w => (n, w)) (walkerOf n d)) defs))
+  where
+    ok : Walkers -> Walker -> Bool
+    ok ws w = case lookup w.next ws of
+                   Just w' => w'.pos == w.nextPos && length w'.params == w.nextArity
+                   Nothing => False
+
+    fix : Walkers -> Walkers
+    fix ws = let ws' = SortedMap.fromList (filter (\(_, w) => ok ws w) (SortedMap.toList ws))
+             in if length (SortedMap.toList ws') == length (SortedMap.toList ws) then ws else fix ws'
+
+||| `f` and every walker its rest reaches, each once.
+reached : Walkers -> Name -> List (Name, Walker)
+reached ws f = go [] f
+  where
+    go : List Name -> Name -> List (Name, Walker)
+    go seen g = if elem g seen then [] else
+                case lookup g ws of
+                     Just w => (g, w) :: go (g :: seen) w.next
+                     Nothing => []
 
 ||| The call of the walker `f` whose list is a chain, as a call of its copy that the chain feeds.
 walkerCall : Walkers -> FC -> FC -> Name -> List NamedCExp -> Maybe (NamedCExp, Used)
@@ -375,7 +429,7 @@ walkerCall ws fc rfc f args = do
     guard (isNothing ch.end && not (null ks) && length ks <= maxStages)
     let name = thruName f ks
     pure (NmApp fc (NmRef rfc name) (map snd ch.stages ++ replaceAt w.pos ch.list args),
-          SortedMap.singleton (show name) (WThru f w ks))
+          SortedMap.fromList [ (show (thruName g ks), WThru g w' ks) | (g, w') <- reached ws f ])
 
 ||| What the call `f args` (the arguments already rewritten) becomes: a diverted upstream call, a
 ||| fused loop for a chain of rc2's own, or a consumer's loop; `Nothing` when it stays as it is.
@@ -385,8 +439,11 @@ tryCall fuse ws fc rfc f args =
          Just (d, dargs) =>
              let call' = NmApp fc (NmRef rfc (divertedName d)) dargs
                  s' = SortedMap.singleton (divertedKey d) (WDiv d)
-             in case the (Maybe (NamedCExp, Used)) (if fuse then parseChain call' >>= fuseChain fc rfc else Nothing) of
-                     Just (fused, u) => Just (fused, unionUsed s' u)
+                 fused = the (Maybe (NamedCExp, Used)) $
+                             if not fuse then Nothing
+                             else maybe (walkerCall ws fc rfc (divertedName d) dargs) Just (parseChain call' >>= fuseChain fc rfc)
+             in case fused of
+                     Just (e', u) => Just (e', unionUsed s' u)
                      Nothing => Just (call', s')
          Nothing =>
              if not fuse then Nothing
@@ -395,8 +452,12 @@ tryCall fuse ws fc rfc f args =
                        Nothing => maybe (walkerCall ws fc rfc f args) Just (consume fc rfc f args)
 
 ||| `let x = e in call [.., x, ..]` where nothing else reads `x`: the call with `e` for that argument,
-||| when that is a call to rewrite.
+||| when that is a call to rewrite. The call may sit under further lets that do not read `x`
+||| (inlining binds each argument in its own let).
 letCall : (fuse : Bool) -> Walkers -> Name -> NamedCExp -> NamedCExp -> Maybe (NamedCExp, Used)
+letCall fuse ws x v (NmLet fc y w b) =
+    if y == x || mentions x w then Nothing
+    else map (\(b', u) => (NmLet fc y w b', u)) (letCall fuse ws x v b)
 letCall fuse ws x v (NmApp fc (NmRef rfc f) args) =
     if not fuse then Nothing else
     let numbered : List (Nat, NamedCExp) = zip (natsFrom 0 args) args
@@ -506,6 +567,15 @@ definition DFilter =
                 -- a Bool is a `B8` constant (upstream's `Compiler.Opts.Constructor.enumTag`)
                 [ MkNConstAlt (B8 1) (cons (var "x") (call (divertedName DFilter) [var "p", var "rest"]))
                 , MkNConstAlt (B8 0) (call (divertedName DFilter) [var "p", var "rest"]) ]
+                Nothing
+definition DZipWith =
+    MkNmFun [local "f", local "xs", local "ys"] $
+        listCase (var "xs") nil $
+            NmConCase emptyFC (var "ys")
+                [ MkNConAlt (builtin "NIL") NIL (Just 0) [] nil
+                , MkNConAlt (builtin "CONS") CONS (Just 1) [local "y", local "rest2"]
+                      (cons (NmApp emptyFC (NmApp emptyFC (var "f") [var "x"]) [var "y"])
+                            (call (divertedName DZipWith) [var "f", var "rest", var "rest2"])) ]
                 Nothing
 definition DMapMaybe =
     MkNmFun [local "f", local "xs"] $
@@ -641,7 +711,8 @@ segDefinition c kss =
 
 ||| The walker `f` with a chain of these stages for its list: its own definition, each element first
 ||| through the stages. One a stage drops goes on to the rest with every other argument as it was;
-||| a kept one is the walker's element, and its one call of itself on the rest a call of this copy.
+||| a kept one is the walker's element, and its one call on the rest (of itself or of the walker the
+||| rest goes to) a call of that walker's copy for the same stages.
 thruDefinition : Name -> Walker -> List Kind -> NamedDef
 thruDefinition f w ks =
     MkNmFun (map (local . stageName) (indices ks) ++ w.params) $
@@ -667,9 +738,9 @@ thruDefinition f w ks =
     skip = call name (fs ++ replaceAt w.pos (NmLocal emptyFC w.rest) (map (NmLocal emptyFC) w.params))
 
     retarget : NamedCExp -> NamedCExp
-    retarget e = if isRestCall f (length w.params) w.pos w.rest e
+    retarget e = if isRestCall w.next w.nextArity w.nextPos w.rest e
                     then (case e of
-                               NmApp fc _ as => NmApp fc (NmRef fc name) (fs ++ as)
+                               NmApp fc _ as => NmApp fc (NmRef fc (thruName w.next ks)) (fs ++ as)
                                other => other)
                     else mapSubs retarget e
 
@@ -705,7 +776,7 @@ applyListDivert fuse main defs =
     in (main', defs' ++ added)
   where
     ws : Walkers
-    ws = if fuse then SortedMap.fromList (mapMaybe (\(n, _, d) => map (\w => (n, w)) (walkerOf n d)) defs) else SortedMap.empty
+    ws = if fuse then walkersOf (defs ++ [(divertedName DZipWith, emptyFC, definition DZipWith)]) else SortedMap.empty
 
     rewriteDef : NamedDef -> (NamedDef, Used)
     rewriteDef (MkNmFun args b) = let (b', s) = divertCalls fuse ws b in (MkNmFun args b', s)

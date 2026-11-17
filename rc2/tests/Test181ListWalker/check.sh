@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # Post-compile check run by verify.sh (see its "Per-test checks"
 # comment); by hand: ./TestN/check.sh build TestN
-# --directive listfuse: the walkers sumSq, pairs and weigh get a copy that a chain feeds
+# --directive listfuse: the walkers sumSq, pairs and weigh, evens and odds (which pass the rest
+# to each other), intersperse (to mergeReplicate) and zipWith (as rc2_zipWith, fed by a map and, through zip, by a filter) get a copy that a chain feeds
 # (rc2_thru_*), twiceRest (which reads the rest twice) does not, and the output is the same.
 set -u
 TMP="$1"
@@ -19,8 +20,8 @@ if ! ( cd "$tests" && "$rc2" --cg rc2 --directive dumpnamed --directive listfuse
     fail "listfuse build failed, see $on.log"
     exit 0
 fi
-for w in sumSq pairs weigh; do
-    if grep -q "rc2_thru_Main.${w}_" "$on.named"; then pass "listfuse: $w is fed by a chain"; else fail "listfuse: no copy of $w in $on.named"; fi
+for w in Main.sumSq_ Main.pairs_ Main.weigh_ Main.evens_ Main.odds_ Data.List.intersperse_ Data.List.mergeReplicate_ "{rc2_zipWith:0}_m" "{rc2_zipWith:0}_f"; do
+    if grep -qF "rc2_thru_${w}" "$on.named"; then pass "listfuse: $w is fed by a chain"; else fail "listfuse: no copy of $w in $on.named"; fi
 done
 if grep -q "rc2_thru_Main.twiceRest" "$on.named"; then
     fail "listfuse: twiceRest reads the rest twice and was copied anyway"
