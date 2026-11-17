@@ -452,8 +452,12 @@ tryCall fuse ws fc rfc f args =
                        Nothing => maybe (walkerCall ws fc rfc f args) Just (consume fc rfc f args)
 
 ||| `let x = e in call [.., x, ..]` where nothing else reads `x`: the call with `e` for that argument,
-||| when that is a call to rewrite.
+||| when that is a call to rewrite. The call may sit under further lets that do not read `x`
+||| (inlining binds each argument in its own let).
 letCall : (fuse : Bool) -> Walkers -> Name -> NamedCExp -> NamedCExp -> Maybe (NamedCExp, Used)
+letCall fuse ws x v (NmLet fc y w b) =
+    if y == x || mentions x w then Nothing
+    else map (\(b', u) => (NmLet fc y w b', u)) (letCall fuse ws x v b)
 letCall fuse ws x v (NmApp fc (NmRef rfc f) args) =
     if not fuse then Nothing else
     let numbered : List (Nat, NamedCExp) = zip (natsFrom 0 args) args

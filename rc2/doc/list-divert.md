@@ -181,7 +181,11 @@ call of a definition added to the program, named after its stages, first applied
 where one argument of the call is `l` and nothing else reads `l` is the call with the chain for
 that argument, and then one of the rows above. `length (filter p xs)` in a function
 that inlining took apart is `let l = rc2_filter p xs in lengthPlus [0, l]`, and becomes
-`rc2_length_f p 0 xs`.
+`rc2_length_f p 0 xs`. The call may sit under further lets that do not read `l` (inlining binds
+each argument in its own let): `zip (filter p xs) ys` inlined is
+`let l = rc2_filter p xs in let m = ys in rc2_zipWith [g, l, m]`, and becomes
+`let m = ys in rc2_thru_{rc2_zipWith:0}_f p g xs m`. The chain is then evaluated after those lets
+rather than before, which "Design decision: the order of effects is not kept" below allows.
 
 The loops the rewrite calls are these (`B8 1` is `True`; `f0`, `f1`, ... are the stage functions in
 order):
