@@ -79,6 +79,7 @@ findLoopThroughLets _ _ = Nothing
 export
 paramEligibility : List Int -> RCExp -> List (Int, Maybe PrimType)
 paramEligibility argIds body =
+    map (\(p, mty) => (p, mty >>= agreesWithEveryRead p)) $
     case findLoopThroughLets empty body of
          Just (letReps, loopParams) =>
              let m = foldl (\mp, (i, r) => insert i r mp) letReps loopParams
@@ -88,6 +89,16 @@ paramEligibility argIds body =
                                      _ => Nothing)) argIds
          Nothing => let found = nativeArgTypeBatch argIds body
                     in map (\p => (p, lookup p found)) argIds
+  where
+    -- The native type the native reads chose stands only if no other primitive read of `p` -- a boxed one
+    -- included -- wants a different type. A parameter whose type depends on another argument
+    -- (`(k : Key) -> Value (vt k) -> ...`) holds a different primitive in each branch of a case on that
+    -- argument: a Bool read natively in one, an Integer cast or a String op in another. Promoting it at the
+    -- one branch's type hands every other branch a byte.
+    agreesWithEveryRead : Int -> PrimType -> Maybe PrimType
+    agreesWithEveryRead p ty =
+        if consistentNative p body ty then Just ty else Nothing
+
 
 ||| Every genuine (non-`RLoopContinue`) tail-position leaf of `e`, mapped
 ||| by `leaf` (given `reps`, the natives known so far: threaded through
