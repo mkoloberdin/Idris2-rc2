@@ -1094,8 +1094,12 @@ nativePromotionFor workers mLoopParams var ty body =
                   `union` callArgNativeReads workers var body)
                   `union` fromLoop
     in case Prelude.toList found of
-            [ty'] => if ty' == ty then Just ty else Nothing
+            [ty'] => if ty' == ty && consistent ty then Just ty else Nothing
             _ => Nothing
+  where
+    consistent : NativeTy -> Bool
+    consistent (TPrim t) = consistentNative var body t
+    consistent _ = not (takenApart var body)
 
 ||| Rewrite every direct, saturated, non-tail-position call in `e`
 ||| targeting a function `workers` has a worker for. `reps` threads the

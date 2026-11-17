@@ -295,9 +295,15 @@ primReadTypes p e = fromList (here e) `union` concat (map (primReadTypes p) (chi
     opReads (GTE ty) args = each ty (toList args)
     opReads (GT ty) args = each ty (toList args)
     opReads _ _ = []   -- the Double functions, BelieveMe and Crash: no vote
+    -- a constant `case` on `p`: the type of its literals
+    constTy : Constant -> Maybe PrimType
+    constTy (Str _) = Just StringType
+    constTy (BI _) = Just IntegerType
+    constTy c = litRep c
     here : RCExp -> List PrimType
     here (ROp _ _ op args _) = opReads op args
     here (RCmpCase _ op args _ _ _) = each (cmpOpTy op) (toList args)
+    here (RConstCase _ sc alts _) = if sc == RCLoc p then mapMaybe (\(MkRConstAlt c _) => constTy c) alts else []
     here _ = []
 
 ||| Whether local `p` is the scrutinee of a constructor `case` with an alternative that binds fields anywhere in

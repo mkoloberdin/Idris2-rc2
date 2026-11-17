@@ -142,5 +142,6 @@ callArgOrOpNativeTy table p body =
     let calls = maybe empty id (lookup p (callArgNativeReadsFor (tableLookup table) (SortedSet.singleton p) body))
         ops = SortedSet.fromList (map TPrim (Prelude.toList (nativeArgTypes p body)))
     in case Prelude.toList (ops `union` calls) of
-            [ty] => Just ty
+            [TPrim ty] => if consistentNative p body ty then Just (TPrim ty) else Nothing
+            [ty] => if takenApart p body then Nothing else Just ty
             _ => Nothing
