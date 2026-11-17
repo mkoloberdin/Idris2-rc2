@@ -13,7 +13,7 @@
 
 ## 何を置き換えるのか、なぜ置き換えるのか
 
-rc2は、上流の一部の`%foreign`関数を、**Cを生成する時点で**書き換える。宣言が指定するC関数の代わりに、`String`の値そのものを受け取るrc2独自の関数をプログラムに呼ばせる。理由は次の2つで、対象はこれらの関数だけである(`Compiler/RC2/ForeignDivert.idr`の`diverted`がその一覧である)。
+rc2は、上流の一部の`%foreign`宣言を、**プログラムを`RCDef`に変換する時点で**(`normalizeTop`。Cを生成するより前)書き換える。宣言が指定するC関数の代わりに、`String`の値そのものを受け取るrc2独自の関数をプログラムに呼ばせる。理由は次の2つで、対象はこれらの関数だけである(`Compiler/RC2/ForeignDivert.idr`の`diverted`がその一覧である)。
 
 - **リーク。** `char *`を返す`%foreign`の汎用ラッパは、結果を新しい`String`にコピーし、元のポインタを解放しない。ポインタをライブラリが所有している場合はこれが正しいが、rc2のためだけにバッファを`malloc`する関数(`fastPack`、`fastConcat`)では誤りである。
 - **埋め込みNUL。** rc2の`String`は長さ(`IDRIS2RC2_String.len`)を持ち、NULバイトを保持できる。`String`を`char *`として受け取る`%foreign`や、`char *`を返す`%foreign`は、最初のNUL以降をすべて失う(`strlen`、`strncpy`、C文字列を読むコンストラクタ)。置き換え先の関数は、代わりに`len`を使う。

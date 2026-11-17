@@ -215,7 +215,7 @@ isReuseConsumingOp _ = False
 ## ファイル
 
 - `rc2/support/rc2/numeric.h`: `IDRIS2RC2_INTEGER_BINOP`、`IDRIS2RC2_INTEGER_SHIFTOP`、`idris2rc2_negate_Integer`、およびこの2つのマクロから作った10個の実体化。拡張では、`IDRIS2RC2_INTTYPES_TAGGED`/`IDRIS2RC2_INTTYPES_REUSABLE`(従来の1つだった`IDRIS2RC2_INTTYPES`の分割)、`IDRIS2RC2_DEFOP_REUSE`、`IDRIS2RC2_DOUBLE_BINOP`、手書きの`Int64`/`Double`用`negate`も加わった。
-- `rc2/support/rc2/idris2rc2_strings.c`: 上で述べた6つの文字列プリミティブ。
+- `rc2/support/rc2/idris2rc2_strings.c`: 後述の「文字列演算」の6つの文字列プリミティブ。
 - `rc2/src/Compiler/RC2/Emit/Util.idr`: `isReuseConsumingOp`。拡張による`Int64Type`/`Bits64Type`/`DoubleType`のケースと、二重dropのバグの修正で追加した、対応する`IntType`のケースを含む。
 - `rc2/src/Compiler/RC2/Emit.idr`: `emitRC (ROp ...)`の、`isReuseConsumingOp`で制御される2回の`removeVars`のスキップ。
 - `rc2/tests/Test49IntegerOpReuse.idr`: `Integer`の仕組みと、同じファイルの末尾に統合した`Int64`/`Bits64`/`Double`の拡張の、両方の回帰テスト。

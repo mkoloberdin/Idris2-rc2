@@ -2,9 +2,9 @@
 
 (原文: `doc/sort-vs-chez.md`。内容が乖離した場合は原文を正とする。)
 
-`TODO.md`から移した。未解決の原因は`TODO.md`に残している。
+`TODO.md`から移した。未解決のもの(末尾の内訳)は`TODO.md`に残している。
 
-疑似乱数の`Int` 100万個に対する`Data.List.sort`は、rc2で4.18s、Chezで1.23sかかった。原因1は修正済みであり(`Compiler.RC2.DeadArgs`、`rc2/doc/dead-args.md`)、これで`sort`は3.21sになった。さらに`rc2/doc/constructor-layout.md`でコンストラクタのセルを小さくして3.12sになった。それ以外の原因は未解決である。各原因は、`Data.List`自身のコードのコピーに対する実験で切り分けた。
+疑似乱数の`Int` 100万個に対する`Data.List.sort`は、rc2で4.18s、Chezで1.23sかかった。原因1は修正済みであり(`Compiler.RC2.DeadArgs`、`rc2/doc/dead-args.md`)、これで`sort`は3.21sになった。さらに`rc2/doc/constructor-layout.md`でコンストラクタのセルを小さくして3.12sになった。それ以外の原因は後に修正した(下の一覧)。各原因は、`Data.List`自身のコードのコピーに対する実験で切り分けた。
 
 | 版 | 時間 |
 |---|---|
@@ -18,7 +18,7 @@
 1. **修正済み: 使われない引数が入力リストを生かし続けていた**(約1.0s)。フロントエンドが`where`に付け加える引数(`KNOWN-BUGS.md`)が、`splitRec`のループの間ずっとリストの先頭を保持し、セルの再利用を妨げていた。`rc2/doc/dead-args.md`を参照。
 2. **修正済み: 比較関数がまったく特殊化されない。** SpecClosureは、`sortBy`から`mergeBy`へそのまま渡されるクロージャを追うようになった。`sort`は1.49sから1.11sになり、Chezの1.23sを下回った(`rc2/doc/speculative-closure-specialization.md`の「Transitive specialisation」)。
 3. **修正済み: アトミックな参照カウント。** プログラムがマルチスレッドになるまでは通常の操作にした。`sort`は3.17sから2.45sになった(`rc2/doc/hybrid-refcount.md`)。
-4. **glibcのmalloc**(mimallocで-33%)。後述の「a small-object allocator in the runtime」を参照。
+4. **修正済み: glibcのmalloc**(mimallocで-33%)。小さなセルについては、rc2独自のセルプールがこれを置き換える(`rc2/doc/small-object-allocator.md`の「Results」)。
 5. **修正済み: ボックス化された`Int`。** 62ビットに収まる`Int`は即値になった(`rc2/doc/immediate-ints.md`)。
 
 `DeadArgs`の後(3.21s)に計測し直した結果は次のとおりである。

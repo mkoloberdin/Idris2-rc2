@@ -583,7 +583,8 @@ Stage 3c+5(FFI呼び出し箇所のインライン化)について。`rc2/tests/
     `applyCallSiteRewrite`は、Stage 3cの、元の名前をキーとするテーブルを明示的な引数として受け取り、`MkRCFun`から作る`workerTable`に`mergeWith const`で併合する。それ以外は変わらない。Stage 4自身は、Stage 5の存在を知らない。
   - `inlineFFIWorkersExp`/`inlineFFIWorkers`(Stage 5)。`RAppNameRep`を`RAppFFIInline`へ書き換える、木全体の書き換えで、`applyCallSiteRewrite`の後に動き、Stage 3cの、workerの名前をキーとするテーブルを使う。
 - `rc2/src/Compiler/RC2/RCExp.idr`: `MkRCFun`の新しい形、`RAppNameRep`(参照リークの修正のために追加した`postDrop`フィールドを、`ROp`のものと同じ形で持つようになった)、`RAppFFIInline`(Stage 5)。`RAppFFIInline`は、`%foreign`宣言の`ccs`/`fargs`/`ret`のフィールドをそのまま持つ。`RAppNameRep`の`argReps`/`retRep`とは違い、意図的に事前計算していない。置き換え元の`RAppNameRep`から、そのまま引き継ぐ`postDrop`フィールドも持つ。
-- `rc2/src/Compiler/RC2/NativeUse.idr`: `nativeArgType`/`nativeArgTypes`/`stripOwnership`を、`Compiler.RC2.DualABI`が再利用できるように`export`した。`renameRCExp`には、防御的な`RAppNameRep`の通過の節を追加した(`postDrop`の名前の付け替えも行う)。
+- `rc2/src/Compiler/RC2/NativeUse.idr`: `nativeArgType`/`nativeArgTypes`を、`Compiler.RC2.DualABI`が再利用できるように`export`した。
+- `rc2/src/Compiler/RC2/Rewrite.idr`: 同じ再利用のために`stripOwnership`を`export`した。`renameRCExp`には、防御的な`RAppNameRep`の通過の節を追加した(`postDrop`の名前の付け替えも行う)。
 - `rc2/src/Compiler/RC2/RC.idr`: `normalizeDef`/`annotateDef`を、`MkRCFun`の新しい形に合わせて更新した。`annotate`には、防御的な`RAppNameRep`の通過の節を追加した。
 - `rc2/src/Compiler/RC2/MutualLoop.idr`: `MkRCFun`の新しい形に合わせて更新した(マージ関数と各メンバーのwrapperは、このパスの設計どおり、どちらも無条件につねに`RBoxed`)。
 - `rc2/src/Compiler/RC2/Emit.idr`: 次を含む。

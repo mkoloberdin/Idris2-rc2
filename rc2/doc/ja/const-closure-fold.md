@@ -18,7 +18,7 @@
 RCConstPartial : Name -> (missing : Nat) -> (caps : List RCLocal) -> RCLocal
 ```
 
-`RCConstCon`と違い、これは真の葉である。引数を何も埋めていないクロージャは、捕捉した引数をまったく持たないので、再帰してたどるべき入れ子がない。
+この文書が扱う形では、`caps`は空である(`RCConstPartial n missing []`)。`RCConstCon`と違い、これは真の葉である。引数を何も埋めていないクロージャは、捕捉した引数をまったく持たないので、再帰してたどるべき入れ子がない。(捕捉した値が定数で`caps`が空でないクロージャは、最後の節で扱う。)
 
 `IsConstPartialLocal`は、専用の狭いウィットネス型である(`RCConstCon`に対する`IsConstLocal`と同じ考え方で作った)。`IsAnyConstLocal`は5つ目のコンストラクタ`ItIsConstPartial2`を持つ。このため、`RCConstPartial`に畳み込まれた辞書のフィールドは、`RCConstCon`が自身のフィールドにすでに課している`All IsAnyConstLocal args`の義務を、同じように満たす。`RCConstPartial`を構築するのは、`Compiler.RC2.ConstFold`だけである。
 
@@ -120,7 +120,7 @@ typedef struct {
 
 ### 畳み込み済みクロージャの飽和適用は直接呼び出しになった
 
-このギャップの半分は、実は少しも難しくなかった。`RCConstPartial`は、**捕捉した値を持たない**真の葉である。したがってその`missing`は、呼び出し先の残りのアリティ全体であり、ちょうどその数の引数を与える適用には、先送りされるものが何も残らない。これは単なる直接呼び出しである。`foldConst`自身の`RApp`のケースが、これを書き換える。
+このギャップの半分は、実は少しも難しくなかった。`RCConstPartial n missing []`は、**捕捉した値を持たない**真の葉である。したがってその`missing`は、呼び出し先の残りのアリティ全体であり、ちょうどその数の引数を与える適用には、先送りされるものが何も残らない。これは単なる直接呼び出しである。`foldConst`自身の`RApp`のケースが、これを書き換える。
 
 ```idris
 RApp fc lazy (RCConstPartial n missing []) args   -- length args == missing
@@ -135,7 +135,7 @@ RApp fc lazy (RCConstPartial n missing []) args   -- length args == missing
 
 これらのどれよりも大きいのは、*加わる*ものである。**名前付きの**呼び出しになるため、`Compiler.RC2.SpecClosure`、`Compiler.RC2.LateInline`、`Compiler.RC2.DualABI`のすべてが、その中を見通せるようになる。`RApp`は、これらのどれから見ても不透明である。
 
-idris2-lspのビルド全体で計測した。16,400個の`apply`ノードのうち、4,842個が定数クロージャを対象にしていて、そのうち3,881個がそれを飽和させていた。`apply`は16,400から12,519に、`call`は49,530から53,409になった。不足適用(`length args < missing`。残りの961個)は、引き続き本物のクロージャを必要とし、変わらない。過剰適用は起こりえない。`RC.idr`自身の`collectAppChain`が、飽和した地点を越えて連鎖をまとめることがないからである。
+idris2-lspのビルド全体で計測した。16,400個の`apply`ノードのうち、4,842個が定数クロージャを対象にしていて、そのうち3,881個がそれを飽和させていた。`apply`は16,400から12,519に、`call`は49,530から53,409になった。不足適用(`length args < missing`。残りの961個)は、引き続き本物のクロージャを必要とし、変わらない。過剰適用は、`RC.idr`自身の`collectAppChain`からは生じない。`collectAppChain`は飽和した地点を越えて連鎖をまとめることがないからである。しかし特殊化が過剰適用を作ることがある。後述の「畳み込み済みクロージャの過剰適用」を参照。
 
 ### まだ残っていること
 
@@ -245,11 +245,11 @@ RV _ cval@(RCConstPartial {}) =>
 
 ## 定数を捕捉するクロージャ(`RCConstPartial`)
 
-捕捉した値がすべて定数(リテラル、`RCEmptyCon`、`RCConstCon`、`RCConstPartial`、または別の`RCConstPartial`)である`partial f missing caps`は、それ自体が定数である。`ConstFold`はこれを`RCConstPartial f missing caps`にし、`Emit.Util`(`boxedConstPartialExpr`)は、異なる値ごとに1回、不死の`IDRIS2RC2_ConstClosureArgs<n>`(`IDRIS2RC2_Closure`のレイアウト。`arity = filled + missing`、`filled = length caps`、捕捉した値は`args`に入る)をステージングする。IRのダンプでは`#f/missing~closure(caps)`と表示される。捕捉を持たないクロージャは`RCConstPartial`のままである。
+捕捉した値がすべて定数(リテラル、`RCEmptyCon`、`RCConstCon`、または捕捉した値の有無を問わず別の`RCConstPartial`)である`partial f missing caps`は、それ自体が定数である。`ConstFold`はこれを`RCConstPartial f missing caps`にし、`Emit.Util`(`boxedConstPartialExpr`)は、異なる値ごとに1回、不死の`IDRIS2RC2_ConstClosureArgs<n>`(`IDRIS2RC2_Closure`のレイアウト。`arity = filled + missing`、`filled = length caps`、捕捉した値は`args`に入る)をステージングする。IRのダンプでは`#f/missing~closure(caps)`と表示される。捕捉を持たないクロージャは、捕捉した値のない(`caps = []`)同じコンストラクタであり、上の各節が扱う形である。
 
 コード生成は以前から、定数を対象とする`RUnderApp`に出会ったとき、そのようなクロージャをstaticにしていた(`staticClosure`、`static-closures.md`)。したがって、ここでの利点は確保ではなくIRにある。`Emit`より前のパスにとって、クロージャが定数の値になる。定数を捕捉するクロージャのコンストラクタである辞書は`RCConstCon`に畳み込まれ、それに対する`case`とフィールドの`apply`は解決され、クロージャは値として比較・重複除去される。
 
-- その`apply`は、`RCConstPartial`の場合と同じように、捕捉した値を先頭にして解決される。`length ys == missing`なら呼び出し`f (caps ++ ys)`になり、引数がそれより少なければ`caps ++ ys`を捕捉した`partial`になる(次の回の畳み込みがそれを見れば、これもまた定数になる)。クロージャに足りない数より多い引数の適用は、`KnownPartial`によって、飽和させる呼び出しと残りの`apply`に分割される。
+- その`apply`は、捕捉を持たない形の場合と同じように、捕捉した値を先頭にして解決される。`length ys == missing`なら呼び出し`f (caps ++ ys)`になり、引数がそれより少なければ`caps ++ ys`を捕捉した`partial`になる(次の回の畳み込みがそれを見れば、これもまた定数になる)。クロージャに足りない数より多い引数の適用は、`KnownPartial`によって、飽和させる呼び出しと残りの`apply`に分割される。
 - 捕捉した値の中に定数コンストラクタ(インターフェース辞書)があると、そのクロージャは`RUnderApp`のまま残る。`SpecClosure`は、その箇所で呼び出し先を辞書について特殊化する(`underAppSites`、`Test131SpecConstConCapture`)が、`RCConstPartial`の中からではそれができないためである。
 - 捕捉した値の名前を付け替えたり、作り直したりすることはない。`FunDedup.renameLocalN`が変えるのは関数と足りない数だけである(そのため`FwdAlias`と`ArityRaise`のラッパーの畳み込みがここに届く)。捕捉した値の中の定数は、定数コンストラクタに対する`FwdAlias`と同じように、自身の関数を生かし続ける。
 - 適用しても、これが変わることはない。不死なので`idris2rc2_isUnique`は偽である。最後の引数に届かない適用はこれをコピーし、届く適用は捕捉した値を`dup`して関数を呼ぶ。

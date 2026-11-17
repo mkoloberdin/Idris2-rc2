@@ -287,7 +287,7 @@ rc2は完全に独立したパッケージであり、`idris2-src`を編集す�
 
 - `Reuse.idr`の`tryClaim`/`tryConsume`/`resolveReuse`
 - `ConAltNative.idr`の`peelWrappers`/`applyConAltNativeExp`
-- `MutualLoop.idr`の`tailCallTargets`/`buildGroup` (名前の付け替えを、完全に`Loop.idr`の`renameRCExp`に任せている。これは最初の実装と同時にすでに修正済みである)
+- `MutualLoop.idr`の`tailCallTargets`/`buildGroup` (名前の付け替えを、完全に`Rewrite.idr`の`renameRCExp`に任せている。これは最初の実装と同時にすでに修正済みである)
 - `DualABI.idr`の`tailValueReps`/`applyCallSiteRewriteBody`
 
 特定のノードの一覧を挙げていたコメントは、そのことが明示されるよう更新した。振る舞いの変更は不要だった。`refc-suite`の全体 (19/19) とスモークテスト (23/23) の回帰スイートは、途中の変更を通じて通り続けた。新しいノードも、`Emit.idr`の`where`節のリファクタリング (Part Aの`cTypeOfCFType`/`extractValue`/`packCFType`をトップレベルに引き上げたもの) も、何も後退させなかったことが確認できた。
