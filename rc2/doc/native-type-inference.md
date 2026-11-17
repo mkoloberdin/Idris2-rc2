@@ -634,8 +634,84 @@ type depends on another value: a type variable is the same thing (the fold's `b`
 polymorphic field's type is lost with the scrutinee's type arguments, and a lambda's binder has no
 type at all. What can be built is positive evidence only: a declared type whose representation is
 fixed (a newtype judged by its field), or producers that are all native values of one type, and
-everything else unknown and kept boxed across boundaries. TODO.md plans it as a directive, opt-in
-until measured.
+everything else unknown and kept boxed across boundaries. "The strict mode" below is the declared-type
+half of that; TODO.md keeps the producer half.
+
+## The strict mode (`--directive strictnative`)
+
+The check above only vetoes when a contradiction is visible. The strict mode adds the positive
+side: a value is held natively across a function boundary only where its declared type shows the
+representation. Everything else is unknown and stays boxed. It is opt-in (`Compiler.RC2.StrictNative`).
+
+**The table.** `declaredTable` reads each function's declared type (`lookupCtxtExact`, normalized
+with the binders instantiated with `Erased`, so a type that depends on one is stuck) and classifies
+each compiled argument and the result:
+
+| declared type | may be held as |
+|---|---|
+| a primitive type | that type |
+| a type with no constructors (`Ptr`, `AnyPtr`, `Struct`, an external type) | a pointer |
+| an enumeration (nullary constructors only, upstream's `ENUM n`) | `Bits8`, `Bits16` or `Bits32`, as `enumTag` |
+| `Nat` | `Integer` |
+| a function type, `Lazy`, any other constructor type | boxed only |
+| a newtype | what its field's type allows (upstream erases the constructor) |
+| a stuck application, a type variable, no declared type | unknown |
+
+An `IO a` result is the world as one more binder and `a` as the result; a newtype of a function (a
+record of an `IO`) is that function, looked through to a fixed depth. A compiled argument is matched
+to its binder by name: `{arg:N}` is binder `N`, `{ext:K}` the `K`th binder after the case tree's
+arguments (`Compiler.Inline.mergeLambdas`), a copy `ArityRaiseCExp` made (`raisedName`) the original's
+arguments and the declared type's last binder, which has to be the world (`DeadArgs` may have removed
+any of the arguments before it). Any other name, or arguments that do not account for the binders, make
+the whole function unknown. `--directive dumpstrict` writes the table to `<output>.strict` and each
+function's binders to `<output>.binders`.
+
+**Where it is asked.** The table goes into `NativeUse.consistentNative(s)` as one more condition, so
+every place that asks that check asks it: `nativeArgType*`, `CalleeTable` (pointer parameters and the
+loop variables `Loop` shadows), `DualABI.paramEligibility` and the null-only parameters, and
+`LateInline`'s parameter of a spliced callee. `ConAltNative` asks it for a constructor's fields, with a
+second table: each constructor's declared field types, from its declared type with the erased binders
+left out (a constructor whose binders do not come to its field count shows nothing). `returnEligibility` and `boolReturnPlan` keep a native
+result only where the declared result shows it, and a `MutualLoop` merged function's slots get the
+type their members' parameters were shown to have. The strict mode never promotes what the default
+does not: it is the default's answer and the table's, so a wrong match of an argument to its binder
+can lose a promotion or fail to veto, but cannot add one.
+
+Struct return stays on, because it judges the producers (every tail a constructor of one known tag and
+shape, `sameShape`), not the reads. `DualABI.nativePromotionFor` is asked without the table: it keeps a
+worker call's result native in the caller, and a worker returns a native result only where
+`retShown` found the declared result to show it. `noboolfield` is off: it takes a field to be an immediate because
+a constant `case` reads it so, which is the reading that does not hold for a field whose type depends
+on a value.
+
+**What it does not do.** A loop variable or local whose value is produced by a native operation is
+native in the default and here, and a local that is not a parameter is not asked of the table. The
+producer evidence the TODO plans (every producer a native value of one type, constructors judged by
+kind, `believe_me` unknown) is not built; what a local gets is the default's reads plus the check.
+
+**Measured** (the `verify.sh` programs, the benchmarks and lambda-rogue, `strictnative` against the
+default):
+
+| | default | `strictnative` |
+|---|---|---|
+| `verify.sh` | 424 passed | 423 passed; only `Test13NativeArgChain`'s `noboolfield` count check fails, as the field mechanism is off in both runs it compares |
+| generated C of the 119 `verify.sh` programs that predate the mode, default build | byte-identical to the build without the mode | |
+| native worker parameters, all `verify.sh` programs | 1071 of 2113 | 513 of 1110 |
+| native worker results, the same | 582 of 1068 | 339 of 542 |
+| native locals, the same | 3149 | 2504 |
+| the 31 `tests/bench` programs | same output; 24.38 s in all | same output; 24.84 s in all (+1.9%); the two slower than 10% are `BenchClosureChain`, 3 ms to 4 ms, and `BenchConAltNativeBoxed`, 9 ms to 12 ms (its field shadows) |
+| lambda-rogue, native worker parameters | 466 of 1204 | 222 of 645 |
+| lambda-rogue, native worker results | 293 of 489 | 175 of 272 |
+| lambda-rogue, native locals | 2112 | 1461 |
+| lambda-rogue test suite, run time | 2.32 s | 2.42 s (+4%) |
+| lambda-rogue, compile time | 62 s | 59 s |
+
+The mode halves the native parameters and results, and costs little time on these programs: the
+values it keeps boxed are mostly ones whose native form was a conversion at each call. Two things
+to read the counts with: the number of workers falls as well (a function with nothing shown native
+gets no worker), and the benchmarks are small loops over `Int`, whose declared types are fixed.
+The lambda-rogue test suite prints the same output in both builds (one of its settings tests fails
+in both, with this environment's data directory).
 
 ## Bugs found and fixed (chronological, see `git log`/`BENCHMARKS.md` for commit-level detail)
 

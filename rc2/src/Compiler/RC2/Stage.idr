@@ -206,6 +206,7 @@ data OptIn : Type where
      ListDivert : OptIn
      ListFuse : OptIn
      DeadFields : OptIn
+     StrictNative : OptIn
 
 export
 optInDirective : OptIn -> String
@@ -213,11 +214,12 @@ optInDirective LatePushCon = "latepushcon"
 optInDirective ListDivert = "listdivert"
 optInDirective ListFuse = "listfuse"
 optInDirective DeadFields = "deadfields"
+optInDirective StrictNative = "strictnative"
 
 ||| Every `OptIn`.
 export
 allOptIns : List OptIn
-allOptIns = [LatePushCon, ListDivert, ListFuse, DeadFields]
+allOptIns = [LatePushCon, ListDivert, ListFuse, DeadFields, StrictNative]
 
 ||| The directive strings `compileExpr` keeps for `toRCDefs` (`Compiler.RC2.RC2`).
 export

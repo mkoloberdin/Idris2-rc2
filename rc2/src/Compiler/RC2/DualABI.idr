@@ -77,8 +77,8 @@ findLoopThroughLets _ _ = Nothing
 ||| `Compiler.RC2.CalleeTable.callArgOrOpNativeTy`'s own "Batched, multi-id
 ||| native-type analysis" section.
 export
-paramEligibility : List Int -> RCExp -> List (Int, Maybe PrimType)
-paramEligibility argIds body =
+paramEligibility : Maybe Strict -> List Int -> RCExp -> List (Int, Maybe PrimType)
+paramEligibility strict argIds body =
     case findLoopThroughLets empty body of
          -- The loop slots' types may come from a loop spliced in after `Loop` ran, so they are checked
          -- here; `nativeArgTypeBatch` checks its own (rc2/doc/native-type-inference.md's "Types that
@@ -89,11 +89,11 @@ paramEligibility argIds body =
                                                                   Just (RNative ty) => Just (p, ty)
                                                                   Just (RInlineNative ty) => Just (p, ty)
                                                                   _ => Nothing) argIds)
-                 ok = consistentNatives body chosen
+                 ok = consistentNatives strict body chosen
              in map (\p => (p, case lookup p ok of
                                      Just (TPrim ty) => Just ty
                                      _ => Nothing)) argIds
-         Nothing => let found = nativeArgTypeBatch argIds body
+         Nothing => let found = nativeArgTypeBatch strict argIds body
                     in map (\p => (p, lookup p found)) argIds
 
 
@@ -202,7 +202,7 @@ export
 describeEligibility : Name -> RCDef -> Maybe String
 describeEligibility n (MkRCFun args _ _ body) =
     let argIds = map fst args
-        params = paramEligibility argIds body
+        params = paramEligibility Nothing argIds body
         ret = returnEligibility empty params body
     in Just $ show n ++ ": params=" ++
          show (map (\(p, mty) => "\{show p}:\{maybe "Boxed" show mty}") params) ++
@@ -466,11 +466,16 @@ boolTail _ _ _ = TailOther
 ||| `MutualLoop`'s merged functions are excluded, as they are from every
 ||| other DualABI worker.
 export
-boolReturnPlan : List (Name, RCDef) -> SortedSet Name
-boolReturnPlan defs =
+boolReturnPlan : Maybe Strict -> List (Name, RCDef) -> SortedSet Name
+boolReturnPlan strict defs =
     let arities : SortedMap Name Nat := SortedMap.fromList (mapMaybe arityOf defs)
         tbl : SortedMap Name (List RetTail) := SortedMap.fromList (mapMaybe (funTails arities) defs)
-    in settle tbl (tailCallers tbl) empty
+        -- `--directive strictnative`: a function whose declared return type is not shown to be a Bool-like
+        -- enumeration never joins, and nor does one that tail-calls it.
+        notShown : SortedSet Name := case strict of
+                       Nothing => empty
+                       Just st => fromList (filter (\n => not (maybe False (elem (TPrim Bits8Type)) (lookup n st.returns))) (keys tbl))
+    in settle tbl (tailCallers tbl) notShown
   where
     arityOf : (Name, RCDef) -> Maybe (Name, Nat)
     arityOf (n, MkRCFun args _ _ _) = if isMutualLoopMerged n then Nothing else Just (n, length args)
@@ -479,7 +484,7 @@ boolReturnPlan defs =
     funTails : SortedMap Name Nat -> (Name, RCDef) -> Maybe (Name, List RetTail)
     funTails arities (n, MkRCFun args _ _ body) =
         if isMutualLoopMerged n then Nothing
-        else let params = paramEligibility (map fst args) body
+        else let params = paramEligibility strict (map fst args) body
                  seeded : SortedMap Int Rep := fromList (mapMaybe (\(p, mty) => map (\ty => (p, RNative (TPrim ty))) mty) params)
              in Just (n, tailLeaves (boolTail arities) seeded body)
     funTails _ _ = Nothing
@@ -829,12 +834,12 @@ ffiReturns defs = fromList (mapMaybe entry defs)
 ||| exemption was carried (closure-dispatch typedefs to arity 20, the
 ||| FFI worker path too).
 export
-applyDualABI : (boolReturn : Bool) -> (nullTable : SortedMap Name (SortedMap Int NativeTy)) -> List (Name, RCDef) -> Core (List (Name, RCDef))
-applyDualABI boolReturn nullTable defs = do
+applyDualABI : Maybe Strict -> (boolReturn : Bool) -> (nullTable : SortedMap Name (SortedMap Int NativeTy)) -> List (Name, RCDef) -> Core (List (Name, RCDef))
+applyDualABI strict boolReturn nullTable defs = do
     _ <- newRef FreshId 0
-    let boolPlan : SortedSet Name := if boolReturn then boolReturnPlan defs else empty
+    let boolPlan : SortedSet Name := if boolReturn then boolReturnPlan strict defs else empty
     let existingNames = SortedSet.fromList (map fst defs)
-    let ptrTable = ptrCalleeTable defs
+    let ptrTable = ptrCalleeTable strict defs
     let ffiRets = ffiReturns defs
     -- `foldr (++) []`, not `concat`: `Foldable List` overrides
     -- `foldMap` with `foldl (\acc, x => acc <+> f x) neutral`, so
@@ -843,25 +848,32 @@ applyDualABI boolReturn nullTable defs = do
     -- whole-program def list. See `code-style-Idris2.md`.
     foldr (++) [] <$> traverse (synthesizeIfEligible ffiRets ptrTable nullTable boolPlan existingNames) defs
   where
+    -- `--directive strictnative`: a native result only where the declared return type shows it.
+    retShown : Name -> NativeTy -> Maybe NativeTy
+    retShown n ty = case strict of
+                         Nothing => Just ty
+                         Just st => if maybe False (elem ty) (lookup n st.returns) then Just ty else Nothing
+
     synthesizeIfEligible : {auto r : Ref FreshId Int} -> SortedMap Name (NativeTy, Nat) -> CalleeTable -> SortedMap Name (SortedMap Int NativeTy) -> SortedSet Name -> SortedSet Name -> (Name, RCDef) -> Core (List (Name, RCDef))
     synthesizeIfEligible ffiRets ptrTable nullTable boolPlan existingNames (n, d@(MkRCFun args retRep _ body)) =
         if isMutualLoopMerged n
            then pure [(n, d)]
            else do
              let argIds = map fst args
-                 params = paramEligibility argIds body
-                 byCalls = callNativeParams ptrTable argIds body
-                 byNull = consistentNatives body (fromMaybe empty (lookup n nullTable))
+                 params = paramEligibility strict argIds body
+                 byCalls = callNativeParams strict ptrTable argIds body
+                 byNull = consistentNatives strict body (fromMaybe empty (lookup n nullTable))
                  eligible = mapMaybe (\(p, mty) => case mty of
                                                          Just ty => Just (p, TPrim ty)
                                                          Nothing => map (p,) (lookup p byCalls <|> lookup p byNull)) params
-                 retEligible = if contains n boolPlan then Just (TPrim Bits8Type) else returnEligibility ffiRets params body
+                 retEligible = if contains n boolPlan then Just (TPrim Bits8Type) else returnEligibility ffiRets params body >>= retShown n
              if null eligible && isNothing retEligible
                 then pure [(n, d)]
                 else do
                   (workerName, wrapperDef, workerDef) <- synthesizeWorker existingNames n eligible retEligible args retRep body
                   pure [(n, wrapperDef), (workerName, workerDef)]
     synthesizeIfEligible _ _ _ _ _ (n, d) = pure [(n, d)]
+
 
 ------------------------------------------------------------------------
 -- Stage 3c: FFI worker synthesis. Unlike Stage 3a, there is no
@@ -1091,7 +1103,7 @@ nativePromotionFor workers mLoopParams var ty body =
                   `union` callArgNativeReads workers var body)
                   `union` fromLoop
     in case Prelude.toList found of
-            [ty'] => if ty' == ty && consistentNative var body ty then Just ty else Nothing
+            [ty'] => if ty' == ty && consistentNative Nothing var body ty then Just ty else Nothing
             _ => Nothing
 
 ||| Rewrite every direct, saturated, non-tail-position call in `e`

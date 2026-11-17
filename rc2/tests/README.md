@@ -104,6 +104,7 @@ program's generated C.
 | `Test184DependentParam` | a parameter whose type depends on another argument is not promoted at one branch's native type (a constant-argument call made a `uint8_t` worker the run-time calls reused) | refc |
 | `Test185DependentFold` | a fold accumulator whose type depends on an argument is not made a native loop variable from one branch's reads (`doc/native-type-inference.md`'s "Types that depend on a value") | refc |
 | `Test186DependentPtr` | a value that is a pointer for one key and a String for another is not made a `void *` parameter (`doc/native-type-inference.md`'s "Types that depend on a value") | refc |
+| `Test187StrictNative` | under `strictnative`, a value whose type depends on another argument stays boxed when one branch only passes it on, behind a newtype, and as a pointer or a String (`doc/native-type-inference.md`'s "The strict mode") | refc |
 | `Test90StructReturn` | small constructors returned by value (`doc/struct-return.md`) | refc valgrind check.sh |
 
 ## Loops and deep recursion

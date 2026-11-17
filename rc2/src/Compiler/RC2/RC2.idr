@@ -72,7 +72,9 @@ import Compiler.RC2.NullParams
 import Compiler.RC2.CalleeTable
 import Compiler.RC2.Loop
 import Compiler.RC2.Sink
+import Compiler.RC2.NativeUse
 import Compiler.RC2.Stage
+import Compiler.RC2.StrictNative
 import Compiler.RC2.TargetOs
 import Compiler.RC2.Types
 import Compiler.RC2.Util
@@ -266,9 +268,11 @@ inlineNamed disabled keep main defs =
 ||| `FunDedup` is skipped. (The one definition kind that cannot be
 ||| compiled on its own, a `getField`/`setField` whose struct and field
 ||| names are not literals, is dropped earlier, by `normalizeProgram`.)
-toRCDefs : {auto c : Ref Ctxt Defs} -> {auto v : Ref VarId Int} -> List String -> (incremental : Bool) -> (roots : List Name)
+toRCDefs : {auto c : Ref Ctxt Defs} -> {auto v : Ref VarId Int} -> {auto st : Ref StrictTag (Maybe Strict)} -> List String -> (incremental : Bool) -> (roots : List Name)
         -> (thunks : SortedSet Name) -> List (Name, RCDef) -> Core (List (Name, RCDef))
 toRCDefs directives incremental roots thunks preFolded0 = do
+    -- rc2/doc/native-type-inference.md's "The strict mode" (`--directive strictnative`)
+    strict <- get StrictTag
     let preFolded = case targetOsOf directives of
                          Just t => if stageOff NoConstFold directives
                                       then preFolded0
@@ -371,13 +375,15 @@ toRCDefs directives incremental roots thunks preFolded0 = do
     reused <- logTime 2 "rc2: RC annotate + Reuse + ConAltNative" $
                 traverse (\(n, d) => do
                   d1 <- toRCDefPostFold (not (stageOff NoBoolCase directives)) d
-                  let fieldCase = not (stageOff NoBoolCase directives) && not (stageOff NoBoolField directives)
+                  let fieldCase = not (stageOff NoBoolCase directives) && not (stageOff NoBoolField directives) && isNothing strict
                   let d2 = applyReuse (not (stageOff NoReuseNested directives)) fieldCase d1
-                  d3 <- if stageOff NoConAltNative directives then pure d2 else applyConAltNative fieldCase d2
+                  d3 <- if stageOff NoConAltNative directives then pure d2 else applyConAltNative strict fieldCase d2
                   pure (n, d3)) memoized
-    (merged, noPromotes) <- if stageOff NoMutualLoop directives then pure (reused, SortedMap.empty) else logTime 2 "rc2: Mutual loop" $ applyMutualLoop reused
+    (merged, noPromotes, strictML) <- if stageOff NoMutualLoop directives then pure (reused, SortedMap.empty, strict) else logTime 2 "rc2: Mutual loop" $ applyMutualLoop strict reused
+    -- the merged functions' slots, for Loop, LateInline and DualABI
+    put StrictTag strictML
     looped <- unlessOff [NoLoop] directives merged $ logTime 2 "rc2: Loop conversion" $ do
-                        calleeTable <- logTime 3 "rc2: Loop conversion (build callee table)" $ pure (buildCalleeTable merged)
+                        calleeTable <- logTime 3 "rc2: Loop conversion (build callee table)" $ pure (buildCalleeTable strictML merged)
                         -- `logTimeOver` (unconditional, not gated behind
                         -- `--timing`) rather than one `logTime` call per
                         -- definition -- this stage's own cost turned out
@@ -391,7 +397,7 @@ toRCDefs directives incremental roots thunks preFolded0 = do
                           traverse (\(n, d) =>
                                       logTimeOver slowApplyLoopThresholdNs
                                            (pure ("rc2: Loop conversion (apply) slow definition: " ++ show n))
-                                           (do d' <- applyLoop calleeTable (fromMaybe SortedSet.empty (lookup n noPromotes)) n d; pure (n, d'))) merged
+                                           (do d' <- applyLoop strictML calleeTable (fromMaybe SortedSet.empty (lookup n noPromotes)) n d; pure (n, d'))) merged
     -- rc2/doc/inlining.md's "Criterion B, revisited": strictly after
     -- Loop/MutualLoop conversion, so a self- or mutually-tail-recursive
     -- candidate's own recursion has already collapsed into RLoop/
@@ -423,7 +429,7 @@ toRCDefs directives incremental roots thunks preFolded0 = do
         logTime 2 "rc2: Fold applied closures (after Sink)" $ pure (applyFoldApplied sunkOnly)
     dualABId <- unlessOff [NoDualABI] directives sunk $ logTime 2 "rc2: DualABI" $ do
            let nullParams := if stageOff NoNullParams directives then SortedMap.empty else nullParamTable roots sunk
-           withNative <- logTime 3 "rc2: DualABI (workers)" $ applyDualABI (not (stageOff NoBoolRet directives)) nullParams sunk
+           withNative <- logTime 3 "rc2: DualABI (workers)" $ applyDualABI strictML (not (stageOff NoBoolRet directives)) nullParams sunk
            -- doc/struct-return.md
            withWorkers <- unlessOff [NoStructReturn] directives withNative $
                logTime 3 "rc2: DualABI (struct return)" $ applyStructReturn (not (stageOff NoMutualStruct directives)) withNative
@@ -632,9 +638,9 @@ targetOsDirectives = filter (isPrefixOf "target-os=")
 ||| (`Compiler.RC2.Util`'s `VarId`; it starts at 1 because
 ||| `Compiler.RC2.DeadVars` reserves 0), with the struct table the
 ||| program's `%foreign` signatures declare.
-lowerProgram : {auto c : Ref Ctxt Defs} -> List String -> (incremental : Bool) -> (roots : List Name) ->
+lowerProgram : {auto c : Ref Ctxt Defs} -> List String -> (incremental : Bool) -> (roots : List Name) -> Maybe Declarations ->
                Maybe NamedCExp -> List (Name, FC, NamedDef) -> Core (List (Name, RCDef), SortedMap Name LiftInfo)
-lowerProgram disabled incremental roots main defs = do
+lowerProgram disabled incremental roots declared main defs = do
     _ <- newRef VarId 1
     structs <- logTime 3 "rc2: struct table" $ pure $
            foldl (\acc, (_, _, d) => case d of
@@ -645,6 +651,7 @@ lowerProgram disabled incremental roots main defs = do
     (preFolded, infos) <- logTime 2 "rc2: Lambda lift + RC normalize" $ normalizeProgram incremental main defs
     -- `Delay` thunks, which their lazy cells memoize (`insertMemoize`).
     let thunks = SortedSet.fromList [n | (n, i) <- SortedMap.toList infos, isDelay i.origin]
+    st <- newRef StrictTag (map (\t => strictOf t preFolded) declared)
     rc <- toRCDefs disabled incremental roots thunks preFolded
     pure (rc, infos)
 
@@ -810,7 +817,18 @@ compileExprWhole c s _ outputDir tm outfile =
      -- `getFullName`-resolved `n'`) is reused here rather than
      -- re-deriving it a second time from `exported cdata` directly.
      let roots = MN "__mainExpression" 0 :: map (\(n, _, _, _) => n) exportedSigs
-     (defs, liftInfos) <- lowerProgram (disabledStages ++ targetOsDirectives directiveList) False roots mainR namedR
+     declared <- if optInOn StrictNative directiveList then Just <$> declarations namedR else pure Nothing
+     -- `dumpstrict`: the declared table `strictnative` works from (rc2/doc/directives.md).
+     when ("dumpstrict" `elem` directiveList) $ do
+         t <- declarations namedR
+         coreLift_ $ writeFile (outputDir </> outfile ++ ".strict")
+             (concatMap (\(n, _, d) => case d of
+                                           MkNmFun args _ => show n ++ " " ++ show args ++ " = "
+                                                              ++ maybe "unknown" showDeclared (lookup n t.funs) ++ "\n"
+                                           _ => "") namedR)
+         bds <- traverse (\(n, _, _) => map (\b => show n ++ " " ++ b ++ "\n") (binderDump n)) namedR
+         coreLift_ $ writeFile (outputDir </> outfile ++ ".binders") (concat bds)
+     (defs, liftInfos) <- lowerProgram (disabledStages ++ targetOsDirectives directiveList) False roots declared mainR namedR
 
      -- `dumprcexpr`: dump the final RCExp to a `.rcexpr` file -- see
      -- rc2/doc/reading-the-ir.md for the format, rc2/doc/directives.md
@@ -1040,7 +1058,7 @@ incCompile c s sourceFile = do
                               then pure (Nothing, namedInl)
                               else logTime 2 "rc2: Dead arguments" $ applyDeadArgs roots Nothing namedInl
          (_, namedIn) <- raiseNamed disabledStages Nothing namedDead
-         (defs, _) <- lowerProgram (disabledStages ++ targetOsDirectives directiveList) True roots Nothing namedIn
+         (defs, _) <- lowerProgram (disabledStages ++ targetOsDirectives directiveList) True roots Nothing Nothing namedIn
          let ownMain = NS (currentNS coreDefs) (UN (Basic "main"))
          let entryCall : RCDef -> Maybe String
              entryCall (MkRCFun [] _ _ _) = Just "idris2rc2_applyClosure(\{cName ownMain}(), NULL)"

@@ -115,6 +115,14 @@ Directives that look like they belong on this list but don't:
   is taken apart at once, some fields unread, calls a copy of the function that does not make
   them; a `Dec`-returning recursion like upstream's `isLTE` becomes a loop. Off by default: on the
   compiler and on lambda-rogue it changed nothing measurable (`doc/dead-fields.md`).
+- **`strictnative` is an opt-in stage.** A value is held natively across a function boundary (a
+  worker's argument or result, a loop variable, a spliced callee's parameter) only where its
+  declared type shows the representation; a lifted lambda, a copy rc2 made and a type variable are
+  not shown, and stay boxed. Always-unboxed constructor fields (`noboolfield`) are off under it, and a
+  constructor field is shadowed natively only as far as its declared type shows. For programs whose types
+  depend on values (`doc/native-type-inference.md`, "The strict mode"). Whole-program compiles only: an
+  incremental compile ignores it. `dumpstrict` writes the declared table it works from to `<output>.strict`,
+  and each definition's binders to `<output>.binders`.
 - **`latepushcon` is the other opt-in stage.** It turns *on*
   `Compiler.RC2.PushCon`'s post-RC push (`applyPushConRC`), right after
   the later `LateInline` run: the same case-into-tails push, with each
