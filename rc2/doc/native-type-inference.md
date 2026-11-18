@@ -531,6 +531,112 @@ computes `natives` and `inlineableRep` after this, so it sees the same lets it
 would have had from the start. A divisor that is not a constant keeps the
 `case`, so `mod x y` is unchanged. `Test151IntModDivNative`.
 
+## Types that depend on a value
+
+Every decision above takes a native type from the reads of a local, all over the body: one
+native read at `T` and none at another type makes the local a `T`. That is sound when a local has
+one type. A local whose declared type is computed from another value does not
+(issue #343):
+
+```idris
+Value : VT -> Type
+Value AFlag = Bool
+Value ACount = Nat
+Value AText = String
+
+text : (k : Key) -> Value (vt k) -> String
+text k = encode (vt k)        -- encode AFlag b = if b then ...; encode ACount n = show n; encode AText s = s
+```
+
+The value is a `Bool` in one branch of the case on `vt k`, a `Nat` in another and a `String` in
+the third. Only the `Bool` branch reads it natively, so it was made a `uint8_t` parameter of
+`text`'s worker, and the other branches got a byte: `idris2rc2_mkBits8(v)` returned where a string
+was expected, a segfault. A fold over `Dom o` (`Bool` or `Maybe (List Nat)`) gave its accumulator a
+`uint8_t` loop variable the same way, and the `Maybe` branch then read fields out of that byte.
+
+### The check: no read of another type
+
+`NativeUse.consistentNative p body ty` keeps a native `ty` only if no read of `p` anywhere in
+`body` contradicts it:
+
+- every primitive type `p` is read at agrees with `ty` (`primReadTypesFor`), and a pointer or an
+  erased value is read at none. Boxed reads count too: an operand of an op (a cast's source type, a
+  string op's positions, the op's own type otherwise, `Double` for the `Double` functions), of a
+  fused comparison, or the scrutinee of a constant `case` (the type of its literals);
+- no constructor `case` on `p` has an alternative that binds fields (`takenApartFor`). There `p`
+  is a `Maybe`, a record or a list.
+
+In code where each local has one type, no local is read at two types (`believe_me` aside), so
+the check costs nothing there. Every place that settles a native type asks it:
+
+- `nativeArgType` and `nativeArgTypeBatch` (the operand reads);
+- `CalleeTable.callNativeParams`, so `ptrParams` and `ptrCalleeTable` (a pointer passed on to a
+  pointer parameter), and `callArgOrOpNativeTy` (the loop variables `Loop` shadows);
+- `DualABI.paramEligibility` for the loop slots it takes over, which can come from a loop spliced
+  in after `Loop` ran, the parameters that only hold the world or an erased value, and
+  `nativePromotionFor`.
+
+`consistentNatives` checks a whole map of choices in one walk of the body. Tests:
+`Test184DependentParam` (a worker), `Test185DependentFold` (a loop variable),
+`Test186DependentPtr` (a pointer).
+
+### What it does not catch
+
+A branch that only passes the value on, returns it or stores it has no read to contradict
+anything. `encode ACount n = tally n`, with a `tally` that is not inlined, leaves the `Nat` branch
+with no read at all, and the `Bool` branch's read wins. Whether the branches of `text` disagree
+depends on inlining: `show n` on `Nat` is a cast when inlined and a call when not, and in a larger
+program the same `text` miscompiles. See KNOWN-BUGS.md.
+
+### Why judging each path separately does not work
+
+A local has one type on each path, so the natural fix is to require a native read on every
+path that uses the local, and give up when a path uses it without one. It breaks every
+accumulator:
+
+```idris
+go : Int -> Int -> Int
+go acc n = if n == 0 then acc else go (acc + n) (n - 1)
+```
+
+The `n == 0` path returns `acc`, with no read; locally it is the same as `encode AText s = s`. What
+tells them apart is whether the case that separates the paths decides the local's type: `vt k`
+decides the type of `text`'s value, `n == 0` does not decide `acc`'s. Nothing in the case trees
+says which case does; only the type does. Trusting a read when no case on an enumeration separates
+it from the other paths fits the repros, but an interpreter's `step Nop acc = acc` loses its
+accumulator.
+
+Specializing per path does not help either:
+
+- **A run-time key**: a copy of `text` per key moves the case to the caller, which holds a boxed
+  value from `dflt k` anyway. Nothing is gained, and each copy still has to be told its type.
+- **A constant key** (`text Enable False`): a copy for `Enable` has one path left, and there the
+  value is a `Bool`. That is safe, but it was this call that made the worker the run-time calls
+  then shared. A copy for a constant key is a way to keep the native parameter, not the fix.
+- **Unswitching a loop** on an invariant case (the fold's `case o`) gives one loop per order, each
+  with one type for its accumulator. It wins back a promotion the check takes away; it does not
+  find the loops that need it.
+
+### The remaining way: the declared type
+
+The type checker knows that `text`'s second parameter is `Value (vt k)`, a type-level function
+applied to a variable and stuck there; `lookupTyExact` gives it, as `validateExport` uses it. A
+parameter of such a type can be kept boxed, whatever its reads say. What it takes:
+
+- the parameter positions have to survive `DeadArgs`, which removes arguments;
+- a copy rc2 makes (specialization, `FunDedup`, a lifted lambda) has no type and needs its
+  original's;
+- a loop variable has no declared type. The fold's accumulator is `foldl`'s `b`, a plain variable,
+  and vetoing every type variable would also take `foldl (+) 0` on `Int` away.
+
+So the declared type is not a guarantee by itself, and neither is looking for the values whose
+type depends on another value: a type variable is the same thing (the fold's `b` was `Dom o`), a
+polymorphic field's type is lost with the scrutinee's type arguments, and a lambda's binder has no
+type at all. What can be built is positive evidence only: a declared type whose representation is
+fixed (a newtype judged by its field), or producers that are all native values of one type, and
+everything else unknown and kept boxed across boundaries. TODO.md plans it as a directive, opt-in
+until measured.
+
 ## Bugs found and fixed (chronological, see `git log`/`BENCHMARKS.md` for commit-level detail)
 
 1. **`Cast Integer Int` memory corruption.** `opResultRep (Cast i o)`

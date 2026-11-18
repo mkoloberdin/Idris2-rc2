@@ -85,9 +85,10 @@ export covering
 callNativeParams : CalleeTable -> List Int -> RCExp -> SortedMap Int NativeTy
 callNativeParams table argIds body =
     let found = callArgNativeReadsFor (tableLookup table) (SortedSet.fromList argIds) body
-    in SortedMap.fromList (mapMaybe (\p => case map Prelude.toList (lookup p found) of
-                                                 Just [ty] => Just (p, ty)
-                                                 _ => Nothing) argIds)
+    in consistentNatives body $
+         SortedMap.fromList (mapMaybe (\p => case map Prelude.toList (lookup p found) of
+                                                   Just [ty] => Just (p, ty)
+                                                   _ => Nothing) argIds)
 
 ||| The parameters among `argIds` that `body` reads only as a raw pointer:
 ||| every use is a call argument at a `TPtr` position of `table`.
@@ -142,5 +143,5 @@ callArgOrOpNativeTy table p body =
     let calls = maybe empty id (lookup p (callArgNativeReadsFor (tableLookup table) (SortedSet.singleton p) body))
         ops = SortedSet.fromList (map TPrim (Prelude.toList (nativeArgTypes p body)))
     in case Prelude.toList (ops `union` calls) of
-            [ty] => Just ty
+            [ty] => if consistentNative p body ty then Just ty else Nothing
             _ => Nothing

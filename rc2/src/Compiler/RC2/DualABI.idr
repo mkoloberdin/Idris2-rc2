@@ -80,14 +80,22 @@ export
 paramEligibility : List Int -> RCExp -> List (Int, Maybe PrimType)
 paramEligibility argIds body =
     case findLoopThroughLets empty body of
+         -- The loop slots' types may come from a loop spliced in after `Loop` ran, so they are checked
+         -- here; `nativeArgTypeBatch` checks its own (rc2/doc/native-type-inference.md's "Types that
+         -- depend on a value").
          Just (letReps, loopParams) =>
              let m = foldl (\mp, (i, r) => insert i r mp) letReps loopParams
-             in map (\p => (p, case lookup p m of
-                                     Just (RNative (TPrim ty)) => Just ty
-                                     Just (RInlineNative (TPrim ty)) => Just ty
+                 chosen = SortedMap.fromList (mapMaybe (\p => case lookup p m of
+                                                                  Just (RNative ty) => Just (p, ty)
+                                                                  Just (RInlineNative ty) => Just (p, ty)
+                                                                  _ => Nothing) argIds)
+                 ok = consistentNatives body chosen
+             in map (\p => (p, case lookup p ok of
+                                     Just (TPrim ty) => Just ty
                                      _ => Nothing)) argIds
          Nothing => let found = nativeArgTypeBatch argIds body
                     in map (\p => (p, lookup p found)) argIds
+
 
 ||| Every genuine (non-`RLoopContinue`) tail-position leaf of `e`, mapped
 ||| by `leaf` (given `reps`, the natives known so far: threaded through
@@ -843,7 +851,7 @@ applyDualABI boolReturn nullTable defs = do
              let argIds = map fst args
                  params = paramEligibility argIds body
                  byCalls = callNativeParams ptrTable argIds body
-                 byNull = fromMaybe empty (lookup n nullTable)
+                 byNull = consistentNatives body (fromMaybe empty (lookup n nullTable))
                  eligible = mapMaybe (\(p, mty) => case mty of
                                                          Just ty => Just (p, TPrim ty)
                                                          Nothing => map (p,) (lookup p byCalls <|> lookup p byNull)) params
@@ -1083,7 +1091,7 @@ nativePromotionFor workers mLoopParams var ty body =
                   `union` callArgNativeReads workers var body)
                   `union` fromLoop
     in case Prelude.toList found of
-            [ty'] => if ty' == ty then Just ty else Nothing
+            [ty'] => if ty' == ty && consistentNative var body ty then Just ty else Nothing
             _ => Nothing
 
 ||| Rewrite every direct, saturated, non-tail-position call in `e`

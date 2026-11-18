@@ -356,3 +356,35 @@ Fix, if it is worth it: share the Idris code of the packages between the host an
 libraries. It needs the per-module (incremental) compile to produce a library, and the
 same package versions and compile options throughout, because the numbered and specialized
 names differ from one compile to another.
+
+## rc2: a value whose type depends on another argument, only passed on in some branch
+
+A parameter whose declared type is computed from another argument (`Value (vt k)`: a `Bool`, a
+`Nat` or a `String` by the key) is still made native when one branch reads it natively and the
+others only pass it on, return it or store it: nothing in those branches contradicts the read
+(`rc2/doc/native-type-inference.md`, "Types that depend on a value"). The other branches then get a
+byte. A branch that reads it at another type, or takes it apart, does stop it.
+
+```idris
+tally : Nat -> String
+tally Z = "."
+tally (S k) = "+" ++ tally k
+
+encode : (t : VT) -> Value t -> String
+encode AFlag b = if b then "1" else "0"
+encode ACount n = tally n          -- `show n` too, when it is not inlined
+encode AText s = s
+
+text : (k : Key) -> Value (vt k) -> String
+text k = encode (vt k)
+
+main = do
+  putStrLn (text Enable False)                                      -- makes a uint8_t worker
+  traverse_ (\k => putStrLn (text k (dflt k))) [Enable, Size, Name]  -- segfaults in it
+```
+
+(`VT`, `Key`, `vt`, `Value` and `dflt` as in `rc2/tests/Test184DependentParam`.) Issue #343, shape 2.
+
+Fix: no local check settles it, and the declared type does not either (the doc says why). TODO.md
+plans a directive that promotes only what can be shown safe: a declared type whose
+representation is fixed, or producers that are all native values of one type.
