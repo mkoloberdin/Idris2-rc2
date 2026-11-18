@@ -245,6 +245,26 @@ nativeArgTypesFor tracked (RLoop _ loopParams initial _ body) =
     in fromInitial `unionMaps` nativeArgTypesFor tracked body
 nativeArgTypesFor _ _ = empty
 
+||| What the declared types show (`--directive strictnative`, rc2/doc/native-type-inference.md's "The strict mode"):
+||| what each parameter id, function result and constructor field may be held as. One not listed is not shown.
+public export
+record Strict where
+  constructor MkStrict
+  params : SortedMap Int (List NativeTy)
+  returns : SortedMap Name (List NativeTy)
+  cons : SortedMap Name (List (List NativeTy))
+
+||| Whether the function `n`'s declared result shows that it may be held as `ty`; always, without the mode.
+export
+returnShown : Maybe Strict -> Name -> NativeTy -> Bool
+returnShown strict n ty = maybe True (\s => maybe False (elem ty) (lookup n s.returns)) strict
+
+||| `strict` narrowed to the fields `args` of the constructor `con`.
+export
+fieldStrict : Maybe Strict -> Name -> List Int -> Maybe Strict
+fieldStrict strict con args =
+    map (\s => MkStrict (SortedMap.fromList (zip args (fromMaybe [] (lookup con s.cons)))) empty empty) strict
+
 ||| The type each operand position of `op` requires, whatever its own result representation (boxed or
 ||| native): a cast's source type; a string op's string and index positions; the op's own type otherwise.
 opOperandTypes : PrimFn arity -> Vect arity RCLocal -> List (RCLocal, PrimType)
@@ -312,33 +332,32 @@ takenApartFor tracked e = foldr union (here e) (map (takenApartFor tracked) (chi
     here _ = empty
 
 ||| Whether `ty`, chosen for `p` from some of its reads, is consistent with the typed reads and the cases.
-fits : SortedMap Int (SortedSet PrimType) -> SortedSet Int -> Int -> NativeTy -> Bool
-fits reads apart p ty =
+fits : Maybe Strict -> SortedMap Int (SortedSet PrimType) -> SortedSet Int -> Int -> NativeTy -> Bool
+fits strict reads apart p ty =
+    maybe True (\s => maybe False (elem ty) (lookup p s.params)) strict &&
     not (contains p apart) &&
     (let tys = maybe [] Prelude.toList (lookup p reads)
      in case ty of
              TPrim t => all (== t) tys
              _ => null tys)   -- a pointer or an erased value is no primitive's operand
 
-||| Whether native type `ty`, chosen from `p`'s reads, is consistent with every other read of `p` in `body`: every
-||| typed primitive read agrees with it (`primReadTypesFor`; none for a pointer), and no branch takes `p` apart as
-||| a constructor with fields (`takenApartFor`). A value whose type depends on another argument (`Value (vt k)`,
-||| `Dom o r`) fails one or the other when its branches disagree; promoting it at one branch's type hands the
-||| others a byte. See rc2/doc/native-type-inference.md's "Types that depend on a value".
+||| `chosen` without the entries that do not fit the other reads of `body`, in one walk of `body` for all of
+||| them: every typed primitive read of the id agrees with its type (`primReadTypesFor`; none for a pointer),
+||| and no branch takes it apart as a constructor with fields (`takenApartFor`). A value whose type depends on
+||| another argument (`Value (vt k)`, `Dom o r`) fails one or the other when its branches disagree.
+||| See rc2/doc/native-type-inference.md's "Types that depend on a value".
 export
-consistentNative : (p : Int) -> RCExp -> NativeTy -> Bool
-consistentNative p body ty =
-    let one = SortedSet.singleton p
-    in fits (primReadTypesFor one body) (takenApartFor one body) p ty
-
-||| `consistentNative` for every entry of `chosen` at once, in one walk of `body` for all of them.
-export
-consistentNatives : RCExp -> SortedMap Int NativeTy -> SortedMap Int NativeTy
-consistentNatives body chosen =
+consistentNatives : Maybe Strict -> RCExp -> SortedMap Int NativeTy -> SortedMap Int NativeTy
+consistentNatives strict body chosen =
     let ids = SortedSet.fromList (keys chosen)
         reads = primReadTypesFor ids body
         apart = takenApartFor ids body
-    in SortedMap.fromList (filter (\(p, ty) => fits reads apart p ty) (SortedMap.toList chosen))
+    in SortedMap.fromList (filter (\(p, ty) => fits strict reads apart p ty) (SortedMap.toList chosen))
+
+||| `consistentNatives` for the one id `p`.
+export
+consistentNative : Maybe Strict -> (p : Int) -> RCExp -> NativeTy -> Bool
+consistentNative strict p body ty = isJust (lookup p (consistentNatives strict body (SortedMap.singleton p ty)))
 
 ||| The single native `PrimType` top-level parameter `p` should be
 ||| shadowed at, if `body` reads it that way at all, and consistently
@@ -351,10 +370,10 @@ consistentNatives body chosen =
 ||| the ones an enclosing `RLoop` carries) -- one definition of this
 ||| analysis, not two kept in sync by hand.
 export
-nativeArgType : Int -> RCExp -> Maybe PrimType
-nativeArgType p body =
+nativeArgType : Maybe Strict -> Int -> RCExp -> Maybe PrimType
+nativeArgType strict p body =
     case Prelude.toList (nativeArgTypes p body) of
-         [ty] => if consistentNative p body (TPrim ty) then Just ty else Nothing
+         [ty] => if consistentNative strict p body (TPrim ty) then Just ty else Nothing
          _ => Nothing
 
 ||| Batch version of `nativeArgType`: every one of `ps`'s own verdict,
@@ -366,11 +385,11 @@ nativeArgType p body =
 ||| `nativeArgType` were called once per parameter; this is the same answer
 ||| in a single O(body size) pass.
 export
-nativeArgTypeBatch : List Int -> RCExp -> SortedMap Int PrimType
-nativeArgTypeBatch ps body =
+nativeArgTypeBatch : Maybe Strict -> List Int -> RCExp -> SortedMap Int PrimType
+nativeArgTypeBatch strict ps body =
     let found = nativeArgTypesFor (SortedSet.fromList ps) body
         chosen = SortedMap.fromList (mapMaybe (\p => map (\ty => (p, TPrim ty)) (singleTypeFrom found p)) ps)
     in SortedMap.fromList (mapMaybe (\(p, ty) => case ty of
                                                      TPrim t => Just (p, t)
-                                                     _ => Nothing) (SortedMap.toList (consistentNatives body chosen)))
+                                                     _ => Nothing) (SortedMap.toList (consistentNatives strict body chosen)))
 

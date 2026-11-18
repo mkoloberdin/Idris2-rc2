@@ -285,15 +285,15 @@ finalizeBranch fid owned body =
 ||| Boxed-context ownership is rebuilt from scratch instead of
 ||| reboxing fresh each time. See `doc/con-alt-native.md`'s "Design"
 ||| section.
-shadowAltFields : (imm : SortedSet RCLocal) -> (nextId : Int) -> List Int -> RCExp -> (Int, RCExp)
-shadowAltFields imm nextId argIds body =
+shadowAltFields : Maybe Strict -> (imm : SortedSet RCLocal) -> (nextId : Int) -> List Int -> RCExp -> (Int, RCExp)
+shadowAltFields strict imm nextId argIds body =
     let (rebuild, core) = peelWrappers body
         -- `nativeArgTypeBatch` walks `core` once for every one of
         -- `argIds` together, rather than once per field via
         -- `nativeArgType` -- see
         -- `Compiler.RC2.CalleeTable.callArgOrOpNativeTy`'s own "Batched,
         -- multi-id native-type analysis" section.
-        foundTypes = nativeArgTypeBatch argIds core
+        foundTypes = nativeArgTypeBatch strict argIds core
         eligible : List (Int, PrimType)
         eligible = mapMaybe (\p => map (p,) (lookup p foundTypes)) argIds
     in case eligible of
@@ -351,16 +351,16 @@ shadowAltFields imm nextId argIds body =
 ||| promoted field gets its own distinct shadow id -- same style
 ||| `Compiler.RC2.Loop`'s own `applyLoop` uses for its own
 ||| (function-scoped) shadow ids.
-applyConAltNativeExp : (imm : SortedSet RCLocal) -> (nextId : Int) -> RCExp -> (Int, RCExp)
-applyConAltNativeExp imm nextId (RLet fc var rep value body) =
-    let (nextId1, value') = applyConAltNativeExp imm nextId value
-        (nextId2, body') = applyConAltNativeExp imm nextId1 body
+applyConAltNativeExp : Maybe Strict -> (imm : SortedSet RCLocal) -> (nextId : Int) -> RCExp -> (Int, RCExp)
+applyConAltNativeExp strict imm nextId (RLet fc var rep value body) =
+    let (nextId1, value') = applyConAltNativeExp strict imm nextId value
+        (nextId2, body') = applyConAltNativeExp strict imm nextId1 body
     in (nextId2, RLet fc var rep value' body')
-applyConAltNativeExp imm nextId (RCmpCase fc op args postDrop t f) =
-    let (nextId1, t') = applyConAltNativeExp imm nextId t
-        (nextId2, f') = applyConAltNativeExp imm nextId1 f
+applyConAltNativeExp strict imm nextId (RCmpCase fc op args postDrop t f) =
+    let (nextId1, t') = applyConAltNativeExp strict imm nextId t
+        (nextId2, f') = applyConAltNativeExp strict imm nextId1 f
     in (nextId2, RCmpCase fc op args postDrop t' f')
-applyConAltNativeExp imm nextId (RConCase fc sc alts mDef) =
+applyConAltNativeExp strict imm nextId (RConCase fc sc alts mDef) =
     let (nextId1, alts') = goAlts nextId alts
         (nextId2, mDef') = goMaybe nextId1 mDef
     in (nextId2, RConCase fc sc alts' mDef')
@@ -373,8 +373,10 @@ applyConAltNativeExp imm nextId (RConCase fc sc alts mDef) =
     -- ids end up numerically first.
     goAlt : Int -> RConAlt -> (Int, RConAlt)
     goAlt n (MkRConAlt name ci tag args body) =
-        let (n1, body1) = applyConAltNativeExp imm n body
-            (n2, body2) = shadowAltFields imm n1 args body1
+        let (n1, body1) = applyConAltNativeExp strict imm n body
+            -- `strictnative`: only as far as the constructor's declared field types show
+            altStrict = fieldStrict strict name args
+            (n2, body2) = shadowAltFields altStrict imm n1 args body1
         in (n2, MkRConAlt name ci tag args body2)
     goAlts : Int -> List RConAlt -> (Int, List RConAlt)
     goAlts n [] = (n, [])
@@ -384,8 +386,8 @@ applyConAltNativeExp imm nextId (RConCase fc sc alts mDef) =
         in (n2, a' :: rest')
     goMaybe : Int -> Maybe RCExp -> (Int, Maybe RCExp)
     goMaybe n Nothing = (n, Nothing)
-    goMaybe n (Just e) = let (n', e') = applyConAltNativeExp imm n e in (n', Just e')
-applyConAltNativeExp imm nextId (RConstCase fc sc alts mDef) =
+    goMaybe n (Just e) = let (n', e') = applyConAltNativeExp strict imm n e in (n', Just e')
+applyConAltNativeExp strict imm nextId (RConstCase fc sc alts mDef) =
     let (nextId1, alts') = goAlts nextId alts
         (nextId2, mDef') = goMaybe nextId1 mDef
     in (nextId2, RConstCase fc sc alts' mDef')
@@ -393,30 +395,30 @@ applyConAltNativeExp imm nextId (RConstCase fc sc alts mDef) =
     goAlts : Int -> List RConstAlt -> (Int, List RConstAlt)
     goAlts n [] = (n, [])
     goAlts n (MkRConstAlt c body :: rest) =
-        let (n1, body') = applyConAltNativeExp imm n body
+        let (n1, body') = applyConAltNativeExp strict imm n body
             (n2, rest') = goAlts n1 rest
         in (n2, MkRConstAlt c body' :: rest')
     goMaybe : Int -> Maybe RCExp -> (Int, Maybe RCExp)
     goMaybe n Nothing = (n, Nothing)
-    goMaybe n (Just e) = let (n', e') = applyConAltNativeExp imm n e in (n', Just e')
-applyConAltNativeExp imm nextId (RDup fc v extra body) =
-    let (n, body') = applyConAltNativeExp imm nextId body in (n, RDup fc v extra body')
-applyConAltNativeExp imm nextId (RDrop fc vs body) =
-    let (n, body') = applyConAltNativeExp imm nextId body in (n, RDrop fc vs body')
-applyConAltNativeExp imm nextId (RFree fc v body) =
-    let (n, body') = applyConAltNativeExp imm nextId body in (n, RFree fc v body')
-applyConAltNativeExp imm nextId (RReleaseReuse fc v body) =
-    let (n, body') = applyConAltNativeExp imm nextId body in (n, RReleaseReuse fc v body')
-applyConAltNativeExp imm nextId (RReuseOffer fc sc dupOnShared dropOnUnique body) =
-    let (n, body') = applyConAltNativeExp imm nextId body in (n, RReuseOffer fc sc dupOnShared dropOnUnique body')
-applyConAltNativeExp imm nextId (RMemoize fc name rep body) =
-    let (n, body') = applyConAltNativeExp imm nextId body in (n, RMemoize fc name rep body')
+    goMaybe n (Just e) = let (n', e') = applyConAltNativeExp strict imm n e in (n', Just e')
+applyConAltNativeExp strict imm nextId (RDup fc v extra body) =
+    let (n, body') = applyConAltNativeExp strict imm nextId body in (n, RDup fc v extra body')
+applyConAltNativeExp strict imm nextId (RDrop fc vs body) =
+    let (n, body') = applyConAltNativeExp strict imm nextId body in (n, RDrop fc vs body')
+applyConAltNativeExp strict imm nextId (RFree fc v body) =
+    let (n, body') = applyConAltNativeExp strict imm nextId body in (n, RFree fc v body')
+applyConAltNativeExp strict imm nextId (RReleaseReuse fc v body) =
+    let (n, body') = applyConAltNativeExp strict imm nextId body in (n, RReleaseReuse fc v body')
+applyConAltNativeExp strict imm nextId (RReuseOffer fc sc dupOnShared dropOnUnique body) =
+    let (n, body') = applyConAltNativeExp strict imm nextId body in (n, RReuseOffer fc sc dupOnShared dropOnUnique body')
+applyConAltNativeExp strict imm nextId (RMemoize fc name rep body) =
+    let (n, body') = applyConAltNativeExp strict imm nextId body in (n, RMemoize fc name rep body')
 -- Every other shape (RV, RAppName, RUnderApp, RApp, RCon, ROp,
 -- RExtPrim, RPrimVal, RErased, RCrash, RLoopContinue, RAppNameRep,
 -- RStructGet, RStructSet -- and RLoop, though this pass runs strictly
 -- before Compiler.RC2.Loop/MutualLoop ever produce one, see RC2.idr's
 -- own toRCDefs): no further RCExp to recurse into.
-applyConAltNativeExp imm nextId e = (nextId, e)
+applyConAltNativeExp strict imm nextId e = (nextId, e)
 
 ||| Apply constructor-destructured-field native shadowing to one
 ||| top-level definition. Fresh shadow ids are pulled from the shared,
@@ -431,16 +433,16 @@ applyConAltNativeExp imm nextId e = (nextId, e)
 ||| return values -- only where that counter's *starting* value comes
 ||| from, and where its *final* value goes, changed.
 export
-applyConAltNative : {auto v : Ref VarId Int} -> (fieldCase : Bool) -> RCDef -> Core RCDef
-applyConAltNative fc (MkRCFun args retRep isWorker body) = do
+applyConAltNative : {auto v : Ref VarId Int} -> Maybe Strict -> (fieldCase : Bool) -> RCDef -> Core RCDef
+applyConAltNative strict fc (MkRCFun args retRep isWorker body) = do
     nextId <- get VarId
-    let (nextId', body') = applyConAltNativeExp (if fc then typedConstScrutinees body else empty) nextId body
+    let (nextId', body') = applyConAltNativeExp strict (if fc then typedConstScrutinees body else empty) nextId body
     put VarId nextId'
     pure $ MkRCFun args retRep isWorker body'
-applyConAltNative fc (MkRCError body) = do
+applyConAltNative strict fc (MkRCError body) = do
     nextId <- get VarId
-    let (nextId', body') = applyConAltNativeExp (if fc then typedConstScrutinees body else empty) nextId body
+    let (nextId', body') = applyConAltNativeExp strict (if fc then typedConstScrutinees body else empty) nextId body
     put VarId nextId'
     pure $ MkRCError body'
-applyConAltNative _ d@(MkRCCon _ _ _) = pure d
-applyConAltNative _ d@(MkRCForeign _ _ _) = pure d
+applyConAltNative _ _ d@(MkRCCon _ _ _) = pure d
+applyConAltNative _ _ d@(MkRCForeign _ _ _) = pure d

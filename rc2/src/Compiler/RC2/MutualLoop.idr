@@ -24,6 +24,7 @@ module Compiler.RC2.MutualLoop
 
 import Compiler.RC2.RCExp
 import Compiler.RC2.CalleeTable
+import Compiler.RC2.NativeUse
 import Compiler.RC2.Rewrite
 import Compiler.RC2.Util
 import Compiler.RC2.WorkerName
@@ -136,12 +137,13 @@ tarjanSCCs graph =
 -- Synthesising one merged group.
 
 buildGroup : {auto r : Ref FreshId Int} -> {auto v : Ref VarId Int}
+          -> Maybe Strict
           -> CalleeTable
           -> SortedSet Name
           -> SortedMap Name (List Int, RCExp)
           -> List Name
-          -> Core (List (Name, RCDef), (Name, SortedSet Int))
-buildGroup calleeTable existingNames memberDefs groupNames = do
+          -> Core (List (Name, RCDef), (Name, SortedSet Int), List (Int, NativeTy))
+buildGroup strict calleeTable existingNames memberDefs groupNames = do
     -- Deterministic order (SortedSet's own Foldable, Prelude.toList,
     -- is sorted by `Ord Name`), so tag assignment doesn't depend on
     -- SCC-traversal order.
@@ -167,7 +169,7 @@ buildGroup calleeTable existingNames memberDefs groupNames = do
     -- never promote it (`noPromote`). rc2/doc/loop-conversion.md's
     -- "MutualLoop" section and its "Bugs found" 8.
     let classesOf : List (List (Maybe NativeTy)) :=
-            map (\(_, (args, body)) => map (\p => callArgOrOpNativeTy calleeTable p body) args) members
+            map (\(_, (args, body)) => map (\p => callArgOrOpNativeTy strict calleeTable p body) args) members
     let classes : List (Maybe NativeTy) := nub (concat classesOf)
     let widths : List Nat := map (\k => foldl max Z (map (\ks => length (filter (== k) ks)) classesOf)) classes
     let classOffsets : List Nat := reverse (snd (foldl (\ao, a => (fst ao + a, fst ao :: snd ao)) (the (Nat, List Nat) (Z, [])) widths))
@@ -201,7 +203,13 @@ buildGroup calleeTable existingNames memberDefs groupNames = do
     let boxedSlots : SortedSet Int :=
             SortedSet.fromList (concatMap (\(k, o, w) => if isJust k then [] else map slotAt (take w [o ..]))
                                           (zip3 classes classOffsets widths))
-    pure ((mergedName, mergedDef) :: wrappers, (mergedName, boxedSlots))
+    -- `strictnative`: a native class's slots are shown to hold its type, and the tag an `Int64`
+    let shown : List (Int, NativeTy) :=
+            if isNothing strict then []
+            else (tagId, TPrim Int64Type) ::
+                 concatMap (\(k, o, w) => maybe [] (\ty => map (\i => (slotAt i, ty)) (take w [o ..])) k)
+                           (zip3 classes classOffsets widths)
+    pure ((mergedName, mergedDef) :: wrappers, (mergedName, boxedSlots), shown)
   where
     ||| `args` at their slots `pos` among `slotCount`, `RCNull` everywhere else.
     placed : Nat -> List Nat -> List RCLocal -> List RCLocal
@@ -241,8 +249,8 @@ buildGroup calleeTable existingNames memberDefs groupNames = do
 ||| pass through completely unchanged. Also returns, per merged function,
 ||| the slots Loop must never promote (`buildGroup`'s `noPromote`).
 export
-applyMutualLoop : {auto v : Ref VarId Int} -> List (Name, RCDef) -> Core (List (Name, RCDef), SortedMap Name (SortedSet Int))
-applyMutualLoop defs = do
+applyMutualLoop : {auto v : Ref VarId Int} -> Maybe Strict -> List (Name, RCDef) -> Core (List (Name, RCDef), SortedMap Name (SortedSet Int), Maybe Strict)
+applyMutualLoop strict defs = do
     _ <- newRef FreshId 0
     let memberDefs = SortedMap.fromList $ mapMaybe
             (\(n, d) => case d of
@@ -252,12 +260,13 @@ applyMutualLoop defs = do
     let graph = buildGraph memberDefs
     let groups = filter (\g => length g >= 2) (tarjanSCCs graph)
     let existingNames = SortedSet.fromList (map (\(n, _) => n) defs)
-    let calleeTable = buildCalleeTable defs
-    built <- traverse (buildGroup calleeTable existingNames memberDefs) groups
-    let newDefs = foldr (++) [] (map fst built)
+    let calleeTable = buildCalleeTable strict defs
+    built <- traverse (buildGroup strict calleeTable existingNames memberDefs) groups
+    let newDefs = foldr (++) [] (map (\(ds, _, _) => ds) built)
     let mergedMemberNames = SortedSet.fromList (concat groups)
     let untouched = filter (\(n, _) => not (contains n mergedMemberNames)) defs
-    pure (untouched ++ newDefs, SortedMap.fromList (map snd built))
+    let strict' = map (\st => { params $= \ps => foldl (\m, (i, ty) => insert i [ty] m) ps (concatMap (\(_, _, sh) => sh) built) } st) strict
+    pure (untouched ++ newDefs, SortedMap.fromList (map (\(_, np, _) => np) built), strict')
   where
     buildGraph : SortedMap Name (List Int, RCExp) -> Graph
     buildGraph memberDefs =

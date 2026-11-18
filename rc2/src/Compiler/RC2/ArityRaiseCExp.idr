@@ -115,6 +115,8 @@ raisePlan defs =
 -------------------------------------------------------------------------------
 -- Rewrite
 
+||| The name of `n`'s copy that takes the world as one more argument.
+export
 raisedName : Name -> Name
 raisedName n = MN ("rc2_raised_" ++ cName n) 0
 

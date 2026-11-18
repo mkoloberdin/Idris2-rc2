@@ -327,9 +327,9 @@ hasNonNativeUse ty loopSlots target e = any (hasNonNativeUse ty loopSlots target
 ||| `Just ty` iff `paramId`'s occurrences in `calleeBody` are all
 ||| `ty`-typed native-operand reads (`hasNonNativeUse`); `ty` comes from
 ||| `nativeArgType` first.
-loopParamNativeType : (paramId : Int) -> (calleeBody : RCExp) -> Maybe PrimType
-loopParamNativeType paramId calleeBody =
-    case nativeArgType paramId calleeBody of
+loopParamNativeType : Maybe Strict -> (paramId : Int) -> (calleeBody : RCExp) -> Maybe PrimType
+loopParamNativeType strict paramId calleeBody =
+    case nativeArgType strict paramId calleeBody of
          Nothing => Nothing
          Just ty => if hasNonNativeUse ty [] paramId calleeBody then Nothing else Just ty
 
@@ -387,14 +387,14 @@ resolveConstClosureApps ccs e = mapChildren (resolveConstClosureApps ccs) e
 ||| boxing decision (`RNative ty` only if `loopParamNativeType` agrees at the
 ||| same type). See `rc2/doc/inlining.md`, "Criterion B, revisited", for
 ||| why.
-buildSplice : {auto v : Ref VarId Int} -> FC -> SortedMap Int Rep -> RCExp -> List (Int, RCLocal) -> Core (Renaming, RCExp -> RCExp, SortedSet Int, ConstClosureArgs)
-buildSplice fc reps calleeBody [] = pure (empty, id, empty, empty)
-buildSplice fc reps calleeBody ((paramId, actual@(RCLoc actualId)) :: rest) = do
-    (ren, wrap, promoted, ccs) <- buildSplice fc reps calleeBody rest
+buildSplice : {auto v : Ref VarId Int} -> Maybe Strict -> FC -> SortedMap Int Rep -> RCExp -> List (Int, RCLocal) -> Core (Renaming, RCExp -> RCExp, SortedSet Int, ConstClosureArgs)
+buildSplice strict fc reps calleeBody [] = pure (empty, id, empty, empty)
+buildSplice strict fc reps calleeBody ((paramId, actual@(RCLoc actualId)) :: rest) = do
+    (ren, wrap, promoted, ccs) <- buildSplice strict fc reps calleeBody rest
     case argRep reps actual of
          RNative (TPrim ty) => do
              f <- freshVarId
-             let (rep, promoted') = case loopParamNativeType paramId calleeBody of
+             let (rep, promoted') = case loopParamNativeType strict paramId calleeBody of
                                           Just ty' => if ty' == ty then (RNative (TPrim ty), SortedSet.insert f promoted) else (RBoxed, promoted)
                                           Nothing => (RBoxed, promoted)
              pure (insert paramId f ren, wrap . RLet fc f rep (RV fc actual), promoted', ccs)
@@ -417,12 +417,12 @@ buildSplice fc reps calleeBody ((paramId, actual@(RCLoc actualId)) :: rest) = do
 -- gets a fresh declaration. A native-eligible literal (`litRep`) whose
 -- reads are all native at that type is bound `RNative`; the rest stay
 -- `RBoxed`.
-buildSplice fc reps calleeBody ((paramId, actual) :: rest) = do
-    (ren, wrap, promoted, ccs) <- buildSplice fc reps calleeBody rest
+buildSplice strict fc reps calleeBody ((paramId, actual) :: rest) = do
+    (ren, wrap, promoted, ccs) <- buildSplice strict fc reps calleeBody rest
     f <- freshVarId
     let (rep, promoted') = case constLitRep actual of
                                 Nothing => (RBoxed, promoted)
-                                Just ty => case loopParamNativeType paramId calleeBody of
+                                Just ty => case loopParamNativeType strict paramId calleeBody of
                                                 Just ty' => if ty' == ty
                                                                then (RNative (TPrim ty), SortedSet.insert f promoted)
                                                                else (RBoxed, promoted)
@@ -496,9 +496,9 @@ data SpliceCount : Type where
 ||| (renamed) body. `reps`: the caller's own current `Rep` environment
 ||| at this exact call site (`inlineInto`'s own walk), consulted by
 ||| `buildSplice` above -- never the callee's own declared param `Rep`.
-spliceCall : {auto v : Ref VarId Int} -> FC -> SortedMap Int Rep -> RCDef -> List RCLocal -> Core RCExp
-spliceCall fc reps (MkRCFun calleeArgs _ _ calleeBody) actualArgs = do
-    (paramRen, wrap, promoted, ccs) <- buildSplice fc reps calleeBody (zip (map fst calleeArgs) actualArgs)
+spliceCall : {auto v : Ref VarId Int} -> Maybe Strict -> FC -> SortedMap Int Rep -> RCDef -> List RCLocal -> Core RCExp
+spliceCall strict fc reps (MkRCFun calleeArgs _ _ calleeBody) actualArgs = do
+    (paramRen, wrap, promoted, ccs) <- buildSplice strict fc reps calleeBody (zip (map fst calleeArgs) actualArgs)
     let paramIds = SortedSet.fromList (map fst calleeArgs)
     internalRen <- freshenBoundIds (filter (\i => not (contains i paramIds)) (collectBoundIds calleeBody))
     let ren = foldl (\acc, (k, val) => insert k val acc) paramRen (SortedMap.toList internalRen)
@@ -507,7 +507,7 @@ spliceCall fc reps (MkRCFun calleeArgs _ _ calleeBody) actualArgs = do
     pure $ wrap (resolveConstClosureApps ccs (stripOwnership promoted (renameRCExp ren calleeBody)))
 -- Defensive only -- `eligible` and `tinyOnly` (built from `isFun` in
 -- `analyse`) never name anything but a `MkRCFun`.
-spliceCall _ _ d _ = pure $ RCrash EmptyFC "[rc2] internal: LateInline target wasn't a MkRCFun"
+spliceCall _ _ _ d _ = pure $ RCrash EmptyFC "[rc2] internal: LateInline target wasn't a MkRCFun"
 
 ------------------------------------------------------------------------
 -- Whole-tree rewrite: replace every eligible call site
@@ -519,8 +519,8 @@ spliceCall _ _ d _ = pure $ RCrash EmptyFC "[rc2] internal: LateInline target wa
 ||| `RLet`/`RLoop`) is what `buildSplice` binds arguments by, not the
 ||| callee's declared param `Rep`. A callee that calls `self` back is
 ||| refused (`callsBack`).
-inlineInto : {auto v : Ref VarId Int} -> {auto sc : Ref SpliceCount Nat} -> (tiny : Nat) -> SortedMap Name RCDef -> SortedSet Name -> SortedSet Name -> (self : Name) -> RCExp -> Core RCExp
-inlineInto tiny defOf eligible tinyOnly self = go empty empty []
+inlineInto : {auto v : Ref VarId Int} -> {auto sc : Ref SpliceCount Nat} -> Maybe Strict -> (tiny : Nat) -> SortedMap Name RCDef -> SortedSet Name -> SortedSet Name -> (self : Name) -> RCExp -> Core RCExp
+inlineInto strict tiny defOf eligible tinyOnly self = go empty empty []
   where
     -- The callee's size now, not when the round began: splicing into it earlier
     -- in the round may have grown it, and a grown body is not a tiny one.
@@ -559,7 +559,7 @@ inlineInto tiny defOf eligible tinyOnly self = go empty empty []
            then case lookup n defOf of
                      Just d => do
                          update SpliceCount S
-                         spliceCall fc reps d args
+                         spliceCall strict fc reps d args
                      Nothing => pure (RAppName fc lazy n args)
            else pure (RAppName fc lazy n args)
     -- The call is an `RLet`'s still-`RBoxed` value: `promotableNativeLetRep`
@@ -570,7 +570,7 @@ inlineInto tiny defOf eligible tinyOnly self = go empty empty []
            then case lookup n defOf of
                      Just d => do
                          update SpliceCount S
-                         splicedValue <- passThrough <$> spliceCall vfc reps d args
+                         splicedValue <- passThrough <$> spliceCall strict vfc reps d args
                          case promotableNativeLetRep loopSlots var splicedValue body of
                               Just ty => do
                                   body' <- go cl (insert var (RNative (TPrim ty)) reps) loopSlots body
@@ -598,8 +598,8 @@ inlineInto tiny defOf eligible tinyOnly self = go empty empty []
 |||
 ||| The `logTime`s wrap `pure $ <computation>`, not a `let`: a `let` runs
 ||| before the timer starts and reports nothing.
-applyLateInlineOnce : {auto v : Ref VarId Int} -> {auto c : Ref Ctxt Defs} -> (tiny : Nat) -> (early : Maybe (SortedSet Name)) -> (seed : CalleeInfo) -> (roots : List Name) -> (focus : Maybe (SortedSet Name)) -> Maybe Carried -> SortedSet Name -> List (Name, RCDef) -> Core (Bool, List (Name, RCDef), Carried, SortedSet Name)
-applyLateInlineOnce tiny early seed roots focus prev dirty defs0 = do
+applyLateInlineOnce : {auto v : Ref VarId Int} -> {auto c : Ref Ctxt Defs} -> Maybe Strict -> (tiny : Nat) -> (early : Maybe (SortedSet Name)) -> (seed : CalleeInfo) -> (roots : List Name) -> (focus : Maybe (SortedSet Name)) -> Maybe Carried -> SortedSet Name -> List (Name, RCDef) -> Core (Bool, List (Name, RCDef), Carried, SortedSet Name)
+applyLateInlineOnce strict tiny early seed roots focus prev dirty defs0 = do
     (defs, refs') <- logTime 3 "rc2: LI prune" $
               pure $ pruneDeadDefsCached (maybe empty (.refs) prev) dirty roots defs0
     -- Shared with `goOrder`: `analyse` and the splice walk both need it.
@@ -664,10 +664,10 @@ applyLateInlineOnce tiny early seed roots focus prev dirty defs0 = do
         before <- get SpliceCount
         defOf' <- case lookup n defOf of
                        Just (MkRCFun args retRep isWorker body) => do
-                           body' <- inlineInto tiny defOf eligible tinyOnly n body
+                           body' <- inlineInto strict tiny defOf eligible tinyOnly n body
                            pure (insert n (MkRCFun args retRep isWorker body') defOf)
                        Just (MkRCError body) => do
-                           body' <- inlineInto tiny defOf eligible tinyOnly n body
+                           body' <- inlineInto strict tiny defOf eligible tinyOnly n body
                            pure (insert n (MkRCError body') defOf)
                        _ => pure defOf
         after <- get SpliceCount
@@ -698,10 +698,10 @@ maxLateInlineIterations = 8
 ||| (`Nothing`: all of them). Only those are examined for a site that needs a
 ||| closure argument; the sites that need none are found in every definition.
 export
-applyLateInlineWith : {auto v : Ref VarId Int} -> {auto c : Ref Ctxt Defs} -> (tiny : Nat) -> (label : String) -> (early : Bool)
+applyLateInlineWith : {auto v : Ref VarId Int} -> {auto c : Ref Ctxt Defs} -> Maybe Strict -> (tiny : Nat) -> (label : String) -> (early : Bool)
                    -> (roots : List Name) -> (focus : Maybe (SortedSet Name)) -> (resume : Maybe (Carried, SortedSet Name))
                    -> List (Name, RCDef) -> Core (SortedSet Name, Maybe Carried, List (Name, RCDef))
-applyLateInlineWith tiny label early roots focus resume defs0 =
+applyLateInlineWith strict tiny label early roots focus resume defs0 =
     -- The early run skips every callee in a call cycle: splicing one would
     -- turn the cycle into a direct call back to the caller, which the later
     -- run then refuses (constructor-escape-analysis.md, "Early inline").
@@ -720,13 +720,13 @@ applyLateInlineWith tiny label early roots focus resume defs0 =
                              else "\{show (length (Prelude.toList dirty))} spliced last round"
         (changed, defs', carried, dirty') <-
             logTime 3 "rc2: \{label} (round \{show round}/\{show maxLateInlineIterations}, \{carriedNote})" $
-              applyLateInlineOnce tiny excluded seed roots focus prev dirty defs
+              applyLateInlineOnce strict tiny excluded seed roots focus prev dirty defs
         if changed
            then go seed excluded (S round) fuel (SortedSet.union spliced dirty') (Just dirty') (Just carried) dirty' defs'
            else pure (spliced, Just carried, defs')
 
 ||| `applyLateInlineWith` without the tiny-callee criterion, for the late run.
 export
-applyLateInline : {auto v : Ref VarId Int} -> {auto c : Ref Ctxt Defs} -> (label : String) -> (early : Bool)
+applyLateInline : {auto v : Ref VarId Int} -> {auto c : Ref Ctxt Defs} -> Maybe Strict -> (label : String) -> (early : Bool)
                -> (roots : List Name) -> List (Name, RCDef) -> Core (List (Name, RCDef))
-applyLateInline label early roots defs0 = (\(_, _, ds) => ds) <$> applyLateInlineWith 0 label early roots Nothing Nothing defs0
+applyLateInline strict label early roots defs0 = (\(_, _, ds) => ds) <$> applyLateInlineWith strict 0 label early roots Nothing Nothing defs0

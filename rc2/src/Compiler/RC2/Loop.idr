@@ -469,8 +469,8 @@ dupInvariantBoxed _ e = e
 ||| to a call argument; invariant parameters stay excluded because
 ||| `markInvariantNative` has no `RAppName` case.
 ||| See `rc2/doc/loop-conversion.md`'s "`applyLoop` -- the wrapping decision" and "Known limitation".
-applyLoopFromId : (nextId0 : Int) -> CalleeTable -> (noPromote : SortedSet Int) -> Name -> RCDef -> (Int, RCDef)
-applyLoopFromId nextId0 calleeTable noPromote self (MkRCFun args retRep isWorker body) =
+applyLoopFromId : (nextId0 : Int) -> Maybe Strict -> CalleeTable -> (noPromote : SortedSet Int) -> Name -> RCDef -> (Int, RCDef)
+applyLoopFromId nextId0 strict calleeTable noPromote self (MkRCFun args retRep isWorker body) =
     let argIds = map fst args
         (_, found, body') = mapTailAppNames (\fc, n, args' => if n == self then Just (RLoopContinue fc args' []) else Nothing) body
     in if not found
@@ -502,16 +502,16 @@ applyLoopFromId nextId0 calleeTable noPromote self (MkRCFun args retRep isWorker
                   -- A parameter read only as a raw pointer (`ptrParams`)
                   -- is shadowed as a `TPtr`, when no `PrimType` read
                   -- claims it.
-                  ptrIds : SortedSet Int := ptrParams calleeTable argIds body'
+                  ptrIds : SortedSet Int := ptrParams strict calleeTable argIds body'
                   nativeTyOf : Maybe PrimType -> Int -> Maybe NativeTy
                   nativeTyOf (Just ty) _ = Just (TPrim ty)
                   nativeTyOf Nothing p = if contains p ptrIds then Just TPtr else Nothing
                   eligibleVariant : List (Int, NativeTy) := mapMaybe (\p => if contains p invariantIdsPre || contains p noPromote
                                                                                 then Nothing
-                                                                                else map (\ty => (p, ty)) (callArgOrOpNativeTy calleeTable p body'))
+                                                                                else map (\ty => (p, ty)) (callArgOrOpNativeTy strict calleeTable p body'))
                                                                       argIds
                   eligibleInvariant : List (Int, NativeTy) := mapMaybe (\p => if contains p invariantIdsPre && not (contains p noPromote)
-                                                                                  then map (\ty => (p, ty)) (nativeTyOf (nativeArgType p body') p)
+                                                                                  then map (\ty => (p, ty)) (nativeTyOf (nativeArgType strict p body') p)
                                                                                   else Nothing)
                                                                         argIds
                   shadowedVariant : List (Int, Int, NativeTy) := assignShadowIds nextId0 eligibleVariant
@@ -641,7 +641,7 @@ applyLoopFromId nextId0 calleeTable noPromote self (MkRCFun args retRep isWorker
                                               (RLet emptyFC resultVar retRep dupped
                                                 (RDrop emptyFC [RCLoc p] (RV emptyFC (RCLoc resultVar)))))
               in (fst wrapInvariantShadows, MkRCFun args retRep isWorker (snd wrapInvariantShadows))
-applyLoopFromId nextId0 _ _ _ d = (nextId0, d)
+applyLoopFromId nextId0 _ _ _ _ d = (nextId0, d)
 
 ||| Self-tail-call loop conversion of one top-level definition, given its
 ||| own `Name` (see `applyLoopFromId`): the `Core` wrapper that supplies the
@@ -655,9 +655,9 @@ applyLoopFromId nextId0 _ _ _ d = (nextId0, d)
 ||| function threading that starting id through its own return value; this
 ||| thin `Core` wrapper reads and writes the shared counter once each.
 export
-applyLoop : {auto v : Ref VarId Int} -> CalleeTable -> SortedSet Int -> Name -> RCDef -> Core RCDef
-applyLoop calleeTable noPromote self d = do
+applyLoop : {auto v : Ref VarId Int} -> Maybe Strict -> CalleeTable -> SortedSet Int -> Name -> RCDef -> Core RCDef
+applyLoop strict calleeTable noPromote self d = do
     nextId0 <- get VarId
-    let (nextId', d') = applyLoopFromId nextId0 calleeTable noPromote self d
+    let (nextId', d') = applyLoopFromId nextId0 strict calleeTable noPromote self d
     put VarId nextId'
     pure d'
