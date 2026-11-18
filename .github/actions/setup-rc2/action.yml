@@ -12,14 +12,24 @@ runs:
         sudo apt-get update
         sudo apt-get install -y --no-install-recommends chezscheme gcc make libgmp-dev pkg-config valgrind
 
+    # install/ holds a compiled Idris 2, which only the Chez Scheme it was built with can load
+    # (a different one fails with "incompatible fasl-object version"). The packages above are the
+    # runner's latest, so the key names the Chez Scheme, gcc and Ubuntu actually installed.
+    - name: Name the toolchain
+      id: toolchain
+      shell: bash
+      run: |
+        . /etc/os-release
+        echo "id=${ID}${VERSION_ID}-chez$(dpkg-query -W -f='${Version}' chezscheme)-gcc$(gcc -dumpfullversion)" >> "$GITHUB_OUTPUT"
+
     # The Idris 2 of the pinned commit is the slow part (a Chez bootstrap); install/ is
-    # kept for as long as the pin, the script that builds it and the runner image stay.
+    # kept for as long as the pin, the script that builds it and the toolchain stay.
     - name: Restore Idris 2
       id: idris2-cache
       uses: actions/cache/restore@v4
       with:
         path: install
-        key: idris2-${{ runner.os }}-${{ env.ImageOS }}-${{ hashFiles('.github/ci/idris2-rev', '.github/ci/setup-idris2.sh') }}
+        key: idris2-${{ steps.toolchain.outputs.id }}-${{ hashFiles('.github/ci/idris2-rev', '.github/ci/setup-idris2.sh') }}
 
     - name: Build Idris 2
       shell: bash
