@@ -11,7 +11,8 @@
 
 The action `.github/actions/setup-rc2` (both reusable workflows start with it) installs Chez Scheme, gcc, gmp and valgrind with apt, builds the Idris 2 of the
 pinned upstream commit (`setup-idris2.sh`, about 12 minutes, cached in `install/` for as long as the
-pin, the script and the runner image stay), builds and installs rc2, `libs/rc2base` and `libs/control-async`
+pin, the script and the toolchain stay: the key names the Ubuntu, Chez Scheme and gcc versions
+installed, because an Idris 2 built by one Chez Scheme cannot be loaded by another), builds and installs rc2, `libs/rc2base` and `libs/control-async`
 (`build-rc2.sh`, about 5 minutes). `rc2-verify.yml` then runs `verify.sh --skip-build` and
 `rc2-selfhost.yml` runs `selfhost.sh`, both from `rc2/tests`. The logs of a failed run are kept as the
 artifacts `verify-logs` and `selfhost-logs`.
