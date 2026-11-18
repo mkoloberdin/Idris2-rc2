@@ -121,8 +121,7 @@ Directives that look like they belong on this list but don't:
   not shown, and stay boxed. Always-unboxed constructor fields (`noboolfield`) are off under it, and a
   constructor field is shadowed natively only as far as its declared type shows. For programs whose types
   depend on values (`doc/native-type-inference.md`, "The strict mode"). Whole-program compiles only: an
-  incremental compile ignores it. `dumpstrict` writes the declared table it works from to `<output>.strict`,
-  and each definition's binders to `<output>.binders`.
+  incremental compile ignores it. `dumpstrict` writes the declared table it works from to `<output>.strict`.
 - **`latepushcon` is the other opt-in stage.** It turns *on*
   `Compiler.RC2.PushCon`'s post-RC push (`applyPushConRC`), right after
   the later `LateInline` run: the same case-into-tails push, with each

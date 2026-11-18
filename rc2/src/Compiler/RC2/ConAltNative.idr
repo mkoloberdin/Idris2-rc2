@@ -374,9 +374,8 @@ applyConAltNativeExp strict imm nextId (RConCase fc sc alts mDef) =
     goAlt : Int -> RConAlt -> (Int, RConAlt)
     goAlt n (MkRConAlt name ci tag args body) =
         let (n1, body1) = applyConAltNativeExp strict imm n body
-            -- `--directive strictnative`: a field may be shadowed natively only as far as the
-            -- constructor's declared field type shows it (rc2/doc/native-type-inference.md, "The strict mode")
-            altStrict = map (\st => MkStrict (SortedMap.fromList (zip args (fromMaybe [] (lookup name st.cons)))) empty empty) strict
+            -- `strictnative`: only as far as the constructor's declared field types show
+            altStrict = fieldStrict strict name args
             (n2, body2) = shadowAltFields altStrict imm n1 args body1
         in (n2, MkRConAlt name ci tag args body2)
     goAlts : Int -> List RConAlt -> (Int, List RConAlt)

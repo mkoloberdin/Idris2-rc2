@@ -470,11 +470,9 @@ boolReturnPlan : Maybe Strict -> List (Name, RCDef) -> SortedSet Name
 boolReturnPlan strict defs =
     let arities : SortedMap Name Nat := SortedMap.fromList (mapMaybe arityOf defs)
         tbl : SortedMap Name (List RetTail) := SortedMap.fromList (mapMaybe (funTails arities) defs)
-        -- `--directive strictnative`: a function whose declared return type is not shown to be a Bool-like
-        -- enumeration never joins, and nor does one that tail-calls it.
-        notShown : SortedSet Name := case strict of
-                       Nothing => empty
-                       Just st => fromList (filter (\n => not (maybe False (elem (TPrim Bits8Type)) (lookup n st.returns))) (keys tbl))
+        -- `strictnative`: a function whose declared result is not shown a Bool-like enumeration never
+        -- joins, and nor does one that tail-calls it
+        notShown : SortedSet Name := fromList (filter (\n => not (returnShown strict n (TPrim Bits8Type))) (keys tbl))
     in settle tbl (tailCallers tbl) notShown
   where
     arityOf : (Name, RCDef) -> Maybe (Name, Nat)
@@ -848,12 +846,6 @@ applyDualABI strict boolReturn nullTable defs = do
     -- whole-program def list. See `code-style-Idris2.md`.
     foldr (++) [] <$> traverse (synthesizeIfEligible ffiRets ptrTable nullTable boolPlan existingNames) defs
   where
-    -- `--directive strictnative`: a native result only where the declared return type shows it.
-    retShown : Name -> NativeTy -> Maybe NativeTy
-    retShown n ty = case strict of
-                         Nothing => Just ty
-                         Just st => if maybe False (elem ty) (lookup n st.returns) then Just ty else Nothing
-
     synthesizeIfEligible : {auto r : Ref FreshId Int} -> SortedMap Name (NativeTy, Nat) -> CalleeTable -> SortedMap Name (SortedMap Int NativeTy) -> SortedSet Name -> SortedSet Name -> (Name, RCDef) -> Core (List (Name, RCDef))
     synthesizeIfEligible ffiRets ptrTable nullTable boolPlan existingNames (n, d@(MkRCFun args retRep _ body)) =
         if isMutualLoopMerged n
@@ -866,7 +858,8 @@ applyDualABI strict boolReturn nullTable defs = do
                  eligible = mapMaybe (\(p, mty) => case mty of
                                                          Just ty => Just (p, TPrim ty)
                                                          Nothing => map (p,) (lookup p byCalls <|> lookup p byNull)) params
-                 retEligible = if contains n boolPlan then Just (TPrim Bits8Type) else returnEligibility ffiRets params body >>= retShown n
+                 retEligible = if contains n boolPlan then Just (TPrim Bits8Type)
+                                  else returnEligibility ffiRets params body >>= \ty => toMaybe (returnShown strict n ty) ty
              if null eligible && isNothing retEligible
                 then pure [(n, d)]
                 else do

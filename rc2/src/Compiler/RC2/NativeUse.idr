@@ -245,25 +245,25 @@ nativeArgTypesFor tracked (RLoop _ loopParams initial _ body) =
     in fromInitial `unionMaps` nativeArgTypesFor tracked body
 nativeArgTypesFor _ _ = empty
 
-||| `--directive strictnative` (rc2/doc/native-type-inference.md's "The strict mode"): the native types each
-||| parameter id may be held as, from its declared type. An id it does not list is not shown safe.
+||| What the declared types show (`--directive strictnative`, rc2/doc/native-type-inference.md's "The strict mode"):
+||| what each parameter id, function result and constructor field may be held as. One not listed is not shown.
 public export
 record Strict where
   constructor MkStrict
   params : SortedMap Int (List NativeTy)
   returns : SortedMap Name (List NativeTy)
-  ||| what each field of a constructor may be held as, in field order; a constructor not here has none shown
   cons : SortedMap Name (List (List NativeTy))
 
-||| The `Ref` tag a pass deep in a `Core` chain reads the `Maybe Strict` from (`Compiler.RC2.LateInline`).
+||| Whether the function `n`'s declared result shows that it may be held as `ty`; always, without the mode.
 export
-data StrictTag : Type where
+returnShown : Maybe Strict -> Name -> NativeTy -> Bool
+returnShown strict n ty = maybe True (\s => maybe False (elem ty) (lookup n s.returns)) strict
 
-||| Whether `--directive strictnative`, if on, lets `p` be held as `ty`.
+||| `strict` narrowed to the fields `args` of the constructor `con`.
 export
-strictAllows : Maybe Strict -> Int -> NativeTy -> Bool
-strictAllows Nothing _ _ = True
-strictAllows (Just s) p ty = maybe False (elem ty) (lookup p s.params)
+fieldStrict : Maybe Strict -> Name -> List Int -> Maybe Strict
+fieldStrict strict con args =
+    map (\s => MkStrict (SortedMap.fromList (zip args (fromMaybe [] (lookup con s.cons)))) empty empty) strict
 
 ||| The type each operand position of `op` requires, whatever its own result representation (boxed or
 ||| native): a cast's source type; a string op's string and index positions; the op's own type otherwise.
@@ -334,25 +334,18 @@ takenApartFor tracked e = foldr union (here e) (map (takenApartFor tracked) (chi
 ||| Whether `ty`, chosen for `p` from some of its reads, is consistent with the typed reads and the cases.
 fits : Maybe Strict -> SortedMap Int (SortedSet PrimType) -> SortedSet Int -> Int -> NativeTy -> Bool
 fits strict reads apart p ty =
-    strictAllows strict p ty &&
+    maybe True (\s => maybe False (elem ty) (lookup p s.params)) strict &&
     not (contains p apart) &&
     (let tys = maybe [] Prelude.toList (lookup p reads)
      in case ty of
              TPrim t => all (== t) tys
              _ => null tys)   -- a pointer or an erased value is no primitive's operand
 
-||| Whether native type `ty`, chosen from `p`'s reads, is consistent with every other read of `p` in `body`: every
-||| typed primitive read agrees with it (`primReadTypesFor`; none for a pointer), and no branch takes `p` apart as
-||| a constructor with fields (`takenApartFor`). A value whose type depends on another argument (`Value (vt k)`,
-||| `Dom o r`) fails one or the other when its branches disagree; promoting it at one branch's type hands the
-||| others a byte. See rc2/doc/native-type-inference.md's "Types that depend on a value".
-export
-consistentNative : Maybe Strict -> (p : Int) -> RCExp -> NativeTy -> Bool
-consistentNative strict p body ty =
-    let one = SortedSet.singleton p
-    in fits strict (primReadTypesFor one body) (takenApartFor one body) p ty
-
-||| `consistentNative` for every entry of `chosen` at once, in one walk of `body` for all of them.
+||| `chosen` without the entries that do not fit the other reads of `body`, in one walk of `body` for all of
+||| them: every typed primitive read of the id agrees with its type (`primReadTypesFor`; none for a pointer),
+||| and no branch takes it apart as a constructor with fields (`takenApartFor`). A value whose type depends on
+||| another argument (`Value (vt k)`, `Dom o r`) fails one or the other when its branches disagree.
+||| See rc2/doc/native-type-inference.md's "Types that depend on a value".
 export
 consistentNatives : Maybe Strict -> RCExp -> SortedMap Int NativeTy -> SortedMap Int NativeTy
 consistentNatives strict body chosen =
@@ -360,6 +353,11 @@ consistentNatives strict body chosen =
         reads = primReadTypesFor ids body
         apart = takenApartFor ids body
     in SortedMap.fromList (filter (\(p, ty) => fits strict reads apart p ty) (SortedMap.toList chosen))
+
+||| `consistentNatives` for the one id `p`.
+export
+consistentNative : Maybe Strict -> (p : Int) -> RCExp -> NativeTy -> Bool
+consistentNative strict p body ty = isJust (lookup p (consistentNatives strict body (SortedMap.singleton p ty)))
 
 ||| The single native `PrimType` top-level parameter `p` should be
 ||| shadowed at, if `body` reads it that way at all, and consistently

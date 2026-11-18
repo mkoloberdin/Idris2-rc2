@@ -643,7 +643,7 @@ The check above only vetoes when a contradiction is visible. The strict mode add
 side: a value is held natively across a function boundary only where its declared type shows the
 representation. Everything else is unknown and stays boxed. It is opt-in (`Compiler.RC2.StrictNative`).
 
-**The table.** `declaredTable` reads each function's declared type (`lookupCtxtExact`, normalized
+**The table.** `StrictNative.declarations` reads each function's declared type (`lookupCtxtExact`, normalized
 with the binders instantiated with `Erased`, so a type that depends on one is stuck) and classifies
 each compiled argument and the result:
 
@@ -663,8 +663,7 @@ to its binder by name: `{arg:N}` is binder `N`, `{ext:K}` the `K`th binder after
 arguments (`Compiler.Inline.mergeLambdas`), a copy `ArityRaiseCExp` made (`raisedName`) the original's
 arguments and the declared type's last binder, which has to be the world (`DeadArgs` may have removed
 any of the arguments before it). Any other name, or arguments that do not account for the binders, make
-the whole function unknown. `--directive dumpstrict` writes the table to `<output>.strict` and each
-function's binders to `<output>.binders`.
+the whole function unknown. `--directive dumpstrict` writes the table to `<output>.strict`.
 
 **Where it is asked.** The table goes into `NativeUse.consistentNative(s)` as one more condition, so
 every place that asks that check asks it: `nativeArgType*`, `CalleeTable` (pointer parameters and the

@@ -142,7 +142,7 @@ buildGroup : {auto r : Ref FreshId Int} -> {auto v : Ref VarId Int}
           -> SortedSet Name
           -> SortedMap Name (List Int, RCExp)
           -> List Name
-          -> Core (List (Name, RCDef), (Name, SortedSet Int), List (Int, List NativeTy))
+          -> Core (List (Name, RCDef), (Name, SortedSet Int), List (Int, NativeTy))
 buildGroup strict calleeTable existingNames memberDefs groupNames = do
     -- Deterministic order (SortedSet's own Foldable, Prelude.toList,
     -- is sorted by `Ord Name`), so tag assignment doesn't depend on
@@ -203,14 +203,12 @@ buildGroup strict calleeTable existingNames memberDefs groupNames = do
     let boxedSlots : SortedSet Int :=
             SortedSet.fromList (concatMap (\(k, o, w) => if isJust k then [] else map slotAt (take w [o ..]))
                                           (zip3 classes classOffsets widths))
-    -- `--directive strictnative`: a native class's slots hold what its members' parameters were shown to
-    -- (rc2/doc/native-type-inference.md's "The strict mode"); the tag only ever holds a constant.
-    let shown : List (Int, List NativeTy) :=
-            (tagId, [TPrim Int64Type]) ::
-            concatMap (\(k, o, w) => case k of
-                                         Just ty => map (\i => (slotAt i, [ty])) (take w [o ..])
-                                         Nothing => [])
-                      (zip3 classes classOffsets widths)
+    -- `strictnative`: a native class's slots are shown to hold its type, and the tag an `Int64`
+    let shown : List (Int, NativeTy) :=
+            if isNothing strict then []
+            else (tagId, TPrim Int64Type) ::
+                 concatMap (\(k, o, w) => maybe [] (\ty => map (\i => (slotAt i, ty)) (take w [o ..])) k)
+                           (zip3 classes classOffsets widths)
     pure ((mergedName, mergedDef) :: wrappers, (mergedName, boxedSlots), shown)
   where
     ||| `args` at their slots `pos` among `slotCount`, `RCNull` everywhere else.
@@ -267,7 +265,7 @@ applyMutualLoop strict defs = do
     let newDefs = foldr (++) [] (map (\(ds, _, _) => ds) built)
     let mergedMemberNames = SortedSet.fromList (concat groups)
     let untouched = filter (\(n, _) => not (contains n mergedMemberNames)) defs
-    let strict' = map (\st => { params $= \ps => foldl (\m, (i, tys) => insert i tys m) ps (concatMap (\(_, _, sh) => sh) built) } st) strict
+    let strict' = map (\st => { params $= \ps => foldl (\m, (i, ty) => insert i [ty] m) ps (concatMap (\(_, _, sh) => sh) built) } st) strict
     pure (untouched ++ newDefs, SortedMap.fromList (map (\(_, np, _) => np) built), strict')
   where
     buildGraph : SortedMap Name (List Int, RCExp) -> Graph

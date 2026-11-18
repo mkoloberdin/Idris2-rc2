@@ -28,7 +28,7 @@ Allowed : Type
 Allowed = Maybe (List NativeTy)
 
 ||| One function's compiled arguments, in order, and its result.
-public export
+export
 record Declared where
   constructor MkDeclared
   args : List Allowed
@@ -46,10 +46,8 @@ enumType k = if k <= 0xff then Bits8Type else if k <= 0xffff then Bits16Type els
 maxBinders : Nat
 maxBinders = 64
 
-||| The binder types of a closed, normalized type, each paired with whether it is erased, and what is
-||| left after them. A binder's variable is instantiated with `Erased`, so a type that depends on it gets
-||| stuck rather than reducing to the wrong thing (as `RC2.exportCFSignature`). `newtypes` is how many
-||| newtypes are still looked through, and `Z` looks through none.
+||| The binders of a normalized type (erased or not, with their types) and what is left after them, as
+||| `RC2.exportCFSignature` reads them, with `IO` and newtypes of functions looked through `newtypes` deep.
 binders : {auto c : Ref Ctxt Defs} -> Defs -> (newtypes : Nat) -> NF [] -> Core (List (Bool, NF []), NF [])
 binders defs k t = bindersTo defs k maxBinders t
   where
@@ -120,19 +118,19 @@ mutual
                    | Nothing => pure Nothing
                case definition cdef of
                     DCon _ _ (Just (_, pos)) => newtypeField defs k (type cdef) pos
-                    _ => pure (byFlag 1 (flags cdef))
+                    _ => pure (byFlag (flags cdef))
            TCon _ _ _ _ _ (Just (con :: cons)) _ => do
                Just cdef <- lookupCtxtExact con (gamma defs)
                    | Nothing => pure Nothing
-               pure (byFlag (length (con :: cons)) (flags cdef))
+               pure (byFlag (flags cdef))
            _ => pure Nothing
     where
-      byFlag : Nat -> List DefFlag -> Allowed
-      byFlag n [] = Just []
-      byFlag n (ConType (ENUM m) :: _) = Just [TPrim (enumType m)]
-      byFlag n (ConType ZERO :: _) = Just [TPrim IntegerType]
-      byFlag n (ConType SUCC :: _) = Just [TPrim IntegerType]
-      byFlag n (_ :: fs) = byFlag n fs
+      byFlag : List DefFlag -> Allowed
+      byFlag [] = Just []
+      byFlag (ConType (ENUM m) :: _) = Just [TPrim (enumType m)]
+      byFlag (ConType ZERO :: _) = Just [TPrim IntegerType]
+      byFlag (ConType SUCC :: _) = Just [TPrim IntegerType]
+      byFlag (_ :: fs) = byFlag fs
 
   ||| A newtype's field, judged by its declared type with the constructor's other arguments `Erased`:
   ||| a field type that mentions them is stuck, hence not shown.
@@ -150,10 +148,8 @@ binderOf _ (MN "arg" i) = if i >= 0 then Just (cast i) else Nothing
 binderOf (Just a) (MN "ext" i) = if i >= 0 then Just (a + cast i) else Nothing
 binderOf _ _ = Nothing
 
-||| `n`'s compiled arguments `args` and result, from `n`'s declared type; `Nothing` when an argument is
-||| not one the declared type accounts for. For `raised` (a copy `ArityRaiseCExp` made, which takes the
-||| world after `n`'s own arguments) the extra argument is the declared type's last binder, which must be
-||| the world: `DeadArgs` may have removed any of the others, so it is not the one after the last left.
+||| `n`'s compiled arguments `args` and result, from its declared type; `Nothing` when the arguments are not
+||| ones the type accounts for. A `raised` copy takes the world, the type's last binder (the doc says why).
 declaredOf : {auto c : Ref Ctxt Defs} -> (raised : Bool) -> Name -> List Name -> Core (Maybe Declared)
 declaredOf raised n args = do
     defs <- get Ctxt
@@ -180,11 +176,6 @@ declaredOf raised n args = do
                                               Nothing => pure Nothing) classes
                ret <- if foldr max 0 (map S is) == length bs then classify defs depth rest else pure Nothing
                pure (Just (MkDeclared argCls ret))
-  where
-    getAt : Nat -> List a -> Maybe a
-    getAt _ [] = Nothing
-    getAt Z (x :: _) = Just x
-    getAt (S i) (_ :: xs) = getAt i xs
 
 ||| What each field of the constructor `n` of `arity` fields may be held as, from its declared type, in
 ||| field order. Upstream drops the erased arguments (`arity` counts what is left); when the declared
@@ -200,7 +191,7 @@ declaredFields n arity = do
         traverse (\t => map (fromMaybe []) (classify defs depth t)) fields
 
 ||| What the declared types of a program show.
-public export
+export
 record Declarations where
   constructor MkDeclarations
   funs : SortedMap Name Declared
@@ -216,63 +207,40 @@ declarations defs = do
     own <- traverse (\(n, _, d) => case d of
                                         MkNmFun args _ =>
                                             case lookup n origOf of
-                                                 Just orig => map (map (n,)) (declaredOf True orig (initOf args))
+                                                 Just orig => map (map (n,)) (declaredOf True orig (fromMaybe [] (init' args)))
                                                  Nothing => map (map (n,)) (declaredOf False n args)
                                         _ => pure Nothing) defs
     flds <- traverse (\(n, _, d) => case d of
                                          MkNmCon _ arity _ => map (\fs => Just (n, fs)) (declaredFields n arity)
                                          _ => pure Nothing) defs
     pure (MkDeclarations (SortedMap.fromList (mapMaybe id own)) (SortedMap.fromList (mapMaybe id flds)))
-  where
-    initOf : List a -> List a
-    initOf [] = []
-    initOf [_] = []
-    initOf (x :: xs) = x :: initOf xs
 
 ||| The table keyed by the parameter ids lowering gave each function, for the passes after it.
 export
 strictOf : Declarations -> List (Name, RCDef) -> Strict
 strictOf decl defs =
-    MkStrict (SortedMap.fromList (concatMap params defs))
-             (SortedMap.fromList (mapMaybe ret defs))
-             decl.cons
+    let matched = mapMaybe match defs
+    in MkStrict (SortedMap.fromList (concatMap (\(_, ps, d) => mapMaybe (\(p, a) => map (p,) a) (zip ps d.args)) matched))
+                (SortedMap.fromList (mapMaybe (\(n, _, d) => map (n,) d.ret) matched))
+                decl.cons
   where
-    params : (Name, RCDef) -> List (Int, List NativeTy)
-    params (n, MkRCFun args _ _ _) =
-        case lookup n decl.funs of
-             Just d => if length d.args == length args
-                          then mapMaybe (\((p, _), a) => map (p,) a) (zip args d.args)
-                          else []
-             Nothing => []
-    params _ = []
-
-    ret : (Name, RCDef) -> Maybe (Name, List NativeTy)
-    ret (n, MkRCFun args _ _ _) = do
+    match : (Name, RCDef) -> Maybe (Name, List Int, Declared)
+    match (n, MkRCFun args _ _ _) = do
         d <- lookup n decl.funs
         guard (length d.args == length args)
-        r <- d.ret
-        pure (n, r)
-    ret _ = Nothing
+        pure (n, map fst args, d)
+    match _ = Nothing
 
-||| One line of `--directive dumpstrict`.
+||| `--directive dumpstrict`: one line per function, its compiled arguments and what the table shows of each.
 export
-showDeclared : Declared -> String
-showDeclared d = show (map showAllowed d.args) ++ " -> " ++ showAllowed d.ret
+dumpDeclared : Declarations -> List (Name, FC, NamedDef) -> String
+dumpDeclared decl defs = concatMap line defs
   where
     showAllowed : Allowed -> String
-    showAllowed Nothing = "?"
-    showAllowed (Just tys) = show tys
+    showAllowed = maybe "?" show
 
-||| `--directive dumpstrict`: `n`'s binders as `binders` sees them, and its case tree's arity.
-export
-binderDump : {auto c : Ref Ctxt Defs} -> Name -> Core String
-binderDump n = do
-    defs <- get Ctxt
-    Just gdef <- lookupCtxtExact n (gamma defs)
-        | Nothing => pure "-"
-    (bs, r) <- binders defs depth !(nf defs Env.empty (type gdef))
-    cls <- traverse (\(e, t) => if e then pure "0" else map (maybe "?" show) (classify defs depth t)) bs
-    let ar = case definition gdef of
-                  PMDef _ as _ _ _ => show (length as)
-                  _ => "-"
-    pure (show cls ++ " arity " ++ ar)
+    line : (Name, FC, NamedDef) -> String
+    line (n, _, MkNmFun args _) =
+        show n ++ " " ++ show args ++ " = "
+          ++ maybe "unknown" (\d => show (map showAllowed d.args) ++ " -> " ++ showAllowed d.ret) (lookup n decl.funs) ++ "\n"
+    line _ = ""
