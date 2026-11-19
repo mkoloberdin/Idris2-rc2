@@ -181,6 +181,16 @@ static inline void idris2rc2_drop(IDRIS2RC2_Value *v) {
   if (v && !idris2rc2_is_unboxed(v) && idris2rc2_rc_release(&v->header))
     idris2rc2_teardown(v);
 }
+// idris2rc2_drop of a String, which is never NULL or an immediate: the last
+// reference frees it here, without idris2rc2_teardown's dispatch on the tag
+// (rc2/doc/constructor-layout.md, "Strings").
+static inline void idris2rc2_dropString(IDRIS2RC2_Value *v) {
+  if (idris2rc2_rc_release(&v->header)) {
+    if (!(v->header.reserved & IDRIS2RC2_HDR_FLAG))
+      free(((IDRIS2RC2_String *)v)->str);
+    free(v);
+  }
+}
 // Unconditionally deallocates `v` right now, with no refcount check at
 // all -- the RFree IR primitive's lowering. Only ever safe to call on a
 // value statically proven to be a brand-new, unshared allocation (see

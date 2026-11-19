@@ -144,8 +144,14 @@ the second block only when the flag is clear, which is the case for the one
 string whose bytes come from elsewhere (`cast Integer String`, whose digits GMP
 allocates) and for the immortal constants, which are never torn down. Nothing
 may replace `str` of a string with the flag set, or `realloc` its cell (`str`
-is an interior pointer). Before this, every string took two
-`malloc`/`free` pairs.
+is an interior pointer). Before this, every string took two `malloc`/`free`
+pairs.
+
+A string primitive of the runtime (`strings.c`) releases a String argument it
+consumes with `idris2rc2_dropString` (`memory.h`): a String is never NULL or an
+immediate, and is never a pool cell, so the last reference frees it in place,
+without `idris2rc2_teardown`'s dispatch on the tag. The generated C still uses
+`idris2rc2_drop`: the IR does not keep the type of a boxed variable.
 
 ## The reserved byte
 

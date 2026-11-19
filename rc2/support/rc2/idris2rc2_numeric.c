@@ -92,22 +92,38 @@ IDRIS2RC2_Value *idris2rc2_div_Integer(IDRIS2RC2_Value *x, IDRIS2RC2_Value *y) {
 }
 
 // ---- casts to fixed-width string ----
-#define IDRIS2RC2_CAST_TO_STRING_SIGNED(FROM, FCTY, FGET, FMT)                     \
-  IDRIS2RC2_Value *idris2rc2_cast_##FROM##_to_string(IDRIS2RC2_Value *x) {                     \
-    FCTY v = FGET(x);                                                        \
-    int l = snprintf(NULL, 0, FMT, v);                                       \
-    IDRIS2RC2_String *r = idris2rc2_mkEmptyString((size_t)l + 1);                       \
-    sprintf(r->str, FMT, v);                                                \
-    return (IDRIS2RC2_Value *)r;                                                   \
+// The digits are written backwards into a buffer on the stack, and the String
+// is made once at its length: snprintf would parse its format, and be called
+// twice to learn the length first.
+static IDRIS2RC2_Value *idris2rc2_decimalString(uint64_t u, bool negative) {
+  char buf[21]; // UINT64_MAX has 20 digits; INT64_MIN has 19 and a sign
+  char *p = buf + sizeof buf;
+  do {
+    *--p = (char)('0' + u % 10);
+    u /= 10;
+  } while (u);
+  if (negative)
+    *--p = '-';
+  return (IDRIS2RC2_Value *)idris2rc2_mkStringLen(p, (size_t)(buf + sizeof buf - p));
+}
+// The magnitude through uint64_t, so that minBound has one.
+#define IDRIS2RC2_CAST_TO_STRING_SIGNED(FROM, FCTY, FGET)                       \
+  IDRIS2RC2_Value *idris2rc2_cast_##FROM##_to_string(IDRIS2RC2_Value *x) {      \
+    FCTY v = FGET(x);                                                            \
+    return idris2rc2_decimalString(v < 0 ? -(uint64_t)v : (uint64_t)v, v < 0);   \
   }
-IDRIS2RC2_CAST_TO_STRING_SIGNED(Int8, int8_t, idris2rc2_to_i8, "%" PRId8)
-IDRIS2RC2_CAST_TO_STRING_SIGNED(Int16, int16_t, idris2rc2_to_i16, "%" PRId16)
-IDRIS2RC2_CAST_TO_STRING_SIGNED(Int32, int32_t, idris2rc2_to_i32, "%" PRId32)
-IDRIS2RC2_CAST_TO_STRING_SIGNED(Int64, int64_t, idris2rc2_to_i64, "%" PRId64)
-IDRIS2RC2_CAST_TO_STRING_SIGNED(Bits8, uint8_t, idris2rc2_to_u8, "%" PRIu8)
-IDRIS2RC2_CAST_TO_STRING_SIGNED(Bits16, uint16_t, idris2rc2_to_u16, "%" PRIu16)
-IDRIS2RC2_CAST_TO_STRING_SIGNED(Bits32, uint32_t, idris2rc2_to_u32, "%" PRIu32)
-IDRIS2RC2_CAST_TO_STRING_SIGNED(Bits64, uint64_t, idris2rc2_to_u64, "%" PRIu64)
+#define IDRIS2RC2_CAST_TO_STRING_UNSIGNED(FROM, FCTY, FGET)                     \
+  IDRIS2RC2_Value *idris2rc2_cast_##FROM##_to_string(IDRIS2RC2_Value *x) {      \
+    return idris2rc2_decimalString(FGET(x), false);                            \
+  }
+IDRIS2RC2_CAST_TO_STRING_SIGNED(Int8, int8_t, idris2rc2_to_i8)
+IDRIS2RC2_CAST_TO_STRING_SIGNED(Int16, int16_t, idris2rc2_to_i16)
+IDRIS2RC2_CAST_TO_STRING_SIGNED(Int32, int32_t, idris2rc2_to_i32)
+IDRIS2RC2_CAST_TO_STRING_SIGNED(Int64, int64_t, idris2rc2_to_i64)
+IDRIS2RC2_CAST_TO_STRING_UNSIGNED(Bits8, uint8_t, idris2rc2_to_u8)
+IDRIS2RC2_CAST_TO_STRING_UNSIGNED(Bits16, uint16_t, idris2rc2_to_u16)
+IDRIS2RC2_CAST_TO_STRING_UNSIGNED(Bits32, uint32_t, idris2rc2_to_u32)
+IDRIS2RC2_CAST_TO_STRING_UNSIGNED(Bits64, uint64_t, idris2rc2_to_u64)
 
 // ---- Double <-> String: locale-independent, matches the frontend ----
 //

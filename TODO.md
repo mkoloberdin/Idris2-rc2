@@ -214,6 +214,16 @@ missing-containersで-16%、sortで-23%。残りの案は、逃げないと判�
 関数の引数を通して連鎖させる粗い全体解析(複製なし)も、missing-containersで-1.7%にとどまり打ち切った。
 やるなら、スレッドへ逃げうる値を追う全体解析と、引数がスレッドに閉じている呼び出し元向けの関数の複製が要る。
 
+## 型が判っている値の専用drop: 生成コード側(2026-11-19)
+ランタイムの文字列プリミティブは、String引数を`idris2rc2_dropString`(`memory.h`)で解放する。
+`teardown`のタグ分岐と、その入口のレジスタ退避が無くなる。生成コードのStringのdrop 1箇所
+(`BenchStringAlloc.c`の`strLength`の後)と`strAppend`の2箇所を手で置き換えた版で、BenchStringAllocが
+命令数-5.1%・サイクル-5.5%だった(`perf stat -r 5`、2026-11-19、snprintf撤去の前)。
+生成コードは`idris2rc2_drop`のままである。IRの`RBoxed`がボックス化された変数の型を持たないので、
+drop位置でStringと判らない。やるなら、プリミティブの結果型などから型を伝える必要がある。
+Int64/Bits64/Integerはほぼimmediateで、今のdropでもteardownに届かないため対象外。
+Doubleは箱入りの値の多くがコンストラクタのフィールドで、drop位置は少ない見込み(未計測)。
+
 ## 既存のシムをCExprで置き換える: 残り
 `libs/rc2base`ほかは置き換え済み(`rc2/doc/ffi-cexpr.md`)。残したシム: regexのcompile/exec/free/group_*(TLS状態・確保)、
 TextBufferの確保系、string_byte_slice、double_convert、xoroshiroの`*_sys`、concurrency_util。
