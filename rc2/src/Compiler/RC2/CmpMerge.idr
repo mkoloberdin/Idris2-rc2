@@ -94,9 +94,9 @@ eqExp env (RLet _ v1 r1 val1 b1) (RLet _ v2 r2 val2 b2) =
 eqExp env (RCon _ n1 ci1 t1 a1 r1) (RCon _ n2 ci2 t2 a2 r2) =
     n1 == n2 && ci1 == ci2 && t1 == t2 && eqLocals env a1 a2 && eqMaybeLocal env r1 r2
 eqExp env (ROp _ l1 f1 a1 p1) (ROp _ l2 f2 a2 p2) =
-    l1 == l2 && show f1 == show f2 && eqLocals env (toList a1) (toList a2) && eqLocals env p1 p2
+    l1 == l2 && show f1 == show f2 && eqLocals env (toList a1) (toList a2) && eqLocals env (map locOf p1) (map locOf p2)
 eqExp env (RCmpCase _ op1 a1 p1 t1 f1) (RCmpCase _ op2 a2 p2 t2 f2) =
-    show op1.fst == show op2.fst && eqLocals env (toList a1) (toList a2) && eqLocals env p1 p2
+    show op1.fst == show op2.fst && eqLocals env (toList a1) (toList a2) && eqLocals env (map locOf p1) (map locOf p2)
       && eqExp env t1 t2 && eqExp env f1 f2
 eqExp env (RConCase _ s1 alts1 d1) (RConCase _ s2 alts2 d2) =
     eqLocal env s1 s2 && eqAlts env alts1 alts2 && eqDefault env d1 d2

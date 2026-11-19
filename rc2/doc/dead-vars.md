@@ -151,8 +151,8 @@ of them.
   loop, so that id stays too; replacing it would turn the reads inside the loop
   into the constant (`Test155ConstAlias`, `countVowels`).
 - Every other read of `x` becomes `c`, the `let` is removed, and so are the
-  `dup`, `drop` and `free` of `x` and the constants in `postDrop` lists, which
-  `Emit` reads as variables.
+  `dup`, `drop` and `free` of `x` (`Emit` reads those as variables). The
+  `postDrop` lists hold ids, so the renaming drops `x` from them too.
 - It repeats up to three times, since replacing one alias can make another
   `let` a constant.
 

@@ -61,7 +61,7 @@ was considered and rejected as more complex for no benefit.
 - `RCon`'s `reuseFrom : Maybe RCLocal` -- `Just sc` means this
   construction may reuse `sc`'s storage. Phase 1/2 always leave it
   `Nothing`; only this pass ever sets it.
-- `RReuseOffer : FC -> (sc : RCLocal) -> (dupOnShared : List RCLocal) -> RCExp -> RCExp`
+- `RReuseOffer : FC -> (sc : LocalId) -> (dupOnShared : List LocalId) -> (dropOnUnique : List LocalId) -> RCExp -> RCExp`
   -- new node, replacing an earlier `MkRConAlt.offersReuse : Maybe
   RCLocal` flag design. A runtime uniqueness check on `sc`: if unique,
   its storage is reserved for a later `RCon` of the same shape to claim
@@ -73,7 +73,7 @@ was considered and rejected as more complex for no benefit.
   this pass's `resolveAlt`, wrapping (a prefix of) whatever an eligible
   `RConAlt`'s own body already was -- see "Algorithm" below for the
   full eligibility protocol.
-- `RReleaseReuse : FC -> RCLocal -> RCExp -> RCExp` -- new node, only
+- `RReleaseReuse : FC -> LocalId -> RCExp -> RCExp` -- new node, only
   ever inserted by this pass. Releases a reuse offer that turned out
   *not* to be consumed on a given execution path (a sibling branch
   claimed it, or no matching RCon was reachable on this path at all).

@@ -279,9 +279,9 @@ applyPushCon defs = Builtin.fst <$> applyPushConNames defs
 retargetReuse : Int -> Maybe RCLocal -> RCExp -> RCExp
 retargetReuse v w (RCon fc n ci tag args (Just (RCLoc r))) =
     if r == v then RCon fc n ci tag args w else RCon fc n ci tag args (Just (RCLoc r))
-retargetReuse v w (RReleaseReuse fc (RCLoc r) k) =
-    if r == v then maybe (retargetReuse v w k) (\w' => RReleaseReuse fc w' (retargetReuse v w k)) w
-              else RReleaseReuse fc (RCLoc r) (retargetReuse v w k)
+retargetReuse v w (RReleaseReuse fc r k) =
+    if r.num == v then maybe (retargetReuse v w k) (\w' => RReleaseReuse fc w' (retargetReuse v w k)) (w >>= idOf)
+              else RReleaseReuse fc r (retargetReuse v w k)
 retargetReuse v w e = mapChildren (retargetReuse v w) e
 
 ||| Removes one element equal to `x`, if any.
@@ -298,33 +298,29 @@ foldAlt fc v pending reuseFrom p = go pending p
   where
     drops : List Int -> RCExp -> RCExp
     drops [] k = k
-    drops is k = RDrop fc (map RCLoc is) k
-
-    locId : RCLocal -> Maybe Int
-    locId (RCLoc i) = Just i
-    locId _ = Nothing
+    drops is k = RDrop fc (map MkLocalId is) k
 
     releaseTail : RCExp -> RCExp
-    releaseTail k = maybe k (\w => RReleaseReuse fc w k) reuseFrom
+    releaseTail k = maybe k (\w => RReleaseReuse fc w k) (reuseFrom >>= idOf)
 
     go : List Int -> RCExp -> Maybe RCExp
     -- A field `dup`'d before `v` goes was taking its own reference; the
     -- constructor's is handed over instead.
-    go pend (RDup dfc x@(RCLoc i) n k) =
-        let (hit, pend') = removeOne i pend
+    go pend (RDup dfc x n k) =
+        let (hit, pend') = removeOne x.num pend
         in if not hit then RDup dfc x n <$> go pend k
            else case n of
                      Z => go pend' k
                      S m => RDup dfc x m <$> go pend' k
     go pend (RDrop dfc vs k) =
-        if elem (RCLoc v) vs
-           then let rest = filter (/= RCLoc v) vs
+        if elem (MkLocalId v) vs
+           then let rest = filter (/= MkLocalId v) vs
                 in Just $ (if null rest then id else RDrop dfc rest) (drops pend (releaseTail k))
            else RDrop dfc vs <$> go pend k
-    go pend (RReuseOffer rfc (RCLoc s) ds us k) =
-        if s == v && pend == pending
-           then Just $ drops (mapMaybe locId us) (retargetReuse v reuseFrom k)
-           else RReuseOffer rfc (RCLoc s) ds us <$> go pend k
+    go pend (RReuseOffer rfc s ds us k) =
+        if s.num == v && pend == pending
+           then Just $ drops (map (.num) us) (retargetReuse v reuseFrom k)
+           else RReuseOffer rfc s ds us <$> go pend k
     go pend (RFree ffc x k) = RFree ffc x <$> go pend k
     go pend (RReleaseReuse rfc x k) = RReleaseReuse rfc x <$> go pend k
     go _ _ = Nothing

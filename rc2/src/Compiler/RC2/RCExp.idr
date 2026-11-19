@@ -26,6 +26,26 @@ import Decidable.Equality
 
 %default covering
 
+||| The number of a variable that owns a reference count: what `RCLoc` holds.
+||| `postDrop` and `prologueDrop` list these, never a constant. A newtype, so
+||| the width of the number is one place to change.
+public export
+record LocalId where
+  constructor MkLocalId
+  num : Int
+
+public export
+Eq LocalId where
+  a == b = a.num == b.num
+
+public export
+Ord LocalId where
+  compare a b = compare a.num b.num
+
+public export
+Show LocalId where
+  show a = "v" ++ show a.num
+
 -- `RCLocal` and `IsAnyConstLocal` are mutually recursive (RCConstCon's
 -- own `argsConst` field needs `IsAnyConstLocal`; `IsAnyConstLocal`'s own
 -- constructors index into `RCLocal`'s) -- forward-declared here instead
@@ -93,6 +113,28 @@ deadId = 0
 public export
 isDeadId : Int -> Bool
 isDeadId i = i == deadId
+
+||| The variable `i` as a value to read.
+public export
+locOf : LocalId -> RCLocal
+locOf i = RCLoc i.num
+
+||| The id of a variable, `Nothing` for a constant.
+public export
+idOf : RCLocal -> Maybe LocalId
+idOf (RCLoc i) = Just (MkLocalId i)
+idOf _ = Nothing
+
+||| `i` after `f` renames its variable, or `Nothing` if `f` makes it a constant.
+public export
+mapId : (RCLocal -> RCLocal) -> LocalId -> Maybe LocalId
+mapId f = idOf . f . locOf
+
+||| `ids` after `f` renames its variables. One that `f` turns into a constant
+||| owns no reference count any more, so it is dropped from the list.
+public export
+mapIds : (RCLocal -> RCLocal) -> List LocalId -> List LocalId
+mapIds f = mapMaybe (mapId f)
 
 ||| Witness that `l` is `RCConstCon` -- kept as its own narrow proof
 ||| (rather than only the five-case `IsAnyConstLocal` below)
@@ -345,7 +387,7 @@ data RCExp : Type where
      ||| `sameLen`: one `argReps` entry per argument. It is erased (no run-time
      ||| cost); a pass that rebuilds the call must keep the lists in step
      ||| (`mapRepCallArgs`, or `repCall` for argReps from a table).
-     RAppNameRep : FC -> Name -> (argReps : List Rep) -> (retRep : Rep) -> (postDrop : List RCLocal)
+     RAppNameRep : FC -> Name -> (argReps : List Rep) -> (retRep : Rep) -> (postDrop : List LocalId)
                 -> (args : List RCLocal) -> {auto 0 sameLen : length argReps = length args} -> RCExp
      ||| Inlined `%foreign` call, splicing `Emit.emitFFIWorker`'s own
      ||| marshalling logic directly at the call site instead of a
@@ -354,7 +396,7 @@ data RCExp : Type where
      ||| Never valid in a closure-building position. Only produced by
      ||| `Compiler.RC2.DualABI`'s FFI-inline pass.
      RAppFFIInline : FC -> (ccs : List String) -> (fargs : List CFType) -> (ret : CFType)
-                  -> (postDrop : List RCLocal) -> List RCLocal -> RCExp
+                  -> (postDrop : List LocalId) -> List RCLocal -> RCExp
      RUnderApp  : FC -> Name -> (missing : Nat) -> List RCLocal -> RCExp
      ||| Apply a boxed closure value to one or more arguments in one
      ||| step (built from `Compiler.LambdaLift`'s own nested-`LApp` spine
@@ -390,32 +432,32 @@ data RCExp : Type where
      ||| `postDrop` field in this file points back to:
      ||| `doc/native-type-inference.md`'s "What's stored on the IR vs.
      ||| re-derived".
-     ROp        : {0 arity : Nat} -> FC -> (lazy : Maybe LazyReason) -> PrimFn arity -> Vect arity RCLocal -> (postDrop : List RCLocal) -> RCExp
+     ROp        : {0 arity : Nat} -> FC -> (lazy : Maybe LazyReason) -> PrimFn arity -> Vect arity RCLocal -> (postDrop : List LocalId) -> RCExp
      ||| `postDrop` mirrors `ROp`'s own field, primitive-agnostic -- the
      ||| callee's own C implementation is responsible for `dup`-ing
      ||| anything it wants to keep past the call (`support/rc2/ioprims.c`).
-     RExtPrim   : FC -> (lazy : Maybe LazyReason) -> Name -> List RCLocal -> (postDrop : List RCLocal) -> RCExp
+     RExtPrim   : FC -> (lazy : Maybe LazyReason) -> Name -> List RCLocal -> (postDrop : List LocalId) -> RCExp
      ||| Read of one C struct field (`doc/c-struct-support.md`).
      ||| `postDrop` only ever means "drop `structVar`" -- a struct read
      ||| is never `dup`'d.
-     RStructGet : FC -> (structVar : RCLocal) -> StructField -> (postDrop : List RCLocal) -> RCExp
+     RStructGet : FC -> (structVar : RCLocal) -> StructField -> (postDrop : List LocalId) -> RCExp
      ||| Write of one C struct field, evaluating to Unit. Same
      ||| reasoning as `RStructGet`.
-     RStructSet : FC -> (structVar : RCLocal) -> StructField -> (value : RCLocal) -> (postDrop : List RCLocal) -> RCExp
+     RStructSet : FC -> (structVar : RCLocal) -> StructField -> (value : RCLocal) -> (postDrop : List LocalId) -> RCExp
      ||| Store `value` into field `field` of the constructor cell `cell`,
      ||| evaluating to Unit: the hole a TRMC-built cell left open
      ||| (`doc/trmc.md`). The old content is a hole and is not dropped;
      ||| `value` is consumed; `cell` is only borrowed, so `postDrop` only
      ||| ever means "drop `cell`", as for `RStructSet`. Only produced by
      ||| `Compiler.RC2.Trmc`.
-     RFill : FC -> (cell : RCLocal) -> (field : Nat) -> (value : RCLocal) -> (postDrop : List RCLocal) -> RCExp
+     RFill : FC -> (cell : RCLocal) -> (field : Nat) -> (value : RCLocal) -> (postDrop : List LocalId) -> RCExp
      ||| A comparison fused into a two-way branch with no Bool ever
      ||| materialised. Only produced by Phase 1's `tryFuseCompare` --
      ||| see `doc/native-type-inference.md`'s "Comparisons are a
      ||| separate, narrower mechanism". `postDrop` mirrors `ROp`'s own field.
      ||| The operands are native, except for an `Integer`/`String` comparison
      ||| (`Types.boxedCmpEligible`), where they are Boxed and `postDrop` drops them.
-     RCmpCase   : FC -> CmpOp -> Vect 2 RCLocal -> (postDrop : List RCLocal) -> (whenTrue : RCExp) -> (whenFalse : RCExp) -> RCExp
+     RCmpCase   : FC -> CmpOp -> Vect 2 RCLocal -> (postDrop : List LocalId) -> (whenTrue : RCExp) -> (whenFalse : RCExp) -> RCExp
      RConCase   : FC -> RCLocal -> List RConAlt -> Maybe RCExp -> RCExp
      RConstCase : FC -> RCLocal -> List RConstAlt -> Maybe RCExp -> RCExp
      RPrimVal   : FC -> Constant -> RCExp
@@ -427,16 +469,16 @@ data RCExp : Type where
      ||| unrepresentable at the type level. `RC` and the passes after it
      ||| make single increments (`extra = 0`); `Compiler.RC2.DupMerge`
      ||| batches several into one `extra > 0` call (`idris2rc2_dup_n`).
-     RDup       : FC -> RCLocal -> (extra : Nat) -> RCExp -> RCExp
+     RDup       : FC -> LocalId -> (extra : Nat) -> RCExp -> RCExp
      ||| Cleanup of owned variables dead at this point. Lowers to
      ||| `idris2rc2_drop` calls, except any folded into a reuse slot instead.
-     RDrop      : FC -> List RCLocal -> RCExp -> RCExp
+     RDrop      : FC -> List LocalId -> RCExp -> RCExp
      ||| Unconditional, unchecked deallocation of `loc` -- only where
      ||| RC.idr can prove it's a brand-new, never-shared allocation.
-     RFree      : FC -> RCLocal -> RCExp -> RCExp
+     RFree      : FC -> LocalId -> RCExp -> RCExp
      ||| Releases an `RReuseOffer` not consumed by any `RCon` on this
      ||| path. Lowers to `idris2rc2_releaseReuse`. See `doc/reuse-analysis.md`.
-     RReleaseReuse : FC -> RCLocal -> RCExp -> RCExp
+     RReleaseReuse : FC -> LocalId -> RCExp -> RCExp
      ||| Explicit tail-recursive loop. `loopParams`: this loop's carried
      ||| locals; `initial`: their starting values; `body` runs
      ||| repeatedly until an `RLoopContinue` starts the next iteration
@@ -449,13 +491,13 @@ data RCExp : Type where
      ||| and `Compiler.RC2.Emit`'s `zip` of them drops nothing.
      RLoop : FC -> (loopParams : List (Int, Rep)) -> (initial : List RCLocal)
           -> {auto 0 sameLen : length loopParams = length initial}
-          -> (prologueDrop : List RCLocal) -> RCExp -> RCExp
+          -> (prologueDrop : List LocalId) -> RCExp -> RCExp
      ||| Continue the nearest enclosing `RLoop` with `args` as each loop
      ||| param's new value (ownership already decided by Phase 2,
      ||| unchanged here). `postDrop` decided separately by `applyLoop`
      ||| once each param's final `Rep` is known -- see
      ||| `doc/loop-conversion.md`'s "Bugs found and fixed" #5.
-     RLoopContinue : FC -> List RCLocal -> (postDrop : List RCLocal) -> RCExp
+     RLoopContinue : FC -> List RCLocal -> (postDrop : List LocalId) -> RCExp
      ||| Runtime uniqueness check for whether `sc`'s storage can be
      ||| reused by a later same-shape `RCon`: if unique, its storage is
      ||| reserved; otherwise every `dupOnShared` entry is `dup`'d before
@@ -463,7 +505,7 @@ data RCExp : Type where
      ||| drop only on the unique path, where `sc` itself isn't dropped.
      ||| Only inserted by `Compiler.RC2.Reuse`'s `resolveAlt` -- see
      ||| `doc/reuse-analysis.md`.
-     RReuseOffer : FC -> (sc : RCLocal) -> (dupOnShared : List RCLocal) -> (dropOnUnique : List RCLocal) -> RCExp -> RCExp
+     RReuseOffer : FC -> (sc : LocalId) -> (dupOnShared : List LocalId) -> (dropOnUnique : List LocalId) -> RCExp -> RCExp
      ||| Wraps a top-level 0-argument definition's *entire* body,
      ||| guaranteeing it's evaluated at most once, shared across every
      ||| reference to `name` -- see `doc/caf-memoization.md`. `name` is
@@ -483,7 +525,7 @@ data RCExp : Type where
      RDelay : FC -> LazyReason -> (thunk : Name) -> (captures : List RCLocal) -> RCExp
      ||| The value of a lazy value: evaluates and stores it on first use
      ||| (`idris2rc2_force`). Borrows `v`; `postDrop` as on `ROp`.
-     RForce : FC -> LazyReason -> (v : RCLocal) -> (postDrop : List RCLocal) -> RCExp
+     RForce : FC -> LazyReason -> (v : RCLocal) -> (postDrop : List LocalId) -> RCExp
 
 public export
 data RConAlt : Type where
@@ -510,7 +552,7 @@ data RCDef : Type where
 ||| An `RAppNameRep` when `argReps` has one entry per argument, else `Nothing`:
 ||| for the passes whose `argReps` come from a table, not from the call.
 export
-repCall : FC -> Name -> (argReps : List Rep) -> (retRep : Rep) -> (postDrop : List RCLocal)
+repCall : FC -> Name -> (argReps : List Rep) -> (retRep : Rep) -> (postDrop : List LocalId)
        -> (args : List RCLocal) -> Maybe RCExp
 repCall fc n argReps retRep postDrop args = case decEq (length argReps) (length args) of
     Yes sameLen => Just (RAppNameRep fc n argReps retRep postDrop args)
@@ -519,7 +561,7 @@ repCall fc n argReps retRep postDrop args = case decEq (length argReps) (length 
 ||| An `RAppNameRep` with `f` applied to every argument; the `argReps` still
 ||| match them.
 export
-mapRepCallArgs : FC -> Name -> (argReps : List Rep) -> (retRep : Rep) -> (postDrop : List RCLocal)
+mapRepCallArgs : FC -> Name -> (argReps : List Rep) -> (retRep : Rep) -> (postDrop : List LocalId)
               -> (args : List RCLocal) -> {auto 0 sameLen : length argReps = length args}
               -> (f : RCLocal -> RCLocal) -> RCExp
 mapRepCallArgs fc n argReps retRep postDrop args f =
@@ -532,7 +574,7 @@ export
 mapLoop : FC -> (loopParams : List (Int, Rep)) -> (initial : List RCLocal)
        -> {auto 0 sameLen : length loopParams = length initial}
        -> (pf : (Int, Rep) -> (Int, Rep)) -> (inf : RCLocal -> RCLocal)
-       -> (prologueDrop : List RCLocal) -> RCExp -> RCExp
+       -> (prologueDrop : List LocalId) -> RCExp -> RCExp
 mapLoop fc loopParams initial pf inf prologueDrop body =
     RLoop fc (map pf loopParams) (map inf initial)
           {sameLen = trans (lengthMap loopParams) (trans sameLen (sym (lengthMap initial)))}
@@ -573,12 +615,12 @@ freeLocalsR (RConstCase _ sc alts mDef) =
     let altsFree = map (\(MkRConstAlt _ body) => freeLocalsR body) alts
         allFree = maybe altsFree (\d => freeLocalsR d :: altsFree) mDef
     in insert sc (concat allFree)
-freeLocalsR (RDup _ v _ body) = insert v (freeLocalsR body)
-freeLocalsR (RDrop _ vars body) = union (fromList vars) (freeLocalsR body)
-freeLocalsR (RFree _ v body) = insert v (freeLocalsR body)
-freeLocalsR (RReleaseReuse _ v body) = insert v (freeLocalsR body)
+freeLocalsR (RDup _ v _ body) = insert (locOf v) (freeLocalsR body)
+freeLocalsR (RDrop _ vars body) = union (fromList (map locOf vars)) (freeLocalsR body)
+freeLocalsR (RFree _ v body) = insert (locOf v) (freeLocalsR body)
+freeLocalsR (RReleaseReuse _ v body) = insert (locOf v) (freeLocalsR body)
 freeLocalsR (RReuseOffer _ sc dupOnShared dropOnUnique body) =
-    union (insert sc (fromList dupOnShared `union` fromList dropOnUnique)) (freeLocalsR body)
+    union (insert (locOf sc) (fromList (map locOf dupOnShared) `union` fromList (map locOf dropOnUnique))) (freeLocalsR body)
 freeLocalsR (RMemoize _ _ _ body) = freeLocalsR body
 freeLocalsR (RDelay _ _ _ caps) = fromList caps
 freeLocalsR (RForce _ _ v _) = fromList [v]
@@ -601,8 +643,8 @@ insertAll xs acc = foldl (flip insert) acc xs
 mentionedLocalsAcc : SortedSet RCLocal -> RCExp -> SortedSet RCLocal
 mentionedLocalsAcc acc (RV _ v) = insert v acc
 mentionedLocalsAcc acc (RAppName _ _ _ args) = insertAll args acc
-mentionedLocalsAcc acc (RAppNameRep _ _ _ _ postDrop args) = insertAll args (insertAll postDrop acc)
-mentionedLocalsAcc acc (RAppFFIInline _ _ _ _ postDrop args) = insertAll args (insertAll postDrop acc)
+mentionedLocalsAcc acc (RAppNameRep _ _ _ _ postDrop args) = insertAll args (insertAll (map locOf postDrop) acc)
+mentionedLocalsAcc acc (RAppFFIInline _ _ _ _ postDrop args) = insertAll args (insertAll (map locOf postDrop) acc)
 mentionedLocalsAcc acc (RUnderApp _ _ _ args) = insertAll args acc
 mentionedLocalsAcc acc (RApp _ _ c args) = insertAll (forget args) (insert c acc)
 mentionedLocalsAcc acc (RLet _ _ _ value body) =
@@ -611,33 +653,33 @@ mentionedLocalsAcc acc (RCon _ _ _ _ args reuseFrom) =
     insertAll args (maybe acc (\r => insert r acc) reuseFrom)
 mentionedLocalsAcc acc (RRetPack _ _ _ fields) = foldl (\a, f => insert f a) acc fields
 mentionedLocalsAcc acc (RStackCon _ _ _ _ args) = insertAll args acc
-mentionedLocalsAcc acc (ROp _ _ _ args postDrop) = insertAll (toList args) (insertAll postDrop acc)
-mentionedLocalsAcc acc (RExtPrim _ _ _ args postDrop) = insertAll args (insertAll postDrop acc)
-mentionedLocalsAcc acc (RStructGet _ structVar _ postDrop) = insert structVar (insertAll postDrop acc)
+mentionedLocalsAcc acc (ROp _ _ _ args postDrop) = insertAll (toList args) (insertAll (map locOf postDrop) acc)
+mentionedLocalsAcc acc (RExtPrim _ _ _ args postDrop) = insertAll args (insertAll (map locOf postDrop) acc)
+mentionedLocalsAcc acc (RStructGet _ structVar _ postDrop) = insert structVar (insertAll (map locOf postDrop) acc)
 mentionedLocalsAcc acc (RStructSet _ structVar _ value postDrop) =
-    insert structVar (insert value (insertAll postDrop acc))
+    insert structVar (insert value (insertAll (map locOf postDrop) acc))
 mentionedLocalsAcc acc (RFill _ cell _ value postDrop) =
-    insert cell (insert value (insertAll postDrop acc))
+    insert cell (insert value (insertAll (map locOf postDrop) acc))
 mentionedLocalsAcc acc (RCmpCase _ _ args postDrop t f) =
-    mentionedLocalsAcc (mentionedLocalsAcc (insertAll (toList args) (insertAll postDrop acc)) t) f
+    mentionedLocalsAcc (mentionedLocalsAcc (insertAll (toList args) (insertAll (map locOf postDrop) acc)) t) f
 mentionedLocalsAcc acc (RConCase _ sc alts mDef) =
     let acc' = foldl (\a, (MkRConAlt _ _ _ _ body) => mentionedLocalsAcc a body) (insert sc acc) alts
     in maybe acc' (mentionedLocalsAcc acc') mDef
 mentionedLocalsAcc acc (RConstCase _ sc alts mDef) =
     let acc' = foldl (\a, (MkRConstAlt _ body) => mentionedLocalsAcc a body) (insert sc acc) alts
     in maybe acc' (mentionedLocalsAcc acc') mDef
-mentionedLocalsAcc acc (RDup _ v _ body) = mentionedLocalsAcc (insert v acc) body
-mentionedLocalsAcc acc (RDrop _ vars body) = mentionedLocalsAcc (insertAll vars acc) body
-mentionedLocalsAcc acc (RFree _ v body) = mentionedLocalsAcc (insert v acc) body
-mentionedLocalsAcc acc (RReleaseReuse _ v body) = mentionedLocalsAcc (insert v acc) body
+mentionedLocalsAcc acc (RDup _ v _ body) = mentionedLocalsAcc (insert (locOf v) acc) body
+mentionedLocalsAcc acc (RDrop _ vars body) = mentionedLocalsAcc (insertAll (map locOf vars) acc) body
+mentionedLocalsAcc acc (RFree _ v body) = mentionedLocalsAcc (insert (locOf v) acc) body
+mentionedLocalsAcc acc (RReleaseReuse _ v body) = mentionedLocalsAcc (insert (locOf v) acc) body
 mentionedLocalsAcc acc (RReuseOffer _ sc dupOnShared dropOnUnique body) =
-    mentionedLocalsAcc (insertAll dupOnShared (insertAll dropOnUnique (insert sc acc))) body
+    mentionedLocalsAcc (insertAll (map locOf dupOnShared) (insertAll (map locOf dropOnUnique) (insert (locOf sc) acc))) body
 mentionedLocalsAcc acc (RLoop _ _ initial prologueDrop body) =
-    mentionedLocalsAcc (insertAll initial (insertAll prologueDrop acc)) body
-mentionedLocalsAcc acc (RLoopContinue _ args postDrop) = insertAll args (insertAll postDrop acc)
+    mentionedLocalsAcc (insertAll initial (insertAll (map locOf prologueDrop) acc)) body
+mentionedLocalsAcc acc (RLoopContinue _ args postDrop) = insertAll args (insertAll (map locOf postDrop) acc)
 mentionedLocalsAcc acc (RMemoize _ _ _ body) = mentionedLocalsAcc acc body
 mentionedLocalsAcc acc (RDelay _ _ _ caps) = insertAll caps acc
-mentionedLocalsAcc acc (RForce _ _ v postDrop) = insertAll (v :: postDrop) acc
+mentionedLocalsAcc acc (RForce _ _ v postDrop) = insertAll (v :: map locOf postDrop) acc
 -- RPrimVal/RErased/RCrash: no locals at all.
 mentionedLocalsAcc acc _ = acc
 
@@ -685,8 +727,8 @@ ownedUsedGo targets wanted st@(_, found) e =
     step : RCExp -> (SortedSet RCLocal, Nat)
     step (RV _ v) = hit st v
     step (RAppName _ _ _ args) = hits st args
-    step (RAppNameRep _ _ _ _ postDrop args) = hits (hits st postDrop) args
-    step (RAppFFIInline _ _ _ _ postDrop args) = hits (hits st postDrop) args
+    step (RAppNameRep _ _ _ _ postDrop args) = hits (hits st (map locOf postDrop)) args
+    step (RAppFFIInline _ _ _ _ postDrop args) = hits (hits st (map locOf postDrop)) args
     step (RUnderApp _ _ _ args) = hits st args
     step (RDelay _ _ _ caps) = hits st caps
     step (RForce _ _ v _) = hit st v
@@ -714,19 +756,19 @@ ownedUsedGo targets wanted st@(_, found) e =
         let st' = foldl (\a, (MkRConstAlt _ body) => ownedUsedGo targets wanted a body)
                         (hit st sc) alts
         in maybe st' (ownedUsedGo targets wanted st') mDef
-    step (RDup _ v _ body) = ownedUsedGo targets wanted (hit st v) body
-    step (RDrop _ vars body) = ownedUsedGo targets wanted (hits st vars) body
-    step (RFree _ v body) = ownedUsedGo targets wanted (hit st v) body
-    step (RReleaseReuse _ v body) = ownedUsedGo targets wanted (hit st v) body
+    step (RDup _ v _ body) = ownedUsedGo targets wanted (hit st (locOf v)) body
+    step (RDrop _ vars body) = ownedUsedGo targets wanted (hits st (map locOf vars)) body
+    step (RFree _ v body) = ownedUsedGo targets wanted (hit st (locOf v)) body
+    step (RReleaseReuse _ v body) = ownedUsedGo targets wanted (hit st (locOf v)) body
     step (RReuseOffer _ sc dupOnShared dropOnUnique body) =
-        ownedUsedGo targets wanted (hits (hits (hit st sc) dupOnShared) dropOnUnique) body
+        ownedUsedGo targets wanted (hits (hits (hit st (locOf sc)) (map locOf dupOnShared)) (map locOf dropOnUnique)) body
     -- `freeLocalsR` has no case for either and falls through to `empty`;
     -- covering them here is strictly more conservative, and neither can
     -- occur at `Compiler.RC2.RC`'s own stage anyway (both are built
     -- later, by `Compiler.RC2.Loop`).
     step (RLoop _ _ initial prologueDrop body) =
-        ownedUsedGo targets wanted (hits (hits st initial) prologueDrop) body
-    step (RLoopContinue _ args postDrop) = hits (hits st args) postDrop
+        ownedUsedGo targets wanted (hits (hits st initial) (map locOf prologueDrop)) body
+    step (RLoopContinue _ args postDrop) = hits (hits st args) (map locOf postDrop)
     step (RMemoize _ _ _ body) = ownedUsedGo targets wanted st body
     step _ = st
 
@@ -781,12 +823,12 @@ mentionsLocal l (RConstCase _ sc alts mDef) =
     sc == l
     || any (\(MkRConstAlt _ body) => mentionsLocal l body) alts
     || maybe False (mentionsLocal l) mDef
-mentionsLocal l (RDup _ v _ body) = v == l || mentionsLocal l body
-mentionsLocal l (RDrop _ vars body) = elem l vars || mentionsLocal l body
-mentionsLocal l (RFree _ v body) = v == l || mentionsLocal l body
-mentionsLocal l (RReleaseReuse _ v body) = v == l || mentionsLocal l body
+mentionsLocal l (RDup _ v _ body) = locOf v == l || mentionsLocal l body
+mentionsLocal l (RDrop _ vars body) = elem l (map locOf vars) || mentionsLocal l body
+mentionsLocal l (RFree _ v body) = locOf v == l || mentionsLocal l body
+mentionsLocal l (RReleaseReuse _ v body) = locOf v == l || mentionsLocal l body
 mentionsLocal l (RReuseOffer _ sc dupOnShared dropOnUnique body) =
-    sc == l || elem l dupOnShared || elem l dropOnUnique || mentionsLocal l body
+    locOf sc == l || elem l (map locOf dupOnShared) || elem l (map locOf dropOnUnique) || mentionsLocal l body
 mentionsLocal l (RMemoize _ _ _ body) = mentionsLocal l body
 mentionsLocal l (RDelay _ _ _ caps) = elem l caps
 mentionsLocal l (RForce _ _ v _) = v == l
@@ -823,13 +865,13 @@ countUsesR l (RConstCase _ sc alts mDef) =
     (if sc == l then 1 else 0)
     + sum (map (\(MkRConstAlt _ body) => countUsesR l body) alts)
     + maybe 0 (countUsesR l) mDef
-countUsesR l (RDup _ v extra body) = (if v == l then S extra else 0) + countUsesR l body
-countUsesR l (RDrop _ vars body) = length (filter (== l) vars) + countUsesR l body
-countUsesR l (RFree _ v body) = (if v == l then 1 else 0) + countUsesR l body
-countUsesR l (RReleaseReuse _ v body) = (if v == l then 1 else 0) + countUsesR l body
+countUsesR l (RDup _ v extra body) = (if locOf v == l then S extra else 0) + countUsesR l body
+countUsesR l (RDrop _ vars body) = length (filter (== l) (map locOf vars)) + countUsesR l body
+countUsesR l (RFree _ v body) = (if locOf v == l then 1 else 0) + countUsesR l body
+countUsesR l (RReleaseReuse _ v body) = (if locOf v == l then 1 else 0) + countUsesR l body
 countUsesR l (RReuseOffer _ sc dupOnShared dropOnUnique body) =
-    (if sc == l then 1 else 0) + length (filter (== l) dupOnShared)
-    + length (filter (== l) dropOnUnique) + countUsesR l body
+    (if locOf sc == l then 1 else 0) + length (filter (== l) (map locOf dupOnShared))
+    + length (filter (== l) (map locOf dropOnUnique)) + countUsesR l body
 countUsesR l (RMemoize _ _ _ body) = countUsesR l body
 countUsesR l (RDelay _ _ _ caps) = length (filter (== l) caps)
 countUsesR l (RForce _ _ v _) = if v == l then 1 else 0
@@ -929,23 +971,23 @@ foldRCNamesR nf = go
     go : RCExp -> m
     go (RV _ x) = l x
     go (RAppName _ _ n args) = nf.onAppName n args <+> ls args
-    go (RAppNameRep _ n _ _ postDrop args) = nf.onAppNameRep n <+> ls postDrop <+> ls args
-    go (RAppFFIInline _ _ _ _ postDrop args) = ls postDrop <+> ls args
+    go (RAppNameRep _ n _ _ postDrop args) = nf.onAppNameRep n <+> ls (map locOf postDrop) <+> ls args
+    go (RAppFFIInline _ _ _ _ postDrop args) = ls (map locOf postDrop) <+> ls args
     go (RUnderApp _ n _ args) = nf.onUnderApp n <+> nf.onUnderAppArgs n args <+> ls args
     go (RDelay _ _ n caps) = nf.onUnderApp n <+> ls caps
-    go (RForce _ _ v postDrop) = l v <+> ls postDrop
+    go (RForce _ _ v postDrop) = l v <+> ls (map locOf postDrop)
     go (RApp _ _ c args) = l c <+> ls (forget args)
     go (RLet _ _ _ value body) = go value <+> go body
     go (RCon _ n _ tag args reuseFrom) = nf.onCon n tag <+> ls args <+> maybe neutral l reuseFrom
     go (RRetPack _ n tag fields) = nf.onCon n (Just tag) <+> ls fields
     go (RStackCon _ n _ tag args) = nf.onCon n (Just tag) <+> ls args
-    go (ROp _ _ _ args postDrop) = ls (toList args) <+> ls postDrop
-    go (RExtPrim _ _ _ args postDrop) = ls args <+> ls postDrop
-    go (RStructGet _ structVar _ postDrop) = l structVar <+> ls postDrop
-    go (RStructSet _ structVar _ value postDrop) = l structVar <+> l value <+> ls postDrop
-    go (RFill _ cell _ value postDrop) = l cell <+> l value <+> ls postDrop
+    go (ROp _ _ _ args postDrop) = ls (toList args) <+> ls (map locOf postDrop)
+    go (RExtPrim _ _ _ args postDrop) = ls args <+> ls (map locOf postDrop)
+    go (RStructGet _ structVar _ postDrop) = l structVar <+> ls (map locOf postDrop)
+    go (RStructSet _ structVar _ value postDrop) = l structVar <+> l value <+> ls (map locOf postDrop)
+    go (RFill _ cell _ value postDrop) = l cell <+> l value <+> ls (map locOf postDrop)
     go (RCmpCase _ _ args postDrop whenTrue whenFalse) =
-        ls (toList args) <+> ls postDrop <+> go whenTrue <+> go whenFalse
+        ls (toList args) <+> ls (map locOf postDrop) <+> go whenTrue <+> go whenFalse
     go (RConCase _ sc alts mDef) =
         l sc <+> concatMap (\(MkRConAlt n _ tag _ body) => nf.onConAlt n tag <+> go body) alts <+> maybe neutral go mDef
     go (RConstCase _ sc alts mDef) =
@@ -953,14 +995,14 @@ foldRCNamesR nf = go
     go (RPrimVal _ _) = neutral
     go (RErased _) = neutral
     go (RCrash _ _) = neutral
-    go (RDup _ v _ body) = l v <+> go body
-    go (RDrop _ vars body) = ls vars <+> go body
-    go (RFree _ v body) = l v <+> go body
-    go (RReleaseReuse _ v body) = l v <+> go body
-    go (RLoop _ _ initial prologueDrop body) = ls initial <+> ls prologueDrop <+> go body
-    go (RLoopContinue _ args postDrop) = ls args <+> ls postDrop
+    go (RDup _ v _ body) = l (locOf v) <+> go body
+    go (RDrop _ vars body) = ls (map locOf vars) <+> go body
+    go (RFree _ v body) = l (locOf v) <+> go body
+    go (RReleaseReuse _ v body) = l (locOf v) <+> go body
+    go (RLoop _ _ initial prologueDrop body) = ls initial <+> ls (map locOf prologueDrop) <+> go body
+    go (RLoopContinue _ args postDrop) = ls args <+> ls (map locOf postDrop)
     go (RReuseOffer _ sc dupOnShared dropOnUnique body) =
-        l sc <+> ls dupOnShared <+> ls dropOnUnique <+> go body
+        l (locOf sc) <+> ls (map locOf dupOnShared) <+> ls (map locOf dropOnUnique) <+> go body
     go (RMemoize _ _ _ body) = go body
 
 ||| `foldRCNamesR` lifted over a whole `RCDef` (only `MkRCFun`/
@@ -983,28 +1025,28 @@ export
 directReads : RCExp -> List RCLocal
 directReads (RV _ l) = [l]
 directReads (RAppName _ _ _ args) = args
-directReads (RAppNameRep _ _ _ _ pd args) = pd ++ args
-directReads (RAppFFIInline _ _ _ _ pd args) = pd ++ args
+directReads (RAppNameRep _ _ _ _ pd args) = map locOf pd ++ args
+directReads (RAppFFIInline _ _ _ _ pd args) = map locOf pd ++ args
 directReads (RUnderApp _ _ _ args) = args
 directReads (RDelay _ _ _ caps) = caps
-directReads (RForce _ _ v pd) = v :: pd
+directReads (RForce _ _ v pd) = v :: map locOf pd
 directReads (RApp _ _ c args) = c :: forget args
 directReads (RCon _ _ _ _ args _) = args
 directReads (RRetPack _ _ _ fields) = fields
 directReads (RStackCon _ _ _ _ args) = args
-directReads (ROp _ _ _ args pd) = toList args ++ pd
-directReads (RExtPrim _ _ _ args pd) = args ++ pd
-directReads (RStructGet _ sv _ pd) = sv :: pd
-directReads (RStructSet _ sv _ val pd) = sv :: val :: pd
-directReads (RFill _ cell _ val pd) = cell :: val :: pd
-directReads (RCmpCase _ _ args pd _ _) = toList args ++ pd
+directReads (ROp _ _ _ args pd) = toList args ++ map locOf pd
+directReads (RExtPrim _ _ _ args pd) = args ++ map locOf pd
+directReads (RStructGet _ sv _ pd) = sv :: map locOf pd
+directReads (RStructSet _ sv _ val pd) = sv :: val :: map locOf pd
+directReads (RFill _ cell _ val pd) = cell :: val :: map locOf pd
+directReads (RCmpCase _ _ args pd _ _) = toList args ++ map locOf pd
 directReads (RConCase _ sc _ _) = [sc]
 directReads (RConstCase _ sc _ _) = [sc]
-directReads (RDup _ x _ _) = [x]
-directReads (RFree _ x _) = [x]
-directReads (RReuseOffer _ _ ds us _) = ds ++ us
-directReads (RLoop _ _ initial pd _) = initial ++ pd
-directReads (RLoopContinue _ args pd) = args ++ pd
+directReads (RDup _ x _ _) = [locOf x]
+directReads (RFree _ x _) = [locOf x]
+directReads (RReuseOffer _ _ ds us _) = map locOf (ds ++ us)
+directReads (RLoop _ _ initial pd _) = initial ++ map locOf pd
+directReads (RLoopContinue _ args pd) = args ++ map locOf pd
 directReads _ = []
 
 export

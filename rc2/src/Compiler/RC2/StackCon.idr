@@ -47,12 +47,12 @@ paramDeps p = go
     go (RDrop _ _ k) = go k
     go (RFree _ _ k) = go k
     go (RReleaseReuse _ _ k) = go k
-    go (RReuseOffer _ sc ds us k) = if isP sc || any isP ds || any isP us then Nothing else go k
+    go (RReuseOffer _ sc ds us k) = if any (isP . locOf) (sc :: ds ++ us) then Nothing else go k
     go (RConCase _ _ alts mDef) =
         concat <$> traverse go (map (\(MkRConAlt _ _ _ _ b) => b) alts ++ maybe [] pure mDef)
     go (RAppName _ lazy g args) =
         if isJust lazy then (if any isP args then Nothing else Just []) else Just (positions g args)
-    go (RAppNameRep _ g _ _ pd args) = if any isP pd then Nothing else Just (positions g args)
+    go (RAppNameRep _ g _ _ pd args) = if any isP (map locOf pd) then Nothing else Just (positions g args)
     go e = if any isP (directReads e) then Nothing else concat <$> traverse go (children e)
 
 ||| The parameters no callee lets escape (a greatest fixed point: a parameter
@@ -103,10 +103,10 @@ kept params b = go
     go (RDrop _ _ k) = go k
     go (RFree _ _ k) = go k
     go (RReleaseReuse _ _ k) = go k
-    go (RReuseOffer _ sc ds us k) = not (isB sc || any isB ds || any isB us) && go k
+    go (RReuseOffer _ sc ds us k) = not (any (isB . locOf) (sc :: ds ++ us)) && go k
     go (RConCase _ _ alts mDef) = all go (map (\(MkRConAlt _ _ _ _ body) => body) alts ++ maybe [] pure mDef)
     go (RAppName _ lazy g args) = if any isB args then isNothing lazy && toParams g args else True
-    go (RAppNameRep _ g _ _ pd args) = not (any isB pd) && toParams g args
+    go (RAppNameRep _ g _ _ pd args) = not (any isB (map locOf pd)) && toParams g args
     go e = not (any isB (directReads e)) && all go (children e)
 
 ||| For the parameter `p`: the field positions whose binder, in a `case` on `p`, leaves the
@@ -168,8 +168,8 @@ isBoxed _ = False
 ||| `v`'s ownership of a field: the local to `drop`, nothing for an immortal
 ||| constant, or `Nothing` when the local is not known to be Boxed or the constant
 ||| is boxed afresh when read (a native literal), which nothing would release.
-fieldOwner : SortedMap Int Rep -> RCLocal -> Maybe (List RCLocal)
-fieldOwner env l@(RCLoc i) = if maybe False isBoxed (lookup i env) then Just [l] else Nothing
+fieldOwner : SortedMap Int Rep -> RCLocal -> Maybe (List LocalId)
+fieldOwner env (RCLoc i) = if maybe False isBoxed (lookup i env) then Just [MkLocalId i] else Nothing
 fieldOwner _ (RCConst c) = if isJust (litRep c) then Nothing else Just []
 fieldOwner _ _ = Just []
 
@@ -181,17 +181,20 @@ asCon _ = Nothing
 
 ||| `body` with the stack constructor `v` (owning `fs`) in place of the heap one,
 ||| or `Nothing` when `v` is used in a way a stack constructor cannot be.
-rewriteUses : Safe -> Int -> List RCLocal -> RCExp -> Maybe RCExp
+rewriteUses : Safe -> Int -> List LocalId -> RCExp -> Maybe RCExp
 rewriteUses ok v fs = go
   where
     isV : RCLocal -> Bool
     isV = (== RCLoc v)
 
+    isVId : LocalId -> Bool
+    isVId = (== MkLocalId v)
+
     dropFields : RCExp -> RCExp
     dropFields k = if null fs then k else RDrop emptyFC fs k
 
-    dropsOf : List RCLocal -> List RCLocal
-    dropsOf vs = if any isV vs then filter (not . isV) vs ++ fs else vs
+    dropsOf : List LocalId -> List LocalId
+    dropsOf vs = if any isVId vs then filter (not . isVId) vs ++ fs else vs
 
     argIndex : List RCLocal -> Maybe Nat
     argIndex args = case filter (\(_, a) => isV a) (zip [0 .. length args] args) of
@@ -200,7 +203,7 @@ rewriteUses ok v fs = go
 
     takesV : RCExp -> Bool
     takesV (RAppName _ _ _ args) = any isV args
-    takesV (RAppNameRep _ _ _ _ pd args) = any isV (pd ++ args)
+    takesV (RAppNameRep _ _ _ _ pd args) = any isV (map locOf pd ++ args)
     takesV _ = False
 
     okCall : RCExp -> Maybe ()
@@ -208,7 +211,7 @@ rewriteUses ok v fs = go
         i <- argIndex args
         guard (contains (g, i) ok.params)
     okCall (RAppNameRep _ g _ _ pd args) = do
-        guard (not (any isV pd))
+        guard (not (any isV (map locOf pd)))
         i <- argIndex args
         guard (contains (g, i) ok.params)
     okCall _ = Nothing
@@ -236,26 +239,26 @@ rewriteUses ok v fs = go
             (not (isY sc) || all unbound alts)
               && all keep (map (\(MkRConAlt _ _ _ _ b) => b) alts ++ maybe [] pure mDef)
         keep (RAppName _ _ g args) = not (any isY args) || toFields g args
-        keep (RAppNameRep _ g _ _ pd args) = not (any isY pd) && (not (any isY args) || toFields g args)
+        keep (RAppNameRep _ g _ _ pd args) = not (any isY (map locOf pd)) && (not (any isY args) || toFields g args)
         keep e = not (any isY (directReads e)) && all keep (children e)
 
     peelWrappers : RCExp -> Maybe (RCExp -> RCExp, RCExp)
-    peelWrappers (RDup fc x n k) = if isV x then Nothing else map (\(w, c) => (RDup fc x n . w, c)) (peelWrappers k)
+    peelWrappers (RDup fc x n k) = if isVId x then Nothing else map (\(w, c) => (RDup fc x n . w, c)) (peelWrappers k)
     peelWrappers (RDrop fc vs k) =
         let vs' = dropsOf vs
         in map (\(w, c) => ((\r => if null vs' then w r else RDrop fc vs' (w r)), c)) (peelWrappers k)
     peelWrappers e = Just (id, e)
 
     go : RCExp -> Maybe RCExp
-    go (RDup fc x n k) = if isV x then Nothing else RDup fc x n <$> go k
+    go (RDup fc x n k) = if isVId x then Nothing else RDup fc x n <$> go k
     go (RDrop fc vs k) =
         let vs' = dropsOf vs
         in (\k' => if null vs' then k' else RDrop fc vs' k') <$> go k
-    go (RFree fc x k) = if isV x then dropFields <$> go k else RFree fc x <$> go k
-    go (RReleaseReuse fc x k) = if isV x then go k else RReleaseReuse fc x <$> go k
+    go (RFree fc x k) = if isVId x then dropFields <$> go k else RFree fc x <$> go k
+    go (RReleaseReuse fc x k) = if isVId x then go k else RReleaseReuse fc x <$> go k
     go (RReuseOffer fc sc ds us k) =
-        if isV sc then (\k' => foldr (\d, acc => RDup fc d 0 acc) (dropFields k') ds) <$> go k
-        else if any isV ds || any isV us then Nothing
+        if isVId sc then (\k' => foldr (\d, acc => RDup fc d 0 acc) (dropFields k') ds) <$> go k
+        else if any isVId ds || any isVId us then Nothing
         else RReuseOffer fc sc ds us <$> go k
     go (RCon fc n ci tag args reuseFrom) =
         if any isV args then Nothing

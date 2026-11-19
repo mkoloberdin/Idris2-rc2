@@ -24,7 +24,7 @@ import Data.SortedSet
 ||| drop list can be inspected/refined by a later pass instead of
 ||| unconditionally emitting the drops as-is.
 export
-peelDrop : RCExp -> (List RCLocal, RCExp)
+peelDrop : RCExp -> (List LocalId, RCExp)
 peelDrop (RDrop _ locs cont) = (locs, cont)
 peelDrop e = ([], e)
 
@@ -115,13 +115,6 @@ isNullCon ci = ci == NIL || ci == NOTHING || ci == ZERO || ci == UNIT
 export
 maxConstConFields : Nat
 maxConstConFields = 20
-
-||| Whether a local can hold a refcounted heap value: only a variable can.
-||| Every other form is a constant, `NULL`, or an immortal static.
-export
-isHeapLocal : RCLocal -> Bool
-isHeapLocal (RCLoc _) = True
-isHeapLocal _ = False
 
 ||| Whether `rep` is a native representation (`RNative`/`RInlineNative`).
 export

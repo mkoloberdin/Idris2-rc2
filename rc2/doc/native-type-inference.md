@@ -149,7 +149,7 @@ re-deriving it:
 
 - `RLet.Rep` -- Phase 1's own native-vs-boxed decision (not Phase 2,
   see above) but the same "decide once, store on the node" principle.
-- `ROp.postDrop : List RCLocal` -- *every* Boxed operand an op needs
+- `ROp.postDrop : List LocalId` -- *every* Boxed operand an op needs
   dropped once it's done reading it, one entry per *occurrence* (so
   `x + x` lists `x` twice). Phase 1 always constructs this as `[]`;
   Phase 2's `annotate` fills it in via `boxedOperands natives (toList

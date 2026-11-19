@@ -35,7 +35,7 @@ lazyPrefix Nothing = ""
 lazyPrefix (Just r) = "~" ++ show r ++ " "
 
 ||| The ` postDrop= ...` tail of a node line; nothing when the list is empty.
-postDropNote : List RCLocal -> String
+postDropNote : List LocalId -> String
 postDropNote [] = ""
 postDropNote pd = " postDrop= " ++ show pd
 

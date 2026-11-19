@@ -41,7 +41,7 @@ import Data.Vect
 ||| Removes one occurrence of `v` from the first `RDrop` reachable
 ||| through a contiguous run of refcount-only nodes (`RDup`/`RDrop` and
 ||| nothing else), or `Nothing` when the run holds no such drop.
-takeDropInRun : RCLocal -> RCExp -> Maybe RCExp
+takeDropInRun : LocalId -> RCExp -> Maybe RCExp
 takeDropInRun v (RDup fc w extra body) = RDup fc w extra <$> takeDropInRun v body
 takeDropInRun v (RDrop fc vs body) =
     if elem v vs
@@ -87,14 +87,14 @@ nativeBound args body = union (fromList (mapMaybe nativeParam args)) (go body)
 ||| in `postDrop`, and then the callee may free it -- and a field of it
 ||| -- while still reading `v`, which is exactly what a `dup v` in front
 ||| guards against.
-readsOnly : SortedSet Int -> List RCLocal -> List RCLocal -> Bool
+readsOnly : SortedSet Int -> List RCLocal -> List LocalId -> Bool
 readsOnly ns args pd = all ok args
   where
-    occurrences : RCLocal -> List RCLocal -> Nat
+    occurrences : Eq a => a -> List a -> Nat
     occurrences x xs = length (filter (== x) xs)
 
     ok : RCLocal -> Bool
-    ok x@(RCLoc i) = contains i ns || contains (nullBoundKey i) ns || occurrences x args <= occurrences x pd
+    ok x@(RCLoc i) = contains i ns || contains (nullBoundKey i) ns || occurrences x args <= occurrences (MkLocalId i) pd
     ok _ = True
 
 ||| The `postDrop` list of the first node after a run of `RDup`s, with
@@ -109,7 +109,7 @@ readsOnly ns args pd = all ok args
 ||| the node may be the value of a `let` whose own `RDup`s lead it,
 ||| unless that `let` is `RInlineNative` (its node is spliced at the one
 ||| use site, possibly past another consumer of the local).
-findPostDrop : SortedSet Int -> RCExp -> Maybe (List RCLocal, List RCLocal -> RCExp)
+findPostDrop : SortedSet Int -> RCExp -> Maybe (List LocalId, List LocalId -> RCExp)
 findPostDrop ns (RDup fc w extra body) =
     (\(pd, set) => (pd, \pd' => RDup fc w extra (set pd'))) <$> findPostDrop ns body
 findPostDrop ns (RLet fc x rep value body) =
@@ -129,11 +129,11 @@ findPostDrop ns (RCmpCase fc o args pd t f) =
     if readsOnly ns (toList args) pd then Just (pd, \pd' => RCmpCase fc o args pd' t f) else Nothing
 findPostDrop _ _ = Nothing
 
-spanDups : RCExp -> (List (FC, RCLocal, Nat), RCExp)
+spanDups : RCExp -> (List (FC, LocalId, Nat), RCExp)
 spanDups (RDup fc v extra body) = let (ds, rest) = spanDups body in ((fc, v, extra) :: ds, rest)
 spanDups e = ([], e)
 
-dropN : Nat -> RCLocal -> List RCLocal -> List RCLocal
+dropN : Nat -> LocalId -> List LocalId -> List LocalId
 dropN Z _ pd = pd
 dropN (S k) v pd = dropN k v (delete v pd)
 
@@ -159,7 +159,7 @@ cancelRun ns e =
                       else Just (foldl (\acc, (fc, v, x) => RDup fc v x acc) (set pd') kept)
   where
     -- `extra` is the count MINUS one.
-    step : (List (FC, RCLocal, Nat), List RCLocal) -> (FC, RCLocal, Nat) -> (List (FC, RCLocal, Nat), List RCLocal)
+    step : (List (FC, LocalId, Nat), List LocalId) -> (FC, LocalId, Nat) -> (List (FC, LocalId, Nat), List LocalId)
     step (kept, pd) d@(fc, v, x) =
         let k = min (S x) (length (filter (== v) pd))
         in if k == 0 then (d :: kept, pd)
@@ -169,7 +169,7 @@ cancelRun ns e =
 ||| Renames `x` to `w` in the first `RDrop` naming `x` through a run of
 ||| `RDup`/`RDrop`, for `cancelDupDrop`'s alias case: `let x = w` just
 ||| names the same object again.
-renameAliasDrop : RCLocal -> RCLocal -> RCExp -> Maybe RCExp
+renameAliasDrop : LocalId -> LocalId -> RCExp -> Maybe RCExp
 renameAliasDrop x w (RDup fc v extra body) =
     if v == x then Nothing else RDup fc v extra <$> renameAliasDrop x w body
 renameAliasDrop x w (RDrop fc vs body) =
@@ -204,14 +204,14 @@ cancelDupDrop ns e@(RDup fc v extra body) =
   where
     -- `extra` is the count MINUS one, so a plain `RDup` (extra =
     -- Z) is fully cancelled and disappears.
-    cancelled : FC -> RCLocal -> Nat -> RCExp -> RCExp
+    cancelled : FC -> LocalId -> Nat -> RCExp -> RCExp
     cancelled fc v Z body = cancelDupDrop ns body
     cancelled fc v (S k) body = cancelDupDrop ns (RDup fc v k body)
 cancelDupDrop ns e@(RLet fc var rep value body) =
     case (rep, value) of
-         (RBoxed, RV _ w@(RCLoc j)) =>
+         (RBoxed, RV _ (RCLoc j)) =>
              if contains j ns then plain
-             else case renameAliasDrop (RCLoc var) w body of
+             else case renameAliasDrop (MkLocalId var) (MkLocalId j) body of
                        Just body' => cancelDupDrop ns body'
                        Nothing => plain
          _ => plain
@@ -231,7 +231,7 @@ cancelDupDrop ns e = mapChildren (cancelDupDrop ns) e
 ||| independent regions, scanned separately, see `mergeDupsExp`), the
 ||| TOTAL increment count (`S extra` summed across every such RDup node
 ||| targeting that same local).
-collectDupCounts : RCExp -> SortedMap RCLocal Nat
+collectDupCounts : RCExp -> SortedMap LocalId Nat
 collectDupCounts (RLet _ _ _ value body) =
     mergeWith (+) (collectDupCounts value) (collectDupCounts body)
 collectDupCounts (RDup _ v extra body) =
@@ -260,8 +260,8 @@ mutual
   ||| own `extra` up to `pred total` (so its own actual increment count,
   ||| `S (pred total)`, equals the region's full total for this local),
   ||| record the local in `done`, and continue.
-  rewriteRegion : (ns : SortedSet Int) -> (counts : SortedMap RCLocal Nat) -> (done : SortedSet RCLocal)
-               -> RCExp -> (SortedSet RCLocal, RCExp)
+  rewriteRegion : (ns : SortedSet Int) -> (counts : SortedMap LocalId Nat) -> (done : SortedSet LocalId)
+               -> RCExp -> (SortedSet LocalId, RCExp)
   rewriteRegion ns counts done (RLet fc var rep value body) =
       let (done1, value') = rewriteRegion ns counts done  value
           (done2, body')  = rewriteRegion ns counts done1 body

@@ -58,9 +58,9 @@ fillLoopContinuePostDrop loopParams reps (RLoopContinue fc args _) =
                                    _ => needsDrop arg) (zip loopParams args)
     in RLoopContinue fc args postDrop
   where
-    needsDrop : RCLocal -> Maybe RCLocal
-    needsDrop v@(RCLoc i) = case fromMaybe RBoxed (lookup i reps) of
-                                  RBoxed => Just v
+    needsDrop : RCLocal -> Maybe LocalId
+    needsDrop (RCLoc i) = case fromMaybe RBoxed (lookup i reps) of
+                                  RBoxed => Just (MkLocalId i)
                                   _ => Nothing
     needsDrop _ = Nothing
 fillLoopContinuePostDrop _ _ e = e
@@ -339,19 +339,19 @@ usesInvariant p e = existsInvariantUse e
     existsInvariantUse (RConstCase _ sc alts mDef) =
         sc == RCLoc p || any (\(MkRConstAlt _ body) => existsInvariantUse body) alts || maybe False existsInvariantUse mDef
     existsInvariantUse (RDup _ v _ body) =
-        v == RCLoc p || existsInvariantUse body
+        v == MkLocalId p || existsInvariantUse body
     existsInvariantUse (RDrop _ vars body) =
-        any (== RCLoc p) vars || existsInvariantUse body
+        any (== MkLocalId p) vars || existsInvariantUse body
     existsInvariantUse (RFree _ v body) =
-        v == RCLoc p || existsInvariantUse body
+        v == MkLocalId p || existsInvariantUse body
     existsInvariantUse (RReleaseReuse _ v body) =
-        v == RCLoc p || existsInvariantUse body
+        v == MkLocalId p || existsInvariantUse body
     existsInvariantUse (RReuseOffer _ sc dupOnShared dropOnUnique body) =
-        sc == RCLoc p || any (== RCLoc p) dupOnShared || any (== RCLoc p) dropOnUnique || existsInvariantUse body
+        sc == MkLocalId p || any (== MkLocalId p) dupOnShared || any (== MkLocalId p) dropOnUnique || existsInvariantUse body
     existsInvariantUse (RLoop _ _ initial prologueDrop body) =
-        any (== RCLoc p) initial || any (== RCLoc p) prologueDrop || existsInvariantUse body
+        any (== RCLoc p) initial || any (== MkLocalId p) prologueDrop || existsInvariantUse body
     existsInvariantUse (RLoopContinue _ args postDrop) =
-        any (== RCLoc p) args || any (== RCLoc p) postDrop
+        any (== RCLoc p) args || any (== MkLocalId p) postDrop
     existsInvariantUse _ = False
 
 ||| How many `RDup`s an operand list needs for `p`'s own occurrences in
@@ -367,7 +367,7 @@ countInvariantDups p args = length (filter (== RCLoc p) args)
 ||| Nest `n` `RDup`s for `p` around `e`.
 wrapInvariantDups : FC -> Int -> Nat -> RCExp -> RCExp
 wrapInvariantDups fc p Z e = e
-wrapInvariantDups fc p (S k) e = RDup fc (RCLoc p) 0 (wrapInvariantDups fc p k e)
+wrapInvariantDups fc p (S k) e = RDup fc (MkLocalId p) 0 (wrapInvariantDups fc p k e)
 
 ||| Unconditionally `dup`s every surviving Boxed-context occurrence of
 ||| `p` in `e` (already known, by construction, to contain no
@@ -380,7 +380,7 @@ wrapInvariantDups fc p (S k) e = RDup fc (RCLoc p) 0 (wrapInvariantDups fc p k e
 ||| doesn't need to, see this section's own header note).
 dupInvariantBoxed : (p : Int) -> RCExp -> RCExp
 dupInvariantBoxed p (RV fc v) =
-    if v == RCLoc p then RDup fc v 0 (RV fc v) else RV fc v
+    if v == RCLoc p then RDup fc (MkLocalId p) 0 (RV fc v) else RV fc v
 dupInvariantBoxed p (RAppName fc lazy n args) =
     wrapInvariantDups fc p (countInvariantDups p args) (RAppName fc lazy n args)
 dupInvariantBoxed p (RUnderApp fc n missing args) =
@@ -403,13 +403,13 @@ dupInvariantBoxed p (ROp fc lazy op args postDrop) =
     -- case to ever see).
     let argsList = toList args
         occ = countInvariantDups p argsList
-    in wrapInvariantDups fc p occ (ROp fc lazy op args (postDrop ++ List.replicate occ (RCLoc p)))
+    in wrapInvariantDups fc p occ (ROp fc lazy op args (postDrop ++ List.replicate occ (MkLocalId p)))
 -- Mirrors the ROp case immediately above exactly, primitive-agnostic
 -- (RC.idr's own annotate RExtPrim case follows the same contract
 -- as ROp's own -- see doc/c-struct-support.md's "Why a dedicated node").
 dupInvariantBoxed p (RExtPrim fc lazy nm args postDrop) =
     let occ = countInvariantDups p args
-    in wrapInvariantDups fc p occ (RExtPrim fc lazy nm args (postDrop ++ List.replicate occ (RCLoc p)))
+    in wrapInvariantDups fc p occ (RExtPrim fc lazy nm args (postDrop ++ List.replicate occ (MkLocalId p)))
 dupInvariantBoxed p (RStructGet fc structVar sf postDrop) =
     wrapInvariantDups fc p (countInvariantDups p [structVar]) (RStructGet fc structVar sf postDrop)
 dupInvariantBoxed p (RForce fc lr v postDrop) =
@@ -450,7 +450,7 @@ dupInvariantBoxed p (RReuseOffer fc sc dupOnShared dropOnUnique cont) = RReuseOf
 -- `wrapInvariantDups` on them is defensive totality, not a load-bearing
 -- path.
 dupInvariantBoxed p (RLoop {sameLen} fc loopParams initial prologueDrop body) =
-    wrapInvariantDups fc p (countInvariantDups p initial + countInvariantDups p prologueDrop)
+    wrapInvariantDups fc p (countInvariantDups p initial + length (filter (== MkLocalId p) prologueDrop))
       (RLoop fc loopParams initial prologueDrop (dupInvariantBoxed p body))
 -- Same defensive reasoning as `RLoop` above -- `markInvariantNative`
 -- already redirected `p`'s own occurrence in a continue's own `args`
@@ -582,8 +582,8 @@ applyLoopFromId nextId0 strict calleeTable noPromote self (MkRCFun args retRep i
                   -- `wrapInvariantShadows` below) -- its own drop
                   -- happens right there instead, so it's excluded here
                   -- to avoid a double drop.
-                  prologueDrop : List RCLocal
-                  prologueDrop = mapMaybe (\(p, sid, _) => if contains sid invariantIds then Nothing else Just (RCLoc p))
+                  prologueDrop : List LocalId
+                  prologueDrop = mapMaybe (\(p, sid, _) => if contains sid invariantIds then Nothing else Just (MkLocalId p))
                                    (shadowedVariant ++ shadowedInvariant)
                   -- Loop-invariant *expression* hoisting (ROp/RCon in
                   -- the loop body's own unconditional prefix, see
@@ -633,13 +633,13 @@ applyLoopFromId nextId0 strict calleeTable noPromote self (MkRCFun args retRep i
                       wrapOneInvariant : (Int, Int, NativeTy) -> (Int, RCExp) -> (Int, RCExp)
                       wrapOneInvariant (p, sid, ty) (nid, acc) =
                           if not (usesInvariant p acc)
-                             then (nid, RLet emptyFC sid (RNative ty) (RV emptyFC (RCLoc p)) (RDrop emptyFC [RCLoc p] acc))
+                             then (nid, RLet emptyFC sid (RNative ty) (RV emptyFC (RCLoc p)) (RDrop emptyFC [MkLocalId p] acc))
                              else
                                let resultVar = nid
                                    dupped = dupInvariantBoxed p acc
                                in (nid + 1, RLet emptyFC sid (RNative ty) (RV emptyFC (RCLoc p))
                                               (RLet emptyFC resultVar retRep dupped
-                                                (RDrop emptyFC [RCLoc p] (RV emptyFC (RCLoc resultVar)))))
+                                                (RDrop emptyFC [MkLocalId p] (RV emptyFC (RCLoc resultVar)))))
               in (fst wrapInvariantShadows, MkRCFun args retRep isWorker (snd wrapInvariantShadows))
 applyLoopFromId nextId0 _ _ _ _ d = (nextId0, d)
 

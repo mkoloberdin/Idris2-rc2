@@ -81,9 +81,8 @@ fits ps n e = case e of
     RDrop _ vs k => if all isParam vs then fits ps n k else count
     _ => count
   where
-    isParam : RCLocal -> Bool
-    isParam (RCLoc i) = contains i ps
-    isParam _ = False
+    isParam : LocalId -> Bool
+    isParam i = contains i.num ps
 
     count : Maybe Nat
     count = case n of
@@ -274,7 +273,7 @@ hasNonNativeUse ty loopSlots target (RLet _ _ _ value body) =
     hasNonNativeUse ty loopSlots target value || hasNonNativeUse ty loopSlots target body
 hasNonNativeUse ty loopSlots target (RCon _ _ _ _ args reuseFrom) = elem (RCLoc target) args || reuseFrom == Just (RCLoc target)
 hasNonNativeUse ty loopSlots target (ROp {}) = False -- postDrop-only; stale, stripOwnership handles it
-hasNonNativeUse ty loopSlots target (RExtPrim _ _ _ args postDrop) = elem (RCLoc target) args || elem (RCLoc target) postDrop
+hasNonNativeUse ty loopSlots target (RExtPrim _ _ _ args postDrop) = elem (RCLoc target) args || elem (MkLocalId target) postDrop
 -- Unlike ROp/RCmpCase/..., stripOwnership never touches RExtPrim's own postDrop -- a genuine use here.
 hasNonNativeUse ty loopSlots target (RStructGet _ structVar _ _) = structVar == RCLoc target
 hasNonNativeUse ty loopSlots target (RDelay _ _ _ caps) = elem (RCLoc target) caps
@@ -292,11 +291,11 @@ hasNonNativeUse ty loopSlots target (RConstCase _ sc alts mDef) =
     (sc == RCLoc target && constAltsNativeType alts /= Just ty)
       || any (\(MkRConstAlt _ body) => hasNonNativeUse ty loopSlots target body) alts
       || maybe False (hasNonNativeUse ty loopSlots target) mDef
-hasNonNativeUse ty loopSlots target (RReleaseReuse _ v body) = v == RCLoc target || hasNonNativeUse ty loopSlots target body
+hasNonNativeUse ty loopSlots target (RReleaseReuse _ v body) = v == MkLocalId target || hasNonNativeUse ty loopSlots target body
 -- RReuseOffer's sc/dupOnShared/dropOnUnique are genuine uses, as is RReleaseReuse's v
 -- above: stripOwnership deliberately never touches an already-decided reuse.
 hasNonNativeUse ty loopSlots target (RReuseOffer _ sc dupOnShared dropOnUnique body) =
-    sc == RCLoc target || elem (RCLoc target) dupOnShared || elem (RCLoc target) dropOnUnique
+    sc == MkLocalId target || elem (MkLocalId target) dupOnShared || elem (MkLocalId target) dropOnUnique
       || hasNonNativeUse ty loopSlots target body
 -- The body is checked against THIS loop's slots. `initial` is treated like
 -- `RLoopContinue` below: `Emit` renders each entry by the slot's `Rep`, so

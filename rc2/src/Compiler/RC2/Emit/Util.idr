@@ -300,9 +300,14 @@ isReuseConsumingOp StrAppend   = True
 isReuseConsumingOp StrSubstr   = True
 isReuseConsumingOp _ = False
 
+||| The C variable of the variable numbered `i`.
+export
+idName : LocalId -> String
+idName i = "var_" ++ show i.num
+
 export
 varName : RCLocal -> String
-varName (RCLoc i) = "var_" ++ (show i)
+varName (RCLoc i) = idName (MkLocalId i)
 varName (RCNull)  = "NULL"
 varName RCErased = "NULL"
 varName RCWorld = "NULL"
@@ -1181,19 +1186,19 @@ reuseVarName sc = "reuse_" ++ varName sc
 export
 emitReuseOffer : {auto oft : Ref OutfileText Output}
                -> {auto il : Ref IndentLevel Nat}
-               -> RCLocal -> (dupOnShared : List RCLocal) -> (dropOnUnique : List RCLocal) -> Core ()
+               -> LocalId -> (dupOnShared : List LocalId) -> (dropOnUnique : List LocalId) -> Core ()
 emitReuseOffer sc dupOnShared dropOnUnique = do
-    let sc' = varName sc
-    let reuseVar = reuseVarName sc
+    let sc' = idName sc
+    let reuseVar = reuseVarName (locOf sc)
     emit EmptyFC $ "IDRIS2RC2_Constructor* " ++ reuseVar ++ " = NULL;"
     emit EmptyFC $ "if (idris2rc2_isUnique(" ++ sc' ++ ")) {"
     increaseIndentation
     emit EmptyFC $ reuseVar ++ " = (IDRIS2RC2_Constructor*)" ++ sc' ++ ";"
-    removeVars (varName <$> dropOnUnique)
+    removeVars (idName <$> dropOnUnique)
     decreaseIndentation
     emit EmptyFC "} else {"
     increaseIndentation
-    dupVars (varName <$> dupOnShared)
+    dupVars (idName <$> dupOnShared)
     removeVars [sc']
     decreaseIndentation
     emit EmptyFC "}"
@@ -1537,9 +1542,8 @@ splitLast xs = case reverse xs of
     [] => Nothing
     (l :: ls) => Just (reverse ls, l)
 
-renameLoc : (from : Int) -> (to : Int) -> RCLocal -> RCLocal
-renameLoc from to (RCLoc x) = if x == from then RCLoc to else RCLoc x
-renameLoc _ _ l = l
+renameLoc : (from : Int) -> (to : Int) -> LocalId -> LocalId
+renameLoc from to x = if x.num == from then MkLocalId to else x
 
 ||| When `chain` is nothing but `RDup`/`RDrop` wrappers around a final
 ||| `RV` of a `RCLoc`: that local, and `chain` with every mention of it

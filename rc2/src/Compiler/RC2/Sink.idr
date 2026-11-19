@@ -59,14 +59,14 @@ genuinelyUsedR (RConstCase _ sc alts mDef) =
     let altsUsed = map (\(MkRConstAlt _ body) => genuinelyUsedR body) alts
         allUsed = maybe altsUsed (\d => genuinelyUsedR d :: altsUsed) mDef
     in insert sc (concat allUsed)
-genuinelyUsedR (RDup _ v _ body) = insert v (genuinelyUsedR body)
+genuinelyUsedR (RDup _ v _ body) = insert (locOf v) (genuinelyUsedR body)
 genuinelyUsedR (RDrop _ _ body) = genuinelyUsedR body
 genuinelyUsedR (RFree _ _ body) = genuinelyUsedR body
 genuinelyUsedR (RReleaseReuse _ _ body) = genuinelyUsedR body
 genuinelyUsedR (RReuseOffer _ sc dupOnShared dropOnUnique body) =
-    union (insert sc (fromList dupOnShared `union` fromList dropOnUnique)) (genuinelyUsedR body)
+    union (insert (locOf sc) (fromList (map locOf dupOnShared) `union` fromList (map locOf dropOnUnique))) (genuinelyUsedR body)
 genuinelyUsedR (RLoop _ _ initial _ body) = union (fromList initial) (genuinelyUsedR body)
-genuinelyUsedR (RLoopContinue _ args postDrop) = union (fromList args) (fromList postDrop)
+genuinelyUsedR (RLoopContinue _ args postDrop) = union (fromList args) (fromList (map locOf postDrop))
 genuinelyUsedR _ = empty
 
 ||| Strips every occurrence of `var` from any `RDrop`'s own `vars` list
@@ -80,7 +80,7 @@ genuinelyUsedR _ = empty
 removeVarDrop : Int -> RCExp -> RCExp
 removeVarDrop var (RLet fc v rep value body) = RLet fc v rep value (removeVarDrop var body)
 removeVarDrop var (RDrop fc vars body) =
-    let vars' = filter (/= RCLoc var) vars
+    let vars' = filter (/= MkLocalId var) vars
         body' = removeVarDrop var body
     in if null vars' then body' else RDrop fc vars' body'
 -- Like `genuinelyUsedR`, never looks inside an `RMemoize`.
@@ -103,19 +103,18 @@ stripIfUnused var branch =
 ||| `RCon` field not `dup`'d first). Each needs an explicit `drop` in every
 ||| arm `value` doesn't sink into. See doc/branch-sinking.md, "The rewrite
 ||| itself" (also why constant-shaped operands are excluded).
-consumedOperands : SortedMap Int Rep -> RCExp -> List RCLocal
+consumedOperands : SortedMap Int Rep -> RCExp -> List LocalId
 consumedOperands reps = go []
   where
-    isDroppableBoxed : RCLocal -> Bool
-    isDroppableBoxed a@(RCLoc _) = case localRepIn reps a of
-                                         RBoxed => True
-                                         _ => False
-    isDroppableBoxed _ = False
-    spend : List RCLocal -> List RCLocal -> List RCLocal
+    boxedIds : List RCLocal -> List LocalId
+    boxedIds = mapMaybe (\a => case localRepIn reps a of
+                                     RBoxed => idOf a
+                                     _ => Nothing)
+    spend : List LocalId -> List LocalId -> List LocalId
     spend _ [] = []
     spend dupped (a :: as) =
       if a `elem` dupped then spend (delete a dupped) as else a :: spend dupped as
-    go : List RCLocal -> RCExp -> List RCLocal
+    go : List LocalId -> RCExp -> List LocalId
     -- A reference `value` itself `dup`'d earlier in this same chain is
     -- self-contained, not something the branch we don't sink into owes a
     -- compensating drop for; `spend` cancels one `dup` per occurrence, so
@@ -126,10 +125,10 @@ consumedOperands reps = go []
     -- `dup` already added (one per unit of its count) is self-contained,
     -- exactly like the RCon/ROp cases (doc/branch-sinking.md, "Sinking a
     -- call whose operands were dup'd first").
-    go dupped (RAppName _ _ _ args) = spend dupped (filter isDroppableBoxed args)
-    go dupped (RCon _ _ _ _ args _) = spend dupped (filter isDroppableBoxed args)
-    go dupped (RUnderApp _ _ _ args) = spend dupped (filter isDroppableBoxed args)
-    go dupped (RDelay _ _ _ caps) = spend dupped (filter isDroppableBoxed caps)
+    go dupped (RAppName _ _ _ args) = spend dupped (boxedIds args)
+    go dupped (RCon _ _ _ _ args _) = spend dupped (boxedIds args)
+    go dupped (RUnderApp _ _ _ args) = spend dupped (boxedIds args)
+    go dupped (RDelay _ _ _ caps) = spend dupped (boxedIds caps)
     go dupped (RDup _ v extra cont) = go (replicate (S extra) v ++ dupped) cont
     go dupped (RDrop _ _ cont) = go dupped cont
     go dupped (RFree _ _ cont) = go dupped cont
@@ -152,7 +151,7 @@ consumedOperands reps = go []
 ||| Eval.evalRef`'s own `evalOp` case block), caught by `rcexpr-lint`.
 ||| Same traversal shape as `genuinelyUsedR` itself, so the two agree
 ||| on every place a `RDrop` can turn up.
-alreadyDropped : RCExp -> SortedSet RCLocal
+alreadyDropped : RCExp -> SortedSet LocalId
 alreadyDropped (RDrop _ vars body) = union (fromList vars) (alreadyDropped body)
 alreadyDropped (RMemoize {}) = empty
 alreadyDropped e = foldMap alreadyDropped (children e)
@@ -166,10 +165,10 @@ alreadyDropped e = foldMap alreadyDropped (children e)
 ||| drop on top of one `branch` already owes) -- both vanishingly
 ||| unlikely, costs nothing to guard against either. `Just branch`
 ||| unchanged when `consumed` is empty (the overwhelming common case).
-addOperandDrops : FC -> List RCLocal -> RCExp -> Maybe RCExp
+addOperandDrops : FC -> List LocalId -> RCExp -> Maybe RCExp
 addOperandDrops _ [] branch = Just branch
 addOperandDrops fc consumed branch =
-    if any (\op => contains op (genuinelyUsedR branch) || contains op (alreadyDropped branch)) consumed
+    if any (\op => contains (locOf op) (genuinelyUsedR branch) || contains op (alreadyDropped branch)) consumed
        then Nothing
        else Just (RDrop fc consumed branch)
 
@@ -248,7 +247,7 @@ isDecidingOperand var value branch =
 ||| `fc` is the *enclosing branch node's* own `FC`, needed since a
 ||| fresh `RDrop` needs one of its own and an arm's body isn't
 ||| necessarily a branch node to borrow one from.
-stripForSink : Int -> FC -> List RCLocal -> RCExp -> Maybe RCExp
+stripForSink : Int -> FC -> List LocalId -> RCExp -> Maybe RCExp
 stripForSink var fc consumed branch = stripIfUnused var branch >>= addOperandDrops fc consumed
 
 ||| `stripForSink` over every alt body plus the optional default body
@@ -271,7 +270,7 @@ stripForSink var fc consumed branch = stripIfUnused var branch >>= addOperandDro
 ||| computation in place is strictly better). See
 ||| doc/branch-sinking.md's "The rewrite itself" for the fuller
 ||| rationale.
-sinkIntoBodies : FC -> Int -> Rep -> RCExp -> List RCLocal -> List RCExp -> Maybe RCExp -> Maybe (List RCExp, Maybe RCExp)
+sinkIntoBodies : FC -> Int -> Rep -> RCExp -> List LocalId -> List RCExp -> Maybe RCExp -> Maybe (List RCExp, Maybe RCExp)
 sinkIntoBodies fc var rep value consumed altBodies mDefBody =
     let altStripped : List (RCExp, Maybe RCExp)
         altStripped = map (\body => (body, stripForSink var fc consumed body)) altBodies
@@ -343,16 +342,16 @@ readBy value l = contains l (genuinelyUsedR value)
 ||| dispatching to `trySinkIntoArms`.
 trySinkInto : SortedMap Int Rep -> Int -> Rep -> RCExp -> RCExp -> Maybe RCExp
 trySinkInto reps var rep value (RDup fc v extra cont) =
-    if v == RCLoc var then Nothing else map (RDup fc v extra) (trySinkInto reps var rep value cont)
+    if v == MkLocalId var then Nothing else map (RDup fc v extra) (trySinkInto reps var rep value cont)
 trySinkInto reps var rep value (RDrop fc vs cont) =
-    if (RCLoc var `elem` vs) || any (readBy value) vs then Nothing else map (RDrop fc vs) (trySinkInto reps var rep value cont)
+    if (MkLocalId var `elem` vs) || any (readBy value . locOf) vs then Nothing else map (RDrop fc vs) (trySinkInto reps var rep value cont)
 trySinkInto reps var rep value (RFree fc v cont) =
-    if v == RCLoc var || readBy value v then Nothing else map (RFree fc v) (trySinkInto reps var rep value cont)
+    if v == MkLocalId var || readBy value (locOf v) then Nothing else map (RFree fc v) (trySinkInto reps var rep value cont)
 trySinkInto reps var rep value (RReleaseReuse fc v cont) =
-    if v == RCLoc var || readBy value v then Nothing else map (RReleaseReuse fc v) (trySinkInto reps var rep value cont)
+    if v == MkLocalId var || readBy value (locOf v) then Nothing else map (RReleaseReuse fc v) (trySinkInto reps var rep value cont)
 trySinkInto reps var rep value (RReuseOffer fc sc dupOnShared dropOnUnique cont) =
-    if (sc == RCLoc var) || (RCLoc var `elem` dupOnShared) || (RCLoc var `elem` dropOnUnique)
-         || any (readBy value) (sc :: dupOnShared ++ dropOnUnique)
+    if (sc == MkLocalId var) || (MkLocalId var `elem` dupOnShared) || (MkLocalId var `elem` dropOnUnique)
+         || any (readBy value . locOf) (sc :: dupOnShared ++ dropOnUnique)
        then Nothing
        else map (RReuseOffer fc sc dupOnShared dropOnUnique) (trySinkInto reps var rep value cont)
 trySinkInto reps var rep value (RLet fc y repY valueY cont) =
