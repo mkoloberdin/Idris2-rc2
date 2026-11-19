@@ -120,10 +120,6 @@ plainRep (RNative (TPrim _)) = True
 plainRep (RInlineNative (TPrim _)) = True
 plainRep _ = False
 
-isConstLocal : RCLocal -> Bool
-isConstLocal (RCLoc _) = False
-isConstLocal _ = True
-
 ||| The locals a node reads in a position that needs a variable and cannot
 ||| take a constant: a `case` scrutinee, a cell or struct that is written or
 ||| read, a reuse token, a forced or applied value. A loop parameter shares
@@ -136,8 +132,8 @@ needsVariable (RStructSet _ sv _ _ _) = [sv]
 needsVariable (RFill _ cell _ _ _) = [cell]
 needsVariable (RForce _ _ v _) = [v]
 needsVariable (RApp _ _ c _) = [c]
-needsVariable (RReuseOffer _ sc ds us _) = sc :: ds ++ us
-needsVariable (RReleaseReuse _ v _) = [v]
+needsVariable (RReuseOffer _ sc ds us _) = locOf sc :: map locOf (ds ++ us)
+needsVariable (RReleaseReuse _ v _) = [locOf v]
 needsVariable (RCon _ _ _ _ _ reuseFrom) = toList reuseFrom
 needsVariable (RLoop _ ps _ _ _) = map (RCLoc . fst) ps
 needsVariable _ = []
@@ -158,23 +154,6 @@ dropAliasLets ren e =
     case mapChildren (dropAliasLets ren) e of
          e'@(RLet _ x _ (RV _ _) body) => if isJust (lookup x ren) then body else e'
          e' => e'
-
-||| The `dup`s, `drop`s and `free`s that read a constant, removed: they do
-||| nothing, and `Emit` reads their operands as variables only. (`postDrop` and
-||| `prologueDrop` list `LocalId`s, which a constant never is: `mapIds` drops it.)
-dropConstOwnership : RCExp -> RCExp
-dropConstOwnership e = clean (mapChildren dropConstOwnership e)
-  where
-    keep : List RCLocal -> List RCLocal
-    keep = filter (not . isConstLocal)
-
-    clean : RCExp -> RCExp
-    clean (RDup fc v extra k) = if isConstLocal v then k else RDup fc v extra k
-    clean (RFree fc v k) = if isConstLocal v then k else RFree fc v k
-    clean (RDrop fc vs k) = case keep vs of
-                                 [] => k
-                                 vs' => RDrop fc vs' k
-    clean e' = e'
 
 ||| The ids that occur more than once in `ids`.
 duplicateIds : List Int -> SortedSet Int
@@ -200,11 +179,10 @@ propagateConstAliases = go (the Nat 3)
             ren = SortedMap.fromList (filter (\(x, _) => not (contains x blockedIds || contains x twice)) aliases)
         in if null ren
               then e
-              else go k (dropConstOwnership
-                           (mapLocalsRCExp (\l => case l of
-                                                      RCLoc i => fromMaybe l (lookup i ren)
-                                                      _ => l) id
-                                           (dropAliasLets ren e)))
+              else go k (mapLocalsRCExp (\l => case l of
+                                          RCLoc i => fromMaybe l (lookup i ren)
+                                          _ => l) id
+                               (dropAliasLets ren e))
 
 ||| Apply dead-variable erasure to one top-level definition, after the
 ||| constant aliases are propagated when `constAlias` holds.

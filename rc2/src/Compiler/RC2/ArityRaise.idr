@@ -223,9 +223,9 @@ mentions : RCLocal -> RCExp -> Nat
 mentions l e = length (filter (== l) (directReads e ++ releases e)) + sum (map (mentions l) (children e))
   where
     releases : RCExp -> List RCLocal
-    releases (RDrop _ vs _) = vs
-    releases (RReuseOffer _ sc _ _ _) = [sc]
-    releases (RReleaseReuse _ x _) = [x]
+    releases (RDrop _ vs _) = map locOf vs
+    releases (RReuseOffer _ sc _ _ _) = [locOf sc]
+    releases (RReleaseReuse _ x _) = [locOf x]
     releases (RCon _ _ _ _ _ reuseFrom) = toList reuseFrom
     releases _ = []
 
@@ -275,16 +275,16 @@ closureValue _ _ = Nothing
 
 ||| How often `c` is named in a `drop` in `e`.
 dropMentions : RCLocal -> RCExp -> Nat
-dropMentions c (RDrop _ vs k) = length (filter (== c) vs) + dropMentions c k
+dropMentions c (RDrop _ vs k) = length (filter (== c) (map locOf vs)) + dropMentions c k
 dropMentions c e = sum (map (dropMentions c) (children e))
 
 ||| `e` with its one `apply c ys` built by `mk` instead, and each
 ||| `drop` of `c` dropping `owned` (what the closure held) instead;
 ||| `Nothing` when `c` sits inside a loop, or `mk` declines.
-replaceApply : Int -> List RCLocal -> (FC -> List RCLocal -> Maybe RCExp) -> RCExp -> Maybe RCExp
+replaceApply : Int -> List LocalId -> (FC -> List RCLocal -> Maybe RCExp) -> RCExp -> Maybe RCExp
 replaceApply c _ mk e@(RApp fc Nothing (RCLoc c') ys) = if c' == c then mk fc (forget ys) else Just e
 replaceApply c owned mk (RDrop fc vs k) =
-    let vs' = concatMap (\v => if v == RCLoc c then owned else [v]) vs
+    let vs' = concatMap (\v => if v == MkLocalId c then owned else [v]) vs
     in (\k' => if null vs' then k' else RDrop fc vs' k') <$> replaceApply c owned mk k
 replaceApply c _ _ e@(RLoop _ _ _ _ _) = if mentions (RCLoc c) e > 0 then Nothing else Just e
 replaceApply c owned mk e = if mentions (RCLoc c) e == 0 then Just e else traverseChildren (replaceApply c owned mk) e
@@ -320,7 +320,7 @@ foldAppliedExp ws nat e = here (mapChildren (foldAppliedExp ws nat) e)
         pure (RAppName fc Nothing g (forget ys))
     here e@(RLet _ c RBoxed value body) = fromMaybe e $ do
         (lead, g, m, xs) <- closureValue ws value
-        let owned = filter (isLoc (\i => not (contains i (fst nat)))) xs
+        let owned = mapMaybe (\x => idOf x >>= \i => toMaybe (not (contains i.num (fst nat))) i) xs
             n = mentions (RCLoc c) body
         guard (not (any (isLoc (\i => contains i (snd nat))) xs || n /= S (dropMentions (RCLoc c) body)))
         body' <- replaceApply c owned (target g m xs) body

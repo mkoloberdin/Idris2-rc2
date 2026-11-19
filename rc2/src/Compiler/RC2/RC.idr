@@ -394,7 +394,7 @@ Owned = SortedSet RCLocal
 ||| Wrap `e` in an RDup for each variable in `needed` (order doesn't
 ||| matter between independent increments).
 wrapDups : FC -> List RCLocal -> RCExp -> RCExp
-wrapDups fc needed e = foldr (\v, acc => RDup fc v 0 acc) e needed
+wrapDups fc needed e = foldr (\i, acc => RDup fc i 0 acc) e (mapMaybe idOf needed)
 
 ||| Fold `f` over every RConAlt's own body and (if present) the default,
 ||| unioning the `SortedSet RCLocal` results -- the shared shape behind
@@ -576,7 +576,7 @@ mutual
         -- this arm just to keep the handful this scope owns. See its own
         -- doc comment for the measurement that motivated it.
         let actualOwned = ownedUsedIn ownedWithArgs body
-        let shouldDrop = Prelude.toList (difference ownedWithArgs actualOwned)
+        let shouldDrop = mapMaybe idOf (Prelude.toList (difference ownedWithArgs actualOwned))
         rest <- annotate natives actualOwned body
         pure $ case shouldDrop of
                     [] => rest
@@ -611,7 +611,8 @@ mutual
     annotate natives owned e@(RV _ RCErased) = pure e
     annotate natives owned e@(RV _ RCWorld) = pure e
     annotate natives owned (RV fc v) =
-        pure $ if contains v natives || contains v owned then RV fc v else RDup fc v 0 (RV fc v)
+        pure $ if contains v natives || contains v owned then RV fc v
+                 else maybe (RV fc v) (\i => RDup fc i 0 (RV fc v)) (idOf v)
     annotate natives owned (RAppName fc lazy n args) =
         pure $ wrapDups fc (splitBorrows natives owned args) (RAppName fc lazy n args)
     annotate natives owned (RUnderApp fc n missing args) =
@@ -643,7 +644,7 @@ mutual
         bodyRC <- annotate natives owned' body
         if contains (RCLoc var) usedVars
            then pure $ RLet fc var (inlineableRep rep valueRC var bodyRC) valueRC bodyRC
-           else pure $ RLet fc var rep valueRC (dropDeadLet fc natives rep (RCLoc var) valueRC bodyRC)
+           else pure $ RLet fc var rep valueRC (dropDeadLet fc natives rep var valueRC bodyRC)
       where
         ||| Narrow `RNative ty` to `RInlineNative ty` when `valueRC` is a bare
         ||| `ROp` and `var` is used exactly once in `bodyRC`; otherwise `rep`
@@ -659,13 +660,13 @@ mutual
         ||| for a native (unboxed, unrefcounted) local, or for a Boxed local
         ||| that's in `natives` anyway (alwaysUnboxedBoxedLocalsR -- see its own
         ||| comment for why that's just as unconditionally a no-op).
-        dropDeadLet : FC -> SortedSet RCLocal -> Rep -> RCLocal -> RCExp -> RCExp -> RCExp
+        dropDeadLet : FC -> SortedSet RCLocal -> Rep -> Int -> RCExp -> RCExp -> RCExp
         dropDeadLet fc natives RBoxed loc value body =
-            if contains loc natives
+            if contains (RCLoc loc) natives
                then body
                else if freeableShape value
-                       then RFree fc loc body
-                       else RDrop fc [loc] body
+                       then RFree fc (MkLocalId loc) body
+                       else RDrop fc [MkLocalId loc] body
           where
             ||| Whether a just-built value (still in its pre-annotation, Phase 1
             ||| shape) is provably a brand-new, never-shared heap allocation:

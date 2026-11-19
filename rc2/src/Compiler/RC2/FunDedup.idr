@@ -78,12 +78,12 @@ renameNamesG f cl = go
     go (RPrimVal fc c) = RPrimVal fc c
     go (RErased fc) = RErased fc
     go (RCrash fc msg) = RCrash fc msg
-    go (RDup fc v extra body) = RDup fc (l v) extra (go body)
-    go (RDrop fc vars body) = RDrop fc (ls vars) (go body)
-    go (RFree fc v body) = RFree fc (l v) (go body)
-    go (RReleaseReuse fc v body) = RReleaseReuse fc (l v) (go body)
+    go (RDup fc v extra body) = RDup fc v extra (go body)
+    go (RDrop fc vars body) = RDrop fc vars (go body)
+    go (RFree fc v body) = RFree fc v (go body)
+    go (RReleaseReuse fc v body) = RReleaseReuse fc v (go body)
     go (RReuseOffer fc sc dupOnShared dropOnUnique body) =
-        RReuseOffer fc (l sc) (ls dupOnShared) (ls dropOnUnique) (go body)
+        RReuseOffer fc sc dupOnShared dropOnUnique (go body)
     go (RLoop {sameLen} fc params initial prologueDrop body) = mapLoop fc params initial id l prologueDrop (go body)
     go (RLoopContinue fc args postDrop) = RLoopContinue fc (ls args) postDrop
     go (RMemoize fc n rep body) = RMemoize fc n rep (go body)
@@ -136,11 +136,11 @@ where
   go (RPrimVal _ _) = False
   go (RErased _) = False
   go (RCrash _ _) = False
-  go (RDup _ v _ body) = l v || go body
-  go (RDrop _ vars body) = ls vars || go body
-  go (RFree _ v body) = l v || go body
-  go (RReleaseReuse _ v body) = l v || go body
-  go (RReuseOffer _ sc dupOnShared dropOnUnique body) = l sc || ls dupOnShared || ls dropOnUnique || go body
+  go (RDup _ _ _ body) = go body
+  go (RDrop _ _ body) = go body
+  go (RFree _ _ body) = go body
+  go (RReleaseReuse _ _ body) = go body
+  go (RReuseOffer _ _ _ _ body) = go body
   go (RLoop _ _ initial _ body) = ls initial || go body
   go (RLoopContinue _ args _) = ls args
   go (RMemoize _ _ _ body) = go body
@@ -358,12 +358,12 @@ mutual
   eqE env (RErased _) (RErased _) = Just env
   eqE env (RCrash _ m1) (RCrash _ m2) = if m1 == m2 then Just env else Nothing
   eqE env (RDup _ v1 x1 b1) (RDup _ v2 x2 b2) =
-      if x1 == x2 && eqL env v1 v2 then eqE env b1 b2 else Nothing
-  eqE env (RDrop _ vs1 b1) (RDrop _ vs2 b2) = if eqLs env vs1 vs2 then eqE env b1 b2 else Nothing
-  eqE env (RFree _ v1 b1) (RFree _ v2 b2) = if eqL env v1 v2 then eqE env b1 b2 else Nothing
-  eqE env (RReleaseReuse _ v1 b1) (RReleaseReuse _ v2 b2) = if eqL env v1 v2 then eqE env b1 b2 else Nothing
+      if x1 == x2 && eqIds env [v1] [v2] then eqE env b1 b2 else Nothing
+  eqE env (RDrop _ vs1 b1) (RDrop _ vs2 b2) = if eqIds env vs1 vs2 then eqE env b1 b2 else Nothing
+  eqE env (RFree _ v1 b1) (RFree _ v2 b2) = if eqIds env [v1] [v2] then eqE env b1 b2 else Nothing
+  eqE env (RReleaseReuse _ v1 b1) (RReleaseReuse _ v2 b2) = if eqIds env [v1] [v2] then eqE env b1 b2 else Nothing
   eqE env (RReuseOffer _ s1 d1 u1 b1) (RReuseOffer _ s2 d2 u2 b2) =
-      if eqL env s1 s2 && eqLs env d1 d2 && eqLs env u1 u2 then eqE env b1 b2 else Nothing
+      if eqIds env [s1] [s2] && eqIds env d1 d2 && eqIds env u1 u2 then eqE env b1 b2 else Nothing
   eqE env (RLoop _ ps1 i1 pd1 b1) (RLoop _ ps2 i2 pd2 b2) =
       if eqLs env i1 i2 && eqIds env pd1 pd2 && eqReps (map snd ps1) (map snd ps2)
          then bindAll env (map fst ps1) (map fst ps2) >>= \env1 => eqE env1 b1 b2

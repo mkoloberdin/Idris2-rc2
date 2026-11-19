@@ -1315,7 +1315,7 @@ packTails ws wNames reps (RLoop {sameLen} fc loopParams initial prologueDrop bod
     RLoop fc loopParams initial prologueDrop
       (packTails ws wNames (foldl (\m, (i, r) => insert i r m) reps loopParams) body)
 packTails _ _ _ (RCon fc n _ (Just tag) args reuseFrom) =
-    maybe id (RReleaseReuse fc) reuseFrom (RRetPack fc n tag args)
+    maybe id (RReleaseReuse fc) (reuseFrom >>= idOf) (RRetPack fc n tag args)
 packTails _ _ _ (RV fc (RCEmptyCon n _ tag)) = RRetPack fc n tag []
 packTails _ _ _ (RV fc (RCConstCon n _ (Just tag) args)) = RRetPack fc n tag args
 packTails _ _ _ (RV fc RCNull) = RRetPack fc nullConName 0 []
@@ -1360,16 +1360,16 @@ materialize w argReps rep postDrop args shapes = do
 ||| (doc/struct-return.md's "RC at a struct scrutinee"), `fld` being the
 ||| alt's own Boxed fields: the struct owns them, and there is no cell to release
 ||| or reuse. `Nothing` when `v` is read any other way.
-structRC : Int -> List RCLocal -> RCExp -> Maybe RCExp
+structRC : Int -> List LocalId -> RCExp -> Maybe RCExp
 structRC v fld (RDrop fc vs k) =
-    let vs' = if RCLoc v `elem` vs then filter (/= RCLoc v) vs ++ fld else vs
+    let vs' = if MkLocalId v `elem` vs then filter (/= MkLocalId v) vs ++ fld else vs
     in (\k' => if null vs' then k' else RDrop fc vs' k') <$> structRC v fld k
 structRC v fld (RFree fc x k) =
-    if x == RCLoc v then structRC v fld k else RFree fc x <$> structRC v fld k
+    if x == MkLocalId v then structRC v fld k else RFree fc x <$> structRC v fld k
 structRC v fld (RReleaseReuse fc x k) =
-    if x == RCLoc v then structRC v fld k else RReleaseReuse fc x <$> structRC v fld k
+    if x == MkLocalId v then structRC v fld k else RReleaseReuse fc x <$> structRC v fld k
 structRC v fld (RReuseOffer fc sc ds us k) =
-    if sc == RCLoc v
+    if sc == MkLocalId v
        then (\k' => if null us then k' else RDrop fc us k') <$> structRC v fld k
        else RReuseOffer fc sc ds us <$> structRC v fld k
 structRC v _ e@(RCon fc n ci tag args reuseFrom) =
@@ -1382,10 +1382,10 @@ structRC v fld e =
 ||| that don't touch `v`: the wrappers as a rebuild function, and the case.
 caseOn : Int -> RCExp -> Maybe (RCExp -> RCExp, FC, List RConAlt, Maybe RCExp)
 caseOn v (RDup fc x n k) =
-    if x == RCLoc v then Nothing
+    if x == MkLocalId v then Nothing
     else map (\(w, c) => (RDup fc x n . w, c)) (caseOn v k)
 caseOn v (RDrop fc vs k) =
-    if RCLoc v `elem` vs then Nothing
+    if MkLocalId v `elem` vs then Nothing
     else map (\(w, c) => (RDrop fc vs . w, c)) (caseOn v k)
 caseOn v (RLet fc y rep value k) =
     if contains (RCLoc v) (mentionedLocals value) then Nothing
@@ -1412,11 +1412,11 @@ retargetCall _ _ _ = Nothing
 ||| carries natively has no reference count. A Boxed use of it is boxed
 ||| afresh at that point by Emit, which is what the removed `dup` paid for.
 dropOwnership : Int -> RCExp -> RCExp
-dropOwnership f (RDup fc x n k) = if x == RCLoc f then dropOwnership f k else RDup fc x n (dropOwnership f k)
+dropOwnership f (RDup fc x n k) = if x == MkLocalId f then dropOwnership f k else RDup fc x n (dropOwnership f k)
 dropOwnership f (RDrop fc vs k) =
-    let vs' = filter (/= RCLoc f) vs
+    let vs' = filter (/= MkLocalId f) vs
     in (if null vs' then id else RDrop fc vs') (dropOwnership f k)
-dropOwnership f (RFree fc x k) = if x == RCLoc f then dropOwnership f k else RFree fc x (dropOwnership f k)
+dropOwnership f (RFree fc x k) = if x == MkLocalId f then dropOwnership f k else RFree fc x (dropOwnership f k)
 dropOwnership f (ROp fc lazy op args pd) = ROp fc lazy op args (filter (/= MkLocalId f) pd)
 dropOwnership f (RExtPrim fc lazy p args pd) = RExtPrim fc lazy p args (filter (/= MkLocalId f) pd)
 dropOwnership f (RAppNameRep {sameLen} fc n argReps retRep pd args) = RAppNameRep fc n argReps retRep (filter (/= MkLocalId f) pd) args
@@ -1430,7 +1430,7 @@ dropOwnership f (RCmpCase fc op args pd t e) =
 dropOwnership f (RLoopContinue fc args pd) = RLoopContinue fc args (filter (/= MkLocalId f) pd)
 dropOwnership f (RLoop {sameLen} fc ps initial pd k) = RLoop fc ps initial (filter (/= MkLocalId f) pd) (dropOwnership f k)
 dropOwnership f (RReuseOffer fc sc ds us k) =
-    RReuseOffer fc sc (filter (/= RCLoc f) ds) (filter (/= RCLoc f) us) (dropOwnership f k)
+    RReuseOffer fc sc (filter (/= MkLocalId f) ds) (filter (/= MkLocalId f) us) (dropOwnership f k)
 dropOwnership f e = mapChildren (dropOwnership f) e
 
 ||| One alt, rewritten for a struct scrutinee: a known tag and at most
@@ -1443,7 +1443,7 @@ structAlt fieldType v (MkRConAlt n ci (Just tag) as b) =
     if length as > maxRetFields || elem 0 as then Nothing
     else let indexed : List (Nat, Int) := zip [0 .. length as] as
              natives : List Int := map snd (filter (\kf => isJust (fieldType tag (fst kf))) indexed)
-             boxed : List RCLocal := map (RCLoc . snd) (filter (\kf => isNothing (fieldType tag (fst kf))) indexed)
+             boxed : List LocalId := map (MkLocalId . snd) (filter (\kf => isNothing (fieldType tag (fst kf))) indexed)
          in MkRConAlt n ci (Just tag) as . (\b' => foldr dropOwnership b' natives) <$> structRC v boxed b
 structAlt _ _ _ = Nothing
 

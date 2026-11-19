@@ -24,7 +24,7 @@ import Data.SortedSet
 ||| drop list can be inspected/refined by a later pass instead of
 ||| unconditionally emitting the drops as-is.
 export
-peelDrop : RCExp -> (List RCLocal, RCExp)
+peelDrop : RCExp -> (List LocalId, RCExp)
 peelDrop (RDrop _ locs cont) = (locs, cont)
 peelDrop e = ([], e)
 

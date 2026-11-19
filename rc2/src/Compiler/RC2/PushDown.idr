@@ -25,8 +25,8 @@ import Data.Vect
 
 ||| One node of a refcount-only run. A `DupOp` holds the dup COUNT
 ||| (`RDup`'s `extra` plus one).
-data RcOp = DupOp FC RCLocal Nat
-          | DropOp FC (List RCLocal)
+data RcOp = DupOp FC LocalId Nat
+          | DropOp FC (List LocalId)
 
 ||| The leading refcount-only nodes of `e` and what follows them.
 spanRun : RCExp -> (List RcOp, RCExp)
@@ -47,19 +47,19 @@ opCount = sum . map count
     count (DupOp _ _ n) = n
     count (DropOp _ vs) = length vs
 
-dropsOf : List RcOp -> List RCLocal
+dropsOf : List RcOp -> List LocalId
 dropsOf = concatMap (\o => case o of
                                 DropOp _ vs => vs
                                 _ => [])
 
-addDup : List (FC, RCLocal, Nat) -> RcOp -> List (FC, RCLocal, Nat)
+addDup : List (FC, LocalId, Nat) -> RcOp -> List (FC, LocalId, Nat)
 addDup acc (DupOp fc v n) =
     if any (\(_, w, _) => w == v) acc
        then map (\(f, w, m) => if w == v then (f, w, m + n) else (f, w, m)) acc
        else acc ++ [(fc, v, n)]
 addDup acc _ = acc
 
-removeN : Nat -> RCLocal -> List RCLocal -> List RCLocal
+removeN : Nat -> LocalId -> List LocalId -> List LocalId
 removeN Z _ xs = xs
 removeN (S k) v xs = removeN k v (delete v xs)
 
@@ -79,8 +79,8 @@ normalize ops =
     in (cancelled, map (\(fc, v, n) => DupOp fc v n) (reverse dups)
                    ++ (if null drops then [] else [DropOp dropFC drops]))
   where
-    cancel : (Nat, List (FC, RCLocal, Nat), List RCLocal) -> (FC, RCLocal, Nat)
-          -> (Nat, List (FC, RCLocal, Nat), List RCLocal)
+    cancel : (Nat, List (FC, LocalId, Nat), List LocalId) -> (FC, LocalId, Nat)
+          -> (Nat, List (FC, LocalId, Nat), List LocalId)
     cancel (c, ds, drops) (fc, v, n) =
         let k = min n (length (filter (== v) drops))
         in (c + k, if n > k then (fc, v, minus n k) :: ds else ds, removeN k v drops)
@@ -130,7 +130,7 @@ tryPush ops e = do
     (scruts, arms, put) <- caseParts e
     let (_, run) = normalize ops
     -- A `drop` of what the dispatch reads is never moved past it.
-    guard (not (any (\s => elem s (dropsOf run)) scruts))
+    guard (not (any (\s => any (\i => locOf i == s) (dropsOf run)) scruts))
     let parts = map (\b => let (q, rest) = spanRun b in (snd (normalize q), rest)) arms
     let results = map (\(q, _) => normalize (run ++ q)) parts
     let cancelled = the Nat (sum (map fst results))

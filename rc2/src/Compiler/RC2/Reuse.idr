@@ -21,7 +21,7 @@ import Data.SortedSet
 %default covering
 
 ||| Inverse of `Compiler.RC2.Util.peelDrop`.
-rewrapDrop : List RCLocal -> RCExp -> RCExp
+rewrapDrop : List LocalId -> RCExp -> RCExp
 rewrapDrop [] cont = cont
 rewrapDrop locs cont = RDrop emptyFC locs cont
 
@@ -29,10 +29,10 @@ rewrapDrop locs cont = RDrop emptyFC locs cont
 ||| wrapped, see `annotate`'s `wrapDups`), if unclaimed -- a one-shot
 ||| check, not a search. See `doc/reuse-analysis.md`'s "tryConsume /
 ||| tryClaim".
-tryClaim : Name -> RCLocal -> RCExp -> Maybe RCExp
+tryClaim : Name -> LocalId -> RCExp -> Maybe RCExp
 tryClaim target sc (RDup fc v extra inner) = RDup fc v extra <$> tryClaim target sc inner
 tryClaim target sc (RCon fc n ci tag args Nothing) =
-    if n == target then Just (RCon fc n ci tag args (Just sc)) else Nothing
+    if n == target then Just (RCon fc n ci tag args (Just (locOf sc))) else Nothing
 tryClaim target sc _ = Nothing
 
 ||| Search `e` for the first reachable, unclaimed `RCon` of `target`'s
@@ -47,7 +47,7 @@ tryClaim target sc _ = Nothing
 ||| body claims nothing is searched through its *value* tree instead
 ||| (`doc/reuse-analysis.md`, "Nested let values"); every leaf of that
 ||| tree then claims or releases, so the body is left alone.
-tryConsume : (nested : Bool) -> Name -> RCLocal -> RCExp -> (Bool, RCExp)
+tryConsume : (nested : Bool) -> Name -> LocalId -> RCExp -> (Bool, RCExp)
 tryConsume nested target sc (RLet fc var rep value body) =
     case tryClaim target sc value of
          Just value' => (True, RLet fc var rep value' body)
@@ -84,7 +84,7 @@ tryConsume nested target sc (RConCase fc sc2 alts mDef) =
     in (any fst altResults || maybe False fst defResult,
         RConCase fc sc2 (map snd altResults) (map snd defResult))
   where
-    tryConsumeAlt : Bool -> Name -> RCLocal -> RConAlt -> (Bool, RConAlt)
+    tryConsumeAlt : Bool -> Name -> LocalId -> RConAlt -> (Bool, RConAlt)
     tryConsumeAlt nested target sc (MkRConAlt name ci tag args body) =
         let (claimed, body') = tryConsume nested target sc body
         in (claimed, MkRConAlt name ci tag args body')
@@ -94,7 +94,7 @@ tryConsume nested target sc (RConstCase fc sc2 alts mDef) =
     in (any fst altResults || maybe False fst defResult,
         RConstCase fc sc2 (map snd altResults) (map snd defResult))
   where
-    tryConsumeConstAlt : Bool -> Name -> RCLocal -> RConstAlt -> (Bool, RConstAlt)
+    tryConsumeConstAlt : Bool -> Name -> LocalId -> RConstAlt -> (Bool, RConstAlt)
     tryConsumeConstAlt nested target sc (MkRConstAlt c body) =
         let (claimed, body') = tryConsume nested target sc body in (claimed, MkRConstAlt c body')
 tryConsume nested target sc (RCmpCase fc op args pd t f) =
@@ -138,26 +138,31 @@ resolveReuse nested imm (RConCase fc sc alts mDef) =
             -- holds such a constructor as a tagged pointer (RCEmptyCon).
             erased = isNullCon ci || null args
             (dropped, inner) = peelDrop body1
-        in if not erased && elem sc dropped && contains name (usedConstructorsR inner)
-              then let
+            -- the scrutinee, when it is a variable that dies here
+            reusable = if erased || not (contains name (usedConstructorsR inner))
+                          then Nothing
+                          else idOf sc >>= \i => if elem i dropped then Just i else Nothing
+        in case reusable of
+              Just scId => let
                        -- Dead offer: released up front, branch kept
                        -- (rc2/doc/reuse-analysis.md, "a dead offer releases up front").
-                       inner' = case tryConsume nested name sc inner of
+                       inner' = case tryConsume nested name scId inner of
                                      (True, consumed) => consumed
-                                     (False, _) => RReleaseReuse emptyFC sc inner
-                       dropped' = dropped \\ [sc]
+                                     (False, _) => RReleaseReuse emptyFC scId inner
+                       dropped' = dropped \\ [scId]
                        -- An always-unboxed field (`typedConstScrutinees`) needs no
                        -- dup/drop on either path: left out of the three lists below.
-                       conArgsRC = filter (\l => not (contains l imm)) (map RCLoc args)
+                       conArgsRC = filter (\i => not (contains (locOf i) imm)) (map MkLocalId args)
                        -- See rc2/doc/reuse-analysis.md, "dropOnUnique".
                        dupOnShared = conArgsRC \\ dropped'
-                       outerDrop = dropped' \\ map RCLoc args
+                       outerDrop = dropped' \\ map MkLocalId args
                        dropOnUnique = conArgsRC \\ dupOnShared
                    in MkRConAlt name ci tag args
-                        (rewrapDrop outerDrop (RReuseOffer emptyFC sc dupOnShared dropOnUnique inner'))
-              else let conArgsRC = filter (\l => not (contains l imm)) (map RCLoc args)
+                        (rewrapDrop outerDrop (RReuseOffer emptyFC scId dupOnShared dropOnUnique inner'))
+              Nothing => let
+                       conArgsRC = filter (\i => not (contains (locOf i) imm)) (map MkLocalId args)
                        dupOnSurvive = conArgsRC \\ dropped
-                       outerDrop = dropped \\ map RCLoc args
+                       outerDrop = dropped \\ map MkLocalId args
                    in MkRConAlt name ci tag args
                         (foldr (\v, acc => RDup emptyFC v 0 acc) (rewrapDrop outerDrop inner) dupOnSurvive)
 resolveReuse nested imm (RConstCase fc sc alts mDef) =
@@ -184,10 +189,10 @@ export
 recheckReuse : (nested : Bool) -> RCExp -> RCExp
 recheckReuse nested = go []
   where
-    go : List (RCLocal, Name) -> RCExp -> RCExp
+    go : List (LocalId, Name) -> RCExp -> RCExp
     go env (RConCase fc sc alts mDef) =
         RConCase fc sc
-          (map (\(MkRConAlt n ci tag as b) => MkRConAlt n ci tag as (go ((sc, n) :: env) b)) alts)
+          (map (\(MkRConAlt n ci tag as b) => MkRConAlt n ci tag as (go (maybe env (\i => (i, n) :: env) (idOf sc)) b)) alts)
           (map (go env) mDef)
     go env (RReuseOffer fc sc ds us k) =
         case go env k of

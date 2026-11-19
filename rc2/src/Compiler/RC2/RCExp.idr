@@ -125,11 +125,16 @@ idOf : RCLocal -> Maybe LocalId
 idOf (RCLoc i) = Just (MkLocalId i)
 idOf _ = Nothing
 
+||| `i` after `f` renames its variable, or `Nothing` if `f` makes it a constant.
+public export
+mapId : (RCLocal -> RCLocal) -> LocalId -> Maybe LocalId
+mapId f = idOf . f . locOf
+
 ||| `ids` after `f` renames its variables. One that `f` turns into a constant
 ||| owns no reference count any more, so it is dropped from the list.
 public export
 mapIds : (RCLocal -> RCLocal) -> List LocalId -> List LocalId
-mapIds f = mapMaybe (idOf . f . locOf)
+mapIds f = mapMaybe (mapId f)
 
 ||| Witness that `l` is `RCConstCon` -- kept as its own narrow proof
 ||| (rather than only the five-case `IsAnyConstLocal` below)
@@ -464,16 +469,16 @@ data RCExp : Type where
      ||| unrepresentable at the type level. `RC` and the passes after it
      ||| make single increments (`extra = 0`); `Compiler.RC2.DupMerge`
      ||| batches several into one `extra > 0` call (`idris2rc2_dup_n`).
-     RDup       : FC -> RCLocal -> (extra : Nat) -> RCExp -> RCExp
+     RDup       : FC -> LocalId -> (extra : Nat) -> RCExp -> RCExp
      ||| Cleanup of owned variables dead at this point. Lowers to
      ||| `idris2rc2_drop` calls, except any folded into a reuse slot instead.
-     RDrop      : FC -> List RCLocal -> RCExp -> RCExp
+     RDrop      : FC -> List LocalId -> RCExp -> RCExp
      ||| Unconditional, unchecked deallocation of `loc` -- only where
      ||| RC.idr can prove it's a brand-new, never-shared allocation.
-     RFree      : FC -> RCLocal -> RCExp -> RCExp
+     RFree      : FC -> LocalId -> RCExp -> RCExp
      ||| Releases an `RReuseOffer` not consumed by any `RCon` on this
      ||| path. Lowers to `idris2rc2_releaseReuse`. See `doc/reuse-analysis.md`.
-     RReleaseReuse : FC -> RCLocal -> RCExp -> RCExp
+     RReleaseReuse : FC -> LocalId -> RCExp -> RCExp
      ||| Explicit tail-recursive loop. `loopParams`: this loop's carried
      ||| locals; `initial`: their starting values; `body` runs
      ||| repeatedly until an `RLoopContinue` starts the next iteration
@@ -500,7 +505,7 @@ data RCExp : Type where
      ||| drop only on the unique path, where `sc` itself isn't dropped.
      ||| Only inserted by `Compiler.RC2.Reuse`'s `resolveAlt` -- see
      ||| `doc/reuse-analysis.md`.
-     RReuseOffer : FC -> (sc : RCLocal) -> (dupOnShared : List RCLocal) -> (dropOnUnique : List RCLocal) -> RCExp -> RCExp
+     RReuseOffer : FC -> (sc : LocalId) -> (dupOnShared : List LocalId) -> (dropOnUnique : List LocalId) -> RCExp -> RCExp
      ||| Wraps a top-level 0-argument definition's *entire* body,
      ||| guaranteeing it's evaluated at most once, shared across every
      ||| reference to `name` -- see `doc/caf-memoization.md`. `name` is
@@ -610,12 +615,12 @@ freeLocalsR (RConstCase _ sc alts mDef) =
     let altsFree = map (\(MkRConstAlt _ body) => freeLocalsR body) alts
         allFree = maybe altsFree (\d => freeLocalsR d :: altsFree) mDef
     in insert sc (concat allFree)
-freeLocalsR (RDup _ v _ body) = insert v (freeLocalsR body)
-freeLocalsR (RDrop _ vars body) = union (fromList vars) (freeLocalsR body)
-freeLocalsR (RFree _ v body) = insert v (freeLocalsR body)
-freeLocalsR (RReleaseReuse _ v body) = insert v (freeLocalsR body)
+freeLocalsR (RDup _ v _ body) = insert (locOf v) (freeLocalsR body)
+freeLocalsR (RDrop _ vars body) = union (fromList (map locOf vars)) (freeLocalsR body)
+freeLocalsR (RFree _ v body) = insert (locOf v) (freeLocalsR body)
+freeLocalsR (RReleaseReuse _ v body) = insert (locOf v) (freeLocalsR body)
 freeLocalsR (RReuseOffer _ sc dupOnShared dropOnUnique body) =
-    union (insert sc (fromList dupOnShared `union` fromList dropOnUnique)) (freeLocalsR body)
+    union (insert (locOf sc) (fromList (map locOf dupOnShared) `union` fromList (map locOf dropOnUnique))) (freeLocalsR body)
 freeLocalsR (RMemoize _ _ _ body) = freeLocalsR body
 freeLocalsR (RDelay _ _ _ caps) = fromList caps
 freeLocalsR (RForce _ _ v _) = fromList [v]
@@ -663,12 +668,12 @@ mentionedLocalsAcc acc (RConCase _ sc alts mDef) =
 mentionedLocalsAcc acc (RConstCase _ sc alts mDef) =
     let acc' = foldl (\a, (MkRConstAlt _ body) => mentionedLocalsAcc a body) (insert sc acc) alts
     in maybe acc' (mentionedLocalsAcc acc') mDef
-mentionedLocalsAcc acc (RDup _ v _ body) = mentionedLocalsAcc (insert v acc) body
-mentionedLocalsAcc acc (RDrop _ vars body) = mentionedLocalsAcc (insertAll vars acc) body
-mentionedLocalsAcc acc (RFree _ v body) = mentionedLocalsAcc (insert v acc) body
-mentionedLocalsAcc acc (RReleaseReuse _ v body) = mentionedLocalsAcc (insert v acc) body
+mentionedLocalsAcc acc (RDup _ v _ body) = mentionedLocalsAcc (insert (locOf v) acc) body
+mentionedLocalsAcc acc (RDrop _ vars body) = mentionedLocalsAcc (insertAll (map locOf vars) acc) body
+mentionedLocalsAcc acc (RFree _ v body) = mentionedLocalsAcc (insert (locOf v) acc) body
+mentionedLocalsAcc acc (RReleaseReuse _ v body) = mentionedLocalsAcc (insert (locOf v) acc) body
 mentionedLocalsAcc acc (RReuseOffer _ sc dupOnShared dropOnUnique body) =
-    mentionedLocalsAcc (insertAll dupOnShared (insertAll dropOnUnique (insert sc acc))) body
+    mentionedLocalsAcc (insertAll (map locOf dupOnShared) (insertAll (map locOf dropOnUnique) (insert (locOf sc) acc))) body
 mentionedLocalsAcc acc (RLoop _ _ initial prologueDrop body) =
     mentionedLocalsAcc (insertAll initial (insertAll (map locOf prologueDrop) acc)) body
 mentionedLocalsAcc acc (RLoopContinue _ args postDrop) = insertAll args (insertAll (map locOf postDrop) acc)
@@ -751,12 +756,12 @@ ownedUsedGo targets wanted st@(_, found) e =
         let st' = foldl (\a, (MkRConstAlt _ body) => ownedUsedGo targets wanted a body)
                         (hit st sc) alts
         in maybe st' (ownedUsedGo targets wanted st') mDef
-    step (RDup _ v _ body) = ownedUsedGo targets wanted (hit st v) body
-    step (RDrop _ vars body) = ownedUsedGo targets wanted (hits st vars) body
-    step (RFree _ v body) = ownedUsedGo targets wanted (hit st v) body
-    step (RReleaseReuse _ v body) = ownedUsedGo targets wanted (hit st v) body
+    step (RDup _ v _ body) = ownedUsedGo targets wanted (hit st (locOf v)) body
+    step (RDrop _ vars body) = ownedUsedGo targets wanted (hits st (map locOf vars)) body
+    step (RFree _ v body) = ownedUsedGo targets wanted (hit st (locOf v)) body
+    step (RReleaseReuse _ v body) = ownedUsedGo targets wanted (hit st (locOf v)) body
     step (RReuseOffer _ sc dupOnShared dropOnUnique body) =
-        ownedUsedGo targets wanted (hits (hits (hit st sc) dupOnShared) dropOnUnique) body
+        ownedUsedGo targets wanted (hits (hits (hit st (locOf sc)) (map locOf dupOnShared)) (map locOf dropOnUnique)) body
     -- `freeLocalsR` has no case for either and falls through to `empty`;
     -- covering them here is strictly more conservative, and neither can
     -- occur at `Compiler.RC2.RC`'s own stage anyway (both are built
@@ -818,12 +823,12 @@ mentionsLocal l (RConstCase _ sc alts mDef) =
     sc == l
     || any (\(MkRConstAlt _ body) => mentionsLocal l body) alts
     || maybe False (mentionsLocal l) mDef
-mentionsLocal l (RDup _ v _ body) = v == l || mentionsLocal l body
-mentionsLocal l (RDrop _ vars body) = elem l vars || mentionsLocal l body
-mentionsLocal l (RFree _ v body) = v == l || mentionsLocal l body
-mentionsLocal l (RReleaseReuse _ v body) = v == l || mentionsLocal l body
+mentionsLocal l (RDup _ v _ body) = locOf v == l || mentionsLocal l body
+mentionsLocal l (RDrop _ vars body) = elem l (map locOf vars) || mentionsLocal l body
+mentionsLocal l (RFree _ v body) = locOf v == l || mentionsLocal l body
+mentionsLocal l (RReleaseReuse _ v body) = locOf v == l || mentionsLocal l body
 mentionsLocal l (RReuseOffer _ sc dupOnShared dropOnUnique body) =
-    sc == l || elem l dupOnShared || elem l dropOnUnique || mentionsLocal l body
+    locOf sc == l || elem l (map locOf dupOnShared) || elem l (map locOf dropOnUnique) || mentionsLocal l body
 mentionsLocal l (RMemoize _ _ _ body) = mentionsLocal l body
 mentionsLocal l (RDelay _ _ _ caps) = elem l caps
 mentionsLocal l (RForce _ _ v _) = v == l
@@ -860,13 +865,13 @@ countUsesR l (RConstCase _ sc alts mDef) =
     (if sc == l then 1 else 0)
     + sum (map (\(MkRConstAlt _ body) => countUsesR l body) alts)
     + maybe 0 (countUsesR l) mDef
-countUsesR l (RDup _ v extra body) = (if v == l then S extra else 0) + countUsesR l body
-countUsesR l (RDrop _ vars body) = length (filter (== l) vars) + countUsesR l body
-countUsesR l (RFree _ v body) = (if v == l then 1 else 0) + countUsesR l body
-countUsesR l (RReleaseReuse _ v body) = (if v == l then 1 else 0) + countUsesR l body
+countUsesR l (RDup _ v extra body) = (if locOf v == l then S extra else 0) + countUsesR l body
+countUsesR l (RDrop _ vars body) = length (filter (== l) (map locOf vars)) + countUsesR l body
+countUsesR l (RFree _ v body) = (if locOf v == l then 1 else 0) + countUsesR l body
+countUsesR l (RReleaseReuse _ v body) = (if locOf v == l then 1 else 0) + countUsesR l body
 countUsesR l (RReuseOffer _ sc dupOnShared dropOnUnique body) =
-    (if sc == l then 1 else 0) + length (filter (== l) dupOnShared)
-    + length (filter (== l) dropOnUnique) + countUsesR l body
+    (if locOf sc == l then 1 else 0) + length (filter (== l) (map locOf dupOnShared))
+    + length (filter (== l) (map locOf dropOnUnique)) + countUsesR l body
 countUsesR l (RMemoize _ _ _ body) = countUsesR l body
 countUsesR l (RDelay _ _ _ caps) = length (filter (== l) caps)
 countUsesR l (RForce _ _ v _) = if v == l then 1 else 0
@@ -990,14 +995,14 @@ foldRCNamesR nf = go
     go (RPrimVal _ _) = neutral
     go (RErased _) = neutral
     go (RCrash _ _) = neutral
-    go (RDup _ v _ body) = l v <+> go body
-    go (RDrop _ vars body) = ls vars <+> go body
-    go (RFree _ v body) = l v <+> go body
-    go (RReleaseReuse _ v body) = l v <+> go body
+    go (RDup _ v _ body) = l (locOf v) <+> go body
+    go (RDrop _ vars body) = ls (map locOf vars) <+> go body
+    go (RFree _ v body) = l (locOf v) <+> go body
+    go (RReleaseReuse _ v body) = l (locOf v) <+> go body
     go (RLoop _ _ initial prologueDrop body) = ls initial <+> ls (map locOf prologueDrop) <+> go body
     go (RLoopContinue _ args postDrop) = ls args <+> ls (map locOf postDrop)
     go (RReuseOffer _ sc dupOnShared dropOnUnique body) =
-        l sc <+> ls dupOnShared <+> ls dropOnUnique <+> go body
+        l (locOf sc) <+> ls (map locOf dupOnShared) <+> ls (map locOf dropOnUnique) <+> go body
     go (RMemoize _ _ _ body) = go body
 
 ||| `foldRCNamesR` lifted over a whole `RCDef` (only `MkRCFun`/
@@ -1037,9 +1042,9 @@ directReads (RFill _ cell _ val pd) = cell :: val :: map locOf pd
 directReads (RCmpCase _ _ args pd _ _) = toList args ++ map locOf pd
 directReads (RConCase _ sc _ _) = [sc]
 directReads (RConstCase _ sc _ _) = [sc]
-directReads (RDup _ x _ _) = [x]
-directReads (RFree _ x _) = [x]
-directReads (RReuseOffer _ _ ds us _) = ds ++ us
+directReads (RDup _ x _ _) = [locOf x]
+directReads (RFree _ x _) = [locOf x]
+directReads (RReuseOffer _ _ ds us _) = map locOf (ds ++ us)
 directReads (RLoop _ _ initial pd _) = initial ++ map locOf pd
 directReads (RLoopContinue _ args pd) = args ++ map locOf pd
 directReads _ = []

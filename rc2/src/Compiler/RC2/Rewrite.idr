@@ -50,9 +50,9 @@ mapTailAppNames f e = let (MkTailSeen ns r, e') = go e in (ns, r, e')
 ------------------------------------------------------------------------
 -- Renaming every RCLocal/bound-id occurrence in a body according to a
 -- (possibly partial -- ids with no entry pass through unchanged) map.
--- A pure substitution: doesn't add or remove any RDup/RDrop/RFree/
--- RReleaseReuse/reuse-related node, just relabels what they (and every
--- read) refer to.
+-- A pure substitution: relabels what every node refers to. The only node it
+-- removes is a `dup`, `drop` or `free` of a variable that the map turns into a
+-- constant (a constant has no reference count).
 
 public export
 Renaming : Type
@@ -105,12 +105,23 @@ mutual
   mapLocalsRCExp _ _ (RPrimVal fc c) = RPrimVal fc c
   mapLocalsRCExp _ _ (RErased fc) = RErased fc
   mapLocalsRCExp _ _ (RCrash fc msg) = RCrash fc msg
-  mapLocalsRCExp f g (RDup fc v extra body) = RDup fc (f v) extra (mapLocalsRCExp f g body)
-  mapLocalsRCExp f g (RDrop fc vars body) = RDrop fc (map f vars) (mapLocalsRCExp f g body)
-  mapLocalsRCExp f g (RFree fc v body) = RFree fc (f v) (mapLocalsRCExp f g body)
-  mapLocalsRCExp f g (RReleaseReuse fc v body) = RReleaseReuse fc (f v) (mapLocalsRCExp f g body)
+  -- A dup, drop or free of a variable that `f` turns into a constant does nothing,
+  -- so it goes. A reuse token is never replaced by a constant (`DeadVars`).
+  mapLocalsRCExp f g (RDup fc v extra body) =
+      let body' = mapLocalsRCExp f g body
+      in maybe body' (\i => RDup fc i extra body') (mapId f v)
+  mapLocalsRCExp f g (RDrop fc vars body) =
+      let body' = mapLocalsRCExp f g body
+      in case mapIds f vars of
+              [] => body'
+              vars' => RDrop fc vars' body'
+  mapLocalsRCExp f g (RFree fc v body) =
+      let body' = mapLocalsRCExp f g body
+      in maybe body' (\i => RFree fc i body') (mapId f v)
+  mapLocalsRCExp f g (RReleaseReuse fc v body) =
+      RReleaseReuse fc (fromMaybe v (mapId f v)) (mapLocalsRCExp f g body)
   mapLocalsRCExp f g (RReuseOffer fc sc dupOnShared dropOnUnique body) =
-      RReuseOffer fc (f sc) (map f dupOnShared) (map f dropOnUnique) (mapLocalsRCExp f g body)
+      RReuseOffer fc (fromMaybe sc (mapId f sc)) (mapIds f dupOnShared) (mapIds f dropOnUnique) (mapLocalsRCExp f g body)
   -- Never actually reached in practice -- nothing calling this ever
   -- operates on a tree that already contains an `RLoop` (this module's
   -- own `applyLoop` is its sole producer, and only ever calls
@@ -176,14 +187,14 @@ export
 stripOwnership : SortedSet Int -> RCExp -> RCExp
 stripOwnership ids (RDup fc v extra body) =
     let body' = stripOwnership ids body
-    in if keepUnlessOwned ids v then RDup fc v extra body' else body'
+    in if keepIdUnlessOwned ids v then RDup fc v extra body' else body'
 stripOwnership ids (RDrop fc vs body) =
-    let vs' = filter (keepUnlessOwned ids) vs
+    let vs' = filter (keepIdUnlessOwned ids) vs
         body' = stripOwnership ids body
     in if null vs' then body' else RDrop fc vs' body'
 stripOwnership ids (RFree fc v body) =
     let body' = stripOwnership ids body
-    in if keepUnlessOwned ids v then RFree fc v body' else body'
+    in if keepIdUnlessOwned ids v then RFree fc v body' else body'
 stripOwnership ids (RLet fc var rep value body) =
     RLet fc var rep (stripOwnership ids value) (stripOwnership ids body)
 stripOwnership ids (ROp fc lazy op args postDrop) =

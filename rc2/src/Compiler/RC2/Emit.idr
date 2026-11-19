@@ -221,20 +221,20 @@ mutual
     ||| wrapper.
     peelWrappers : EmitDeps (RCExp -> Core RCExp)
     peelWrappers (RDup fc v extra cont) = do
-        dupVarExtra (varName v) extra
+        dupVarExtra (idName v) extra
         peelWrappers cont
     peelWrappers (RDrop fc vs cont) = do
         -- `vs` is already guaranteed Boxed-only -- see the module note.
-        removeVars (varName <$> vs)
+        removeVars (idName <$> vs)
         peelWrappers cont
     peelWrappers (RFree fc v cont) = do
-        freeVars [varName v]
+        freeVars [idName v]
         peelWrappers cont
     peelWrappers (RLet fc var rep value body) = do
         declareLet fc var rep value
         peelWrappers body
     peelWrappers (RReleaseReuse fc loc cont) = do
-        removeReuseConstructors [reuseVarName loc]
+        removeReuseConstructors [reuseVarName (locOf loc)]
         peelWrappers cont
     peelWrappers (RReuseOffer fc sc dupOnShared dropOnUnique cont) = do
         emitReuseOffer sc dupOnShared dropOnUnique
@@ -285,7 +285,7 @@ mutual
         -- wrapping `drop` around a native-context read. See
         -- `RLoopContinue`'s own doc comment (RCExp.idr) for the real
         -- leak this closes.
-        removeVars ((varName . locOf) <$> postDrop)
+        removeVars (idName <$> postDrop)
         traverse_ (\(paramId, t) => emit fc "var_\{show paramId} = \{t};") temps
         emit fc "goto loop_\{label};"
         pure Nothing
@@ -490,7 +490,7 @@ mutual
         let (shouldDrop0, body') = peelDrop body
         -- shouldDrop0 is already guaranteed Boxed-only -- see the
         -- module note.
-        let shouldDrop = varName <$> shouldDrop0
+        let shouldDrop = idName <$> shouldDrop0
         removeVars shouldDrop
         -- `sink` is already fully resolved -- any variable it names was
         -- declared once by the enclosing RConCase/RConstCase/RCmpCase
@@ -561,7 +561,7 @@ mutual
                            let condVar = "cmp_" ++ !(getNextCounter)
                            emit fc $ "int " ++ condVar ++ " = " ++ cond ++ ";"
                            removeVars $ concatMap snd (toList argsWithPending)
-                           removeVars $ map (varName . locOf) postDrop
+                           removeVars $ map idName postDrop
                            pure condVar
         resolvedSink <- resolveSink fc sink
         emit fc "if (\{condText}) {"
@@ -758,7 +758,7 @@ mutual
         sink <- resolveSink fc sink0
         traverse_ (\((paramId, rep), initVal) =>
                        declareLoopParam (elem initVal (map locOf prologueDrop)) fc paramId rep initVal) (zip loopParams initial)
-        removeVars ((varName . locOf) <$> prologueDrop)
+        removeVars (idName <$> prologueDrop)
         label <- getNextCounter
         emit fc "loop_\{label}:;"
         outerStack <- get LoopParams
@@ -825,7 +825,7 @@ mutual
         case retRep of
              RBoxed => throw $ InternalError "[rc2] emitNativeValue: RAppNameRep with Boxed retRep reached a native context"
              RRet _ _ => retUnsupported "emitNativeValue"
-             _ => pure (call, map (varName . locOf) postDrop ++ concatMap snd argsWithPending)
+             _ => pure (call, map idName postDrop ++ concatMap snd argsWithPending)
     -- A direct, self-contained call to a %foreign declaration's own
     -- raw C function (`RAppFFIInline`, `Compiler.RC2.DualABI`'s own
     -- Stage 5), reached here whenever an enclosing `RLet`'s own Rep
@@ -855,7 +855,7 @@ mutual
                                     (TPtr, _) => "((IDRIS2RC2_Raw *)" ++ rawExpr ++ ")"
                                     (_, CFChar) => nativeCharRetExpr rawExpr
                                     _      => rawExpr
-                 in pure (retExpr, map (varName . locOf) postDrop ++ boxedArgDrop)
+                 in pure (retExpr, map idName postDrop ++ boxedArgDrop)
     emitNativeValue (TPrim ty) (ROp fc _ op args postDrop) = do
         argsWithPending <- traverseVect (\v => rcVarToNativeC (TPrim (opArgTyFor ty op)) v) args
         -- `postDrop` (same meaning as emitRC's boxed-ROp case, see its
@@ -867,7 +867,7 @@ mutual
         -- InlineMap'd pending drop each operand's own read already
         -- owed, see `rcVarToNativeC`'s own doc comment) so whoever
         -- *does* emit that statement can drop right after it.
-        pure (nativeOpExpr op (map fst argsWithPending), map (varName . locOf) postDrop ++ concatMap snd (toList argsWithPending))
+        pure (nativeOpExpr op (map fst argsWithPending), map idName postDrop ++ concatMap snd (toList argsWithPending))
     emitNativeValue ty (RPrimVal fc c) = pure (nativeLitExpr c, [])
     -- RC.idr's own ANF-normalisation wraps any non-trivial operand (e.g. a
     -- literal) in a synthetic RLet before the "real" ROp/RPrimVal --
@@ -885,17 +885,17 @@ mutual
     -- an entirely separate concern from whether the op's *result* ends up
     -- native. Just lower the wrapper and keep unwinding.
     emitNativeValue ty (RDup fc loc extra cont) = do
-        dupVarExtra (varName loc) extra
+        dupVarExtra (idName loc) extra
         emitNativeValue ty cont
     emitNativeValue ty (RFree fc loc cont) = do
-        freeVars [varName loc]
+        freeVars [idName loc]
         emitNativeValue ty cont
     emitNativeValue ty (RDrop fc locs cont) = do
         -- locs is already guaranteed Boxed-only -- see the module note.
-        removeVars (varName <$> locs)
+        removeVars (idName <$> locs)
         emitNativeValue ty cont
     emitNativeValue ty (RReleaseReuse fc loc cont) = do
-        removeReuseConstructors [reuseVarName loc]
+        removeReuseConstructors [reuseVarName (locOf loc)]
         emitNativeValue ty cont
     emitNativeValue ty e = throw $ InternalError "[rc2] internal: expected a native-producing expression"
 
@@ -922,7 +922,7 @@ emitAppNameRepInto sink tailPosition fc n argReps retRep postDrop args = do
                    RNative ty => pure (tyMk ty call)
                    RInlineNative ty => pure (tyMk ty call)
                    RRet _ _ => pure call
-    finalizeSinkWithDrop fc sink valStr (map (varName . locOf) postDrop ++ argPending)
+    finalizeSinkWithDrop fc sink valStr (map idName postDrop ++ argPending)
 
 emitAppFFIInlineInto sink tailPosition fc ccs fargs ret postDrop args = do
     (cLang, fctName) <- resolveForeignTarget ccs
@@ -940,7 +940,7 @@ emitAppFFIInlineInto sink tailPosition fc ccs fargs ret postDrop args = do
     -- comment), safe to render via a bare `varName`; `boxedArgDrop`
     -- is already-rendered text (see `ffiRawCall`'s own `marshalArg`
     -- doc comment for why it can't be a bare `varName` render).
-    let allDrop = map (varName . locOf) postDrop ++ boxedArgDrop
+    let allDrop = map idName postDrop ++ boxedArgDrop
     finalizeSinkWithDrop fc sink valStr allDrop
 
 ||| Bail for an `RCExp` node `emitInto`'s own dispatch chain is
@@ -1102,7 +1102,7 @@ emitRC sink (ROp fc _ op args postDrop) _ = do
     let pendings = concatMap (\(_, _, pending) => pending) (toList argsWithFresh)
     let drops = if isReuseConsumingOp op
                    then pendings
-                   else map (varName . locOf) postDrop ++ mapMaybe (\(_, fresh, _) => fresh) (toList argsWithFresh) ++ pendings
+                   else map idName postDrop ++ mapMaybe (\(_, fresh, _) => fresh) (toList argsWithFresh) ++ pendings
     finalizeSinkWithDrop fc sink (cOp op argStrs) drops
 
 emitRC sink (RExtPrim fc _ p args postDrop) _ = do
@@ -1131,7 +1131,7 @@ emitRC sink (RExtPrim fc _ p args postDrop) _ = do
     -- operand of `RExtPrim`".
     finalizeSinkWithDrop fc sink
       "idris2rc2_\{cName p}(\{showSep ", " (map (\(e, _, _) => e) argsWithFresh)})"
-      (map (varName . locOf) postDrop ++ mapMaybe (\(_, fresh, _) => fresh) argsWithFresh
+      (map idName postDrop ++ mapMaybe (\(_, fresh, _) => fresh) argsWithFresh
          ++ concatMap (\(_, _, pending) => pending) argsWithFresh)
 
 -- Part D (doc/c-struct-support.md's "Design" section): resolve
@@ -1167,7 +1167,7 @@ emitRC sink (RStructGet fc structVar (MkStructField sn _ fn ty _) postDrop) _ = 
     let packed = case ty of
                       CFInteger => "idris2rc2_mkIntegerFromMpz(\{rawFieldExpr})"
                       _         => "(IDRIS2RC2_Value*)" ++ packCFType ty "(\{cTypeOfCFType ty})(\{rawFieldExpr})"
-    finalizeSinkWithDrop fc sink packed (map (varName . locOf) postDrop ++ pending)
+    finalizeSinkWithDrop fc sink packed (map idName postDrop ++ pending)
 
 emitRC sink (RStructSet fc structVar (MkStructField sn _ fn ty _) value postDrop) _ = do
     (ptrBoxed, p1) <- rcVarToBoxedC structVar
@@ -1179,7 +1179,7 @@ emitRC sink (RStructSet fc structVar (MkStructField sn _ fn ty _) value postDrop
         Just pt => rcVarToNativeC (TPrim pt) value
         Nothing => mapFst (extractValue CLangC ty) <$> rcVarToBoxedC value
     emit fc $ "((\{sn}*)\{ptrC})->\{fn} = \{valC};"
-    removeVars $ map (varName . locOf) postDrop
+    removeVars $ map idName postDrop
     removeVars (p1 ++ p2)
     finalizeSink fc sink "((IDRIS2RC2_Value *)NULL)"
 
@@ -1188,7 +1188,7 @@ emitRC sink (RFill fc cell k value postDrop) _ = do
     (cellC, p1) <- rcVarToBoxedC cell
     (valC, p2) <- rcVarToBoxedC value
     emit fc $ "((IDRIS2RC2_Constructor *)\{cellC})->args[\{show k}] = \{valC};"
-    removeVars $ map (varName . locOf) postDrop
+    removeVars $ map idName postDrop
     removeVars (p1 ++ p2)
     finalizeSink fc sink "((IDRIS2RC2_Value *)NULL)"
 
@@ -1202,7 +1202,7 @@ emitRC sink (RDelay fc _ n caps) _ = do
     finalizeSink fc sink "idris2rc2_mkLazy(\{closure})"
 emitRC sink (RForce fc _ v postDrop) _ = do
     (vStr, pending) <- rcVarToBoxedC v
-    finalizeSinkWithDrop fc sink "idris2rc2_force(\{vStr})" (map (varName . locOf) postDrop ++ pending)
+    finalizeSinkWithDrop fc sink "idris2rc2_force(\{vStr})" (map idName postDrop ++ pending)
 
 emitRC sink (RPrimVal fc (I x)) tailPosition = emitRC sink (RPrimVal fc (I64 $ cast x)) tailPosition
 emitRC sink (RPrimVal fc c) _ = finalizeSink fc sink !(boxedConstExpr c)

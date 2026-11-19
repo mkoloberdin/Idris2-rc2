@@ -114,7 +114,7 @@ countDupsNeeded fid owned args =
 ||| single-local, fixed-count specialisation.
 wrapNDups : FC -> Int -> Nat -> RCExp -> RCExp
 wrapNDups fc fid Z e = e
-wrapNDups fc fid (S k) e = RDup fc (RCLoc fid) 0 (wrapNDups fc fid k e)
+wrapNDups fc fid (S k) e = RDup fc (MkLocalId fid) 0 (wrapNDups fc fid k e)
 
 -- `reannotateFieldOwnership`/`finalizeBranch` are mutually recursive
 -- (three of `reannotateFieldOwnership`'s own case clauses call
@@ -144,7 +144,7 @@ finalizeBranch : (fid : Int) -> Bool -> RCExp -> RCExp
 reannotateFieldOwnership : (fid : Int) -> Bool -> RCExp -> (Bool, RCExp)
 reannotateFieldOwnership fid owned (RV fc v) =
     if v == RCLoc fid
-       then if owned then (False, RV fc v) else (False, RDup fc v 0 (RV fc v))
+       then if owned then (False, RV fc v) else (False, RDup fc (MkLocalId fid) 0 (RV fc v))
        else (owned, RV fc v)
 reannotateFieldOwnership fid owned (RAppName fc lazy n args) =
     let (nDups, owned') = countDupsNeeded fid owned args
@@ -272,7 +272,7 @@ reannotateFieldOwnership _ owned e = (owned, e)
 
 finalizeBranch fid owned body =
     let (ownedAfter, body') = reannotateFieldOwnership fid owned body
-    in if ownedAfter then RDrop emptyFC [RCLoc fid] body' else body'
+    in if ownedAfter then RDrop emptyFC [MkLocalId fid] body' else body'
 
 ||| Promote whichever of `argIds` (one alt's own destructured fields)
 ||| `nativeArgType` finds read as a native-context operand, somewhere
@@ -316,16 +316,15 @@ shadowAltFields strict imm nextId argIds body =
     -- `dup` that moves the field out of a scrutinee dropped whole. Any
     -- further leading `dup` of such a field is the stale kind.
     stripLeading : SortedSet Int -> SortedSet Int -> RCExp -> RCExp
-    stripLeading ids owned (RDup fc v@(RCLoc i) extra cont) =
-        if not (contains i ids) then RDup fc v extra (stripLeading ids owned cont)
-        else if contains i owned then stripLeading ids owned cont
-        else RDup fc v 0 (stripLeading ids (insert i owned) cont)
-    stripLeading ids owned (RDup fc v extra cont) = RDup fc v extra (stripLeading ids owned cont)
+    stripLeading ids owned (RDup fc v extra cont) =
+        if not (contains v.num ids) then RDup fc v extra (stripLeading ids owned cont)
+        else if contains v.num owned then stripLeading ids owned cont
+        else RDup fc v 0 (stripLeading ids (insert v.num owned) cont)
     stripLeading ids owned (RDrop fc vs cont) = RDrop fc vs (stripLeading ids owned cont)
     stripLeading ids owned (RFree fc v cont) = RFree fc v (stripLeading ids owned cont)
     stripLeading ids owned (RReleaseReuse fc v cont) = RReleaseReuse fc v (stripLeading ids owned cont)
     stripLeading ids owned (RReuseOffer fc sc dupOnShared dropOnUnique cont) =
-        let owned' = foldl (\s, v => case v of { RCLoc i => if contains i ids then insert i s else s; _ => s }) owned dupOnShared
+        let owned' = foldl (\s, v => if contains v.num ids then insert v.num s else s) owned dupOnShared
         in RReuseOffer fc sc dupOnShared dropOnUnique (stripLeading ids owned' cont)
     stripLeading _ _ e = e
 
@@ -344,7 +343,7 @@ shadowAltFields strict imm nextId argIds body =
             (needsDrop, reAnnotated) = if contains (RCLoc p) imm then (False, marked)
                                        else reannotateFieldOwnership p True marked
         in RLet emptyFC sid (RNative (TPrim ty)) (RV emptyFC (RCLoc p))
-             (if needsDrop then RDrop emptyFC [RCLoc p] reAnnotated else reAnnotated)
+             (if needsDrop then RDrop emptyFC [MkLocalId p] reAnnotated else reAnnotated)
 
 ||| Walks the whole tree (an `RConCase` can appear anywhere, not just
 ||| tail position), threading a single fresh-id counter so every
