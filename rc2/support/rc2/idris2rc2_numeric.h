@@ -520,8 +520,7 @@ static inline uint32_t idris2rc2_charFromCodepoint(int64_t v) {
 IDRIS2RC2_INTTYPES(IDRIS2RC2_CAST_TO_CHAR)
 
 // idris2rc2_cast_<Int8/16/32/64/Bits8/16/32/64>_to_string stay in
-// numeric.c: each is multi-statement (measure with snprintf, allocate,
-// format), not a one-liner.
+// numeric.c: they share idris2rc2_decimalString there, not one-liners.
 #define IDRIS2RC2_CAST_TO_STRING_DECL(FROM, FCTY, FGET, FMK) \
   IDRIS2RC2_Value *idris2rc2_cast_##FROM##_to_string(IDRIS2RC2_Value *);
 IDRIS2RC2_INTTYPES(IDRIS2RC2_CAST_TO_STRING_DECL)

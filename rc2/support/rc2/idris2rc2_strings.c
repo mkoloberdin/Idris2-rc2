@@ -10,13 +10,13 @@ IDRIS2RC2_Value *idris2rc2_strTail(IDRIS2RC2_Value *input) {
   size_t offset = idris2rc2_utf8ByteOffsetOfChar(s->str, byteLen, 1);
   if (offset >= byteLen) {
     IDRIS2RC2_Value *result = (IDRIS2RC2_Value *)&idris2rc2_emptyStringValue;
-    idris2rc2_drop(input);
+    idris2rc2_dropString(input);
     return result;
   }
   IDRIS2RC2_String *r = idris2rc2_mkEmptyString(byteLen - offset + 1);
   memcpy(r->str, s->str + offset, byteLen - offset);
   IDRIS2RC2_Value *result = (IDRIS2RC2_Value *)r;
-  idris2rc2_drop(input);
+  idris2rc2_dropString(input);
   return result;
 }
 
@@ -48,7 +48,7 @@ IDRIS2RC2_Value *idris2rc2_strReverse(IDRIS2RC2_Value *str) {
   }
   free(offsets);
   IDRIS2RC2_Value *result = (IDRIS2RC2_Value *)r;
-  idris2rc2_drop(str);
+  idris2rc2_dropString(str);
   return result;
 }
 
@@ -59,7 +59,7 @@ IDRIS2RC2_Value *idris2rc2_strIndex(IDRIS2RC2_Value *str, IDRIS2RC2_Value *i) {
   size_t offset = idris2rc2_utf8ByteOffsetOfChar(s->str, byteLen, (size_t)idx);
   size_t consumed;
   IDRIS2RC2_Value *result = idris2rc2_mkChar(idris2rc2_utf8DecodeAt(s->str, byteLen, offset, &consumed));
-  idris2rc2_drop(str);
+  idris2rc2_dropString(str);
   idris2rc2_drop(i);
   return result;
 }
@@ -74,7 +74,7 @@ IDRIS2RC2_Value *idris2rc2_strCons(IDRIS2RC2_Value *c, IDRIS2RC2_Value *str) {
   memcpy(r->str + cpLen, s->str, byteLen);
   IDRIS2RC2_Value *result = (IDRIS2RC2_Value *)r;
   idris2rc2_drop(c);
-  idris2rc2_drop(str);
+  idris2rc2_dropString(str);
   return result;
 }
 
@@ -85,8 +85,8 @@ IDRIS2RC2_Value *idris2rc2_strAppend(IDRIS2RC2_Value *a, IDRIS2RC2_Value *b) {
   memcpy(r->str, ((IDRIS2RC2_String *)a)->str, la);
   memcpy(r->str + la, ((IDRIS2RC2_String *)b)->str, lb);
   IDRIS2RC2_Value *result = (IDRIS2RC2_Value *)r;
-  idris2rc2_drop(a);
-  idris2rc2_drop(b);
+  idris2rc2_dropString(a);
+  idris2rc2_dropString(b);
   return result;
 }
 
@@ -99,7 +99,7 @@ IDRIS2RC2_Value *idris2rc2_strSubstr(IDRIS2RC2_Value *start, IDRIS2RC2_Value *le
     IDRIS2RC2_Value *result = (IDRIS2RC2_Value *)idris2rc2_mkEmptyString(1);
     idris2rc2_drop(start);
     idris2rc2_drop(len);
-    idris2rc2_drop(s);
+    idris2rc2_dropString(s);
     return result;
   }
   size_t startByte = idris2rc2_utf8ByteOffsetOfChar(in->str, byteLen, (size_t)startIdx);
@@ -119,7 +119,7 @@ IDRIS2RC2_Value *idris2rc2_strSubstr(IDRIS2RC2_Value *start, IDRIS2RC2_Value *le
   IDRIS2RC2_Value *result = (IDRIS2RC2_Value *)r;
   idris2rc2_drop(start);
   idris2rc2_drop(len);
-  idris2rc2_drop(s);
+  idris2rc2_dropString(s);
   return result;
 }
 

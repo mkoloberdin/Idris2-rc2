@@ -3,7 +3,7 @@ module Main
 -- Copyright 2026, Hattori,Hiroki. All rights reserved.
 -- This module was licensed by BSD3.
 
--- Numeric edge cases checked against a saved output: Euclidean mod with negative operands, minBound div -1, non-finite Double to Integer, Double to Int wrap, the Double/Char Cast matrix and locale-independent Double<->String.
+-- Numeric edge cases checked against a saved output: Euclidean mod with negative operands, minBound div -1, non-finite Double to Integer, Double to Int wrap, the Double/Char Cast matrix, locale-independent Double<->String and integer show at the bounds.
 -- Each section is a formerly separate test kept verbatim as its own
 -- module (its `main` renamed `run`); see rc2/tests/README.md.
 
@@ -13,6 +13,7 @@ import Test168NumericEdge.DoubleNonFiniteToInteger
 import Test168NumericEdge.DoubleToIntWrap
 import Test168NumericEdge.CastMatrix
 import Test168NumericEdge.DoubleString
+import Test168NumericEdge.IntToString
 
 main : IO ()
 main = do
@@ -22,3 +23,4 @@ main = do
     DoubleToIntWrap.run
     CastMatrix.run
     DoubleString.run
+    IntToString.run
