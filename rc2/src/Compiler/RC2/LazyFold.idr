@@ -16,7 +16,7 @@ import Data.List
 
 ||| `e` with its one `force` of `c` replaced by a call of `thunk` on
 ||| `caps`, or `Nothing` if that use isn't a `force`.
-replaceForce : Int -> Name -> List RCLocal -> RCExp -> Maybe RCExp
+replaceForce : LocalId -> Name -> List RCLocal -> RCExp -> Maybe RCExp
 replaceForce c thunk caps e@(RForce fc _ v _) =
     if v == RCLoc c then Just (RAppName fc Nothing thunk caps) else Nothing
 replaceForce c thunk caps (RLet fc var rep value body) =

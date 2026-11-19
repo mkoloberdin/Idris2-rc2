@@ -91,9 +91,9 @@ EmitDeps retTy = {auto a : Ref ArgCounter Nat}
               -> {auto il : Ref IndentLevel Nat}
               -> {auto _ : Ref ConstDef (SortedMap Constant ConstDef)}
               -> {auto cc : Ref ConstConDef (SortedMap RCLocal String, List String)}
-              -> {auto r : Ref RepMap (SortedMap Int Rep)}
-              -> {auto lm : Ref InlineMap (SortedMap Int (String, List String))}
-              -> {auto fa : Ref LoopParams (List (String, List (Int, Rep)))}
+              -> {auto r : Ref RepMap (SortedMap LocalId Rep)}
+              -> {auto lm : Ref InlineMap (SortedMap LocalId (String, List String))}
+              -> {auto fa : Ref LoopParams (List (String, List (LocalId, Rep)))}
               -> {auto sd : Ref StructDefs (SortedMap String (List (String, CFType)))}
               -> {auto tf : Ref TrampolineFree (SortedSet Name)}
               -> retTy
@@ -156,7 +156,7 @@ mutual
     ||| projects field `f` out of a Boxed `sc`: declare `var` as that
     ||| field itself, so the field needs neither a second variable nor a
     ||| copy. `False` when the shape does not match, nothing emitted.
-    emitFieldProjection : EmitDeps (Int -> RCLocal -> RConAlt -> Core Bool)
+    emitFieldProjection : EmitDeps (LocalId -> RCLocal -> RConAlt -> Core Bool)
     emitFieldProjection var sc (MkRConAlt _ _ _ args body) = do
         scRep <- repOfLocal sc
         case (scRep, projectChain var body) of
@@ -184,7 +184,7 @@ mutual
     |||
     ||| A `let` that only projects a field out of a single-alt case goes
     ||| through `emitFieldProjection` instead.
-    declareLet : EmitDeps (FC -> Int -> Rep -> RCExp -> Core ())
+    declareLet : EmitDeps (FC -> LocalId -> Rep -> RCExp -> Core ())
     declareLet fc var rep value = do
         update RepMap (insert var rep)
         projected <- case (rep, value) of
@@ -203,9 +203,9 @@ mutual
              -- verified byte-identical over the whole test suite's own
              -- generated C when this routing landed.
              (RNative ty, _) =>
-                 emitInto fc (SinkVar True "var_\{show var}" (RNative ty)) NotInTailPosition value
-             (RBoxed, _) => emitInto fc (SinkVar True "var_\{show var}" RBoxed) NotInTailPosition value
-             (r@(RRet _ _), _) => emitInto fc (SinkVar True "var_\{show var}" r) NotInTailPosition value
+                 emitInto fc (SinkVar True (idName var) (RNative ty)) NotInTailPosition value
+             (RBoxed, _) => emitInto fc (SinkVar True (idName var) RBoxed) NotInTailPosition value
+             (r@(RRet _ _), _) => emitInto fc (SinkVar True (idName var) r) NotInTailPosition value
 
     ||| Lower a leading chain of ownership/reuse wrapper nodes --
     ||| `RDup`/`RDrop`/`RFree`/`RLet`/`RReleaseReuse`/`RReuseOffer`,
@@ -234,7 +234,7 @@ mutual
         declareLet fc var rep value
         peelWrappers body
     peelWrappers (RReleaseReuse fc loc cont) = do
-        removeReuseConstructors [reuseVarName (locOf loc)]
+        removeReuseConstructors [reuseVarName (RCLoc loc)]
         peelWrappers cont
     peelWrappers (RReuseOffer fc sc dupOnShared dropOnUnique cont) = do
         emitReuseOffer sc dupOnShared dropOnUnique
@@ -286,7 +286,7 @@ mutual
         -- `RLoopContinue`'s own doc comment (RCExp.idr) for the real
         -- leak this closes.
         removeVars (idName <$> postDrop)
-        traverse_ (\(paramId, t) => emit fc "var_\{show paramId} = \{t};") temps
+        traverse_ (\(paramId, t) => emit fc "\{idName paramId} = \{t};") temps
         emit fc "goto loop_\{label};"
         pure Nothing
       _ => pure (Just e)
@@ -314,10 +314,10 @@ mutual
     ||| `emitRC`'s and `emitNativeValue`'s own RLet cases for a plain
     ||| (non-inlined) `RNative` local -- identical in both except for
     ||| what continues afterward, which each caller keeps to itself.
-    declareNative : EmitDeps (FC -> NativeTy -> Int -> RCExp -> Core ())
+    declareNative : EmitDeps (FC -> NativeTy -> LocalId -> RCExp -> Core ())
     declareNative fc ty var value = do
         (valStr, pending) <- emitNativeValue ty value
-        emit fc $ "\{tyCType ty} var_\{show var} = \{valStr};"
+        emit fc $ "\{tyCType ty} \{idName var} = \{valStr};"
         removeVars pending
 
     ||| As `declareNative`, but for an `RInlineNative` local: no C
@@ -336,7 +336,7 @@ mutual
     ||| about. `rcVarToBoxedC`/`rcVarToNativeC` (the only readers of an
     ||| InlineMap entry) hand `pending` back to their own caller instead,
     ||| which is what finally discharges it.
-    inlineNative : EmitDeps (NativeTy -> Int -> RCExp -> Core ())
+    inlineNative : EmitDeps (NativeTy -> LocalId -> RCExp -> Core ())
     inlineNative ty var value = do
         (valStr, pending) <- emitNativeValue ty value
         update InlineMap (insert var (valStr, pending))
@@ -524,9 +524,9 @@ mutual
             unless (isDeadId arg) $ case (isStruct, native k) of
                  (True, Just ty) => do
                      update RepMap (insert arg (RNative (TPrim ty)))
-                     emit emptyFC "\{nativeCType ty} var_\{show arg} = (\{nativeCType ty})\{sc'}.f\{show k}.\{retMember ty};"
-                 (True, Nothing) => emit emptyFC "IDRIS2RC2_Value *var_\{show arg} = \{sc'}.f\{show k}.p;"
-                 _ => emit emptyFC "IDRIS2RC2_Value *var_\{show arg} = ((IDRIS2RC2_Constructor*)\{sc'})->args[\{show k}];"
+                     emit emptyFC "\{nativeCType ty} \{idName arg} = (\{nativeCType ty})\{sc'}.f\{show k}.\{retMember ty};"
+                 (True, Nothing) => emit emptyFC "IDRIS2RC2_Value *\{idName arg} = \{sc'}.f\{show k}.p;"
+                 _ => emit emptyFC "IDRIS2RC2_Value *\{idName arg} = ((IDRIS2RC2_Constructor*)\{sc'})->args[\{show k}];"
             pure (S k) ) 0 args
         branchBody sink body tailPosition
 
@@ -716,7 +716,7 @@ mutual
     ||| DualABI-promoted param never is) and `initVal` is dropped here, its last
     ||| use. See `rc2/doc/loop-conversion.md` "Bugs found and fixed" #4 and
     ||| `rc2/doc/dual-abi.md` #2.
-    declareLoopParam : EmitDeps ((inPrologueDrop : Bool) -> FC -> (paramId : Int) -> Rep -> (initVal : RCLocal) -> Core ())
+    declareLoopParam : EmitDeps ((inPrologueDrop : Bool) -> FC -> (paramId : LocalId) -> Rep -> (initVal : RCLocal) -> Core ())
     declareLoopParam _ fc paramId RBoxed initVal =
         if initVal == RCLoc paramId
            then update RepMap (insert paramId RBoxed)
@@ -735,8 +735,8 @@ mutual
             if inPrologueDrop
                then do
                    let initValName = varName initVal
-                   emit fc "\{tyCType ty} var_\{show paramId} = (\{initValName} == NULL) ? 0 : (\{valStr});"
-               else emit fc "\{tyCType ty} var_\{show paramId} = \{valStr};"
+                   emit fc "\{tyCType ty} \{idName paramId} = (\{initValName} == NULL) ? 0 : (\{valStr});"
+               else emit fc "\{tyCType ty} \{idName paramId} = \{valStr};"
             removeVars pending
     -- A loop param is read again every iteration, so it never has the
     -- single-use shape `RInlineNative` requires -- Compiler.RC2.Loop
@@ -750,14 +750,14 @@ mutual
     ||| `loop_N:;`, then `body` into `sink`, then discharge `prologueDrop` as one
     ||| `removeVars`. Pushes/pops `LoopParams` around `body`: see
     ||| `rc2/doc/loop-conversion.md` "Multiple loops per function".
-    emitLoopInto : EmitDeps (Sink -> TailPositionStatus -> FC -> List (Int, Rep) -> List RCLocal -> (prologueDrop : List LocalId) -> RCExp -> Core ())
+    emitLoopInto : EmitDeps (Sink -> TailPositionStatus -> FC -> List (LocalId, Rep) -> List RCLocal -> (prologueDrop : List LocalId) -> RCExp -> Core ())
     emitLoopInto sink0 tailPosition fc loopParams initial prologueDrop body = do
         -- Declared up front, like a case's own result slot: a loop
         -- with no exit never reaches the leaf that would declare it,
         -- yet the code after it still names the variable.
         sink <- resolveSink fc sink0
         traverse_ (\((paramId, rep), initVal) =>
-                       declareLoopParam (elem initVal (map locOf prologueDrop)) fc paramId rep initVal) (zip loopParams initial)
+                       declareLoopParam (elem initVal (map RCLoc prologueDrop)) fc paramId rep initVal) (zip loopParams initial)
         removeVars (idName <$> prologueDrop)
         label <- getNextCounter
         emit fc "loop_\{label}:;"
@@ -895,7 +895,7 @@ mutual
         removeVars (idName <$> locs)
         emitNativeValue ty cont
     emitNativeValue ty (RReleaseReuse fc loc cont) = do
-        removeReuseConstructors [reuseVarName (locOf loc)]
+        removeReuseConstructors [reuseVarName (RCLoc loc)]
         emitNativeValue ty cont
     emitNativeValue ty e = throw $ InternalError "[rc2] internal: expected a native-producing expression"
 
@@ -1225,15 +1225,15 @@ addCommaToList (x :: xs) = ("  " ++ x) :: map (", " ++) xs
 ||| (emits it as the definition's own head line).
 fnSignature : {auto c : Ref Ctxt Defs}
            -> {auto lm : Ref LibraryMode Bool}
-           -> Name -> (args : List (Int, Rep)) -> (retRep : Rep) -> (isWorker : Bool)
+           -> Name -> (args : List (LocalId, Rep)) -> (retRep : Rep) -> (isWorker : Bool)
            -> Core String
 fnSignature n args retRep isWorker = do
     let nargs = length args
-    let declareParam : (Int, Rep) -> String
-        declareParam (i, RBoxed) = "  IDRIS2RC2_Value * var_" ++ show i
-        declareParam (i, RNative ty) = "  " ++ tyCType ty ++ " var_" ++ show i
-        declareParam (i, RInlineNative ty) = "  " ++ tyCType ty ++ " var_" ++ show i
-        declareParam (i, RRet n _) = "  " ++ retCType n ++ " var_" ++ show i
+    let declareParam : (LocalId, Rep) -> String
+        declareParam (i, RBoxed) = "  IDRIS2RC2_Value * " ++ idName i
+        declareParam (i, RNative ty) = "  " ++ tyCType ty ++ " " ++ idName i
+        declareParam (i, RInlineNative ty) = "  " ++ tyCType ty ++ " " ++ idName i
+        declareParam (i, RRet n _) = "  " ++ retCType n ++ " " ++ idName i
     let retTypeStr : String = case retRep of
                                     RBoxed => "IDRIS2RC2_Value *"
                                     RNative ty => tyCType ty ++ " "
@@ -1311,7 +1311,7 @@ createCFunctions n (MkRCFun args retRep isWorker body) = do
     increaseIndentation
     when useVarArglist $ do
       _ <- foldlC (\i, j => do
-         emit EmptyFC "IDRIS2RC2_Value *var_\{show j} = var_arglist[\{show i}];"
+         emit EmptyFC "IDRIS2RC2_Value *\{idName j} = var_arglist[\{show i}];"
          pure $ i + 1) 0 argIds
       pure ()
     -- Seeded with this function's own top-level parameters (their Rep
@@ -1323,11 +1323,11 @@ createCFunctions n (MkRCFun args retRep isWorker body) = do
     _ <- newRef RepMap (SortedMap.fromList args)
     -- Populated instead of RepMap+a declaration for any RLet whose value
     -- is a bare literal -- see InlineMap's own comment.
-    _ <- newRef InlineMap (the (SortedMap Int (String, List String)) empty)
+    _ <- newRef InlineMap (the (SortedMap LocalId (String, List String)) empty)
     -- Empty until `body` actually contains an `RLoop` -- see
     -- rc2/doc/loop-conversion.md's "Multiple loops per function" for
     -- why this is a stack, not a single slot.
-    _ <- newRef LoopParams (the (List (String, List (Int, Rep))) [])
+    _ <- newRef LoopParams (the (List (String, List (LocalId, Rep))) [])
     -- emitInto's own tryEmitLoopContinue-first / RLoop-dispatch protocol
     -- handles a loop body correctly on its own (declare params, its own
     -- `loop_N:;` label, goto, no return); for anything else, SinkReturn

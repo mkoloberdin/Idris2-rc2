@@ -30,7 +30,7 @@ export
 ||| argument feeding a native-shadowed loop param). `reps` is seeded from
 ||| `loopParams` and extended at each `RLet` and case-alt field.
 ||| Written here rather than reusing `DualABI`'s walk, which would be an import cycle.
-fillLoopContinuePostDrop : List (Int, Rep) -> SortedMap Int Rep -> RCExp -> RCExp
+fillLoopContinuePostDrop : List (LocalId, Rep) -> SortedMap LocalId Rep -> RCExp -> RCExp
 fillLoopContinuePostDrop loopParams reps (RLet fc var rep value body) =
     RLet fc var rep value (fillLoopContinuePostDrop loopParams (insert var rep reps) body)
 fillLoopContinuePostDrop loopParams reps (RCmpCase fc op args postDrop t f) =
@@ -60,7 +60,7 @@ fillLoopContinuePostDrop loopParams reps (RLoopContinue fc args _) =
   where
     needsDrop : RCLocal -> Maybe LocalId
     needsDrop (RCLoc i) = case fromMaybe RBoxed (lookup i reps) of
-                                  RBoxed => Just (MkLocalId i)
+                                  RBoxed => Just i
                                   _ => Nothing
     needsDrop _ = Nothing
 fillLoopContinuePostDrop _ _ e = e
@@ -93,11 +93,11 @@ collectContinueArgs _ = []
 ||| across an iteration, so it has no business being loop-carried at
 ||| all. See `applyLoop`'s own doc comment for what happens to one of
 ||| these next.
-invariantLoopParamIds : List (Int, Rep) -> List (List RCLocal) -> SortedSet Int
+invariantLoopParamIds : List (LocalId, Rep) -> List (List RCLocal) -> SortedSet LocalId
 invariantLoopParamIds fullLoopParams continues =
-    let start : List (Int, Bool)
+    let start : List (LocalId, Bool)
         start = map (\(p, _) => (p, True)) fullLoopParams
-        settled : List (Int, Bool)
+        settled : List (LocalId, Bool)
         settled = foldl (\acc, cargs => zipWith (\(p, inv), arg => (p, inv && arg == RCLoc p)) acc cargs)
                          start continues
     in fromList $ map fst $ filter snd settled
@@ -111,7 +111,7 @@ invariantLoopParamIds fullLoopParams continues =
 ||| source of one (it's never fed by a fresh Boxed computation -- by
 ||| definition it's the very same already-native-or-Boxed local every
 ||| time).
-elideInvariantContinueArgs : SortedSet Int -> List (Int, Rep) -> RCExp -> RCExp
+elideInvariantContinueArgs : SortedSet LocalId -> List (LocalId, Rep) -> RCExp -> RCExp
 elideInvariantContinueArgs inv fullLoopParams (RLet fc var rep value body) =
     RLet fc var rep value (elideInvariantContinueArgs inv fullLoopParams body)
 elideInvariantContinueArgs inv fullLoopParams (RCmpCase fc op args postDrop t f) =
@@ -140,7 +140,7 @@ elideInvariantContinueArgs _ _ e = e
 ||| `variant`) -- the single question `isInvariantExpr`'s own operand
 ||| scan asks of every argument. A constant/`NULL`/tagged-empty-con
 ||| local is always invariant (it's not an `RCLoc` at all).
-noneVariant : SortedSet Int -> RCLocal -> Bool
+noneVariant : SortedSet LocalId -> RCLocal -> Bool
 noneVariant variant (RCLoc i) = not (contains i variant)
 noneVariant _ _ = True
 
@@ -176,7 +176,7 @@ hoistableOp _ _ = True
 ||| and passes the conservative exclusions (`postDrop`, `Div`/`Mod` divisor, `lazy`,
 ||| `reuseFrom`). The native-`Rep` requirement is checked by the caller,
 ||| `hoistInvariantPrefix`. See `rc2/doc/loop-conversion.md`'s "Loop-invariant expression hoisting".
-isInvariantExpr : SortedSet Int -> RCExp -> Bool
+isInvariantExpr : SortedSet LocalId -> RCExp -> Bool
 isInvariantExpr variant (ROp _ Nothing fn args []) = hoistableOp fn (toList args) && all (noneVariant variant) (toList args)
 isInvariantExpr variant (RCon _ _ _ _ args Nothing) = all (noneVariant variant) args
 isInvariantExpr variant (RDup _ _ _ cont) = isInvariantExpr variant cont
@@ -191,7 +191,7 @@ isInvariantExpr _ _ = False
 ||| Only a `Native`/`RInlineNative` result may be hoisted: a hoisted `Boxed` value
 ||| leaves a stale `drop` in the arm that does not use it (double free).
 ||| See `rc2/doc/loop-conversion.md`'s "Loop-invariant expression hoisting".
-hoistInvariantPrefix : SortedSet Int -> RCExp -> (List (Int, Rep, RCExp), RCExp)
+hoistInvariantPrefix : SortedSet LocalId -> RCExp -> (List (LocalId, Rep, RCExp), RCExp)
 hoistInvariantPrefix variant (RLet fc var rep value body) =
     if isNativeRep rep && isInvariantExpr variant value
        then let (hoisted, rest) = hoistInvariantPrefix variant body
@@ -243,7 +243,7 @@ hoistInvariantPrefix _ e = ([], e)
 ||| `RDup`/`RDrop`/`RFree`/`RReleaseReuse`/nested-`RLet`-`body`
 ||| wrapping), redirect `p`'s own occurrences in that `ROp`'s own
 ||| `args` to `sid`.
-invariantOpArgsThrough : (p : Int) -> (sid : Int) -> RCExp -> RCExp
+invariantOpArgsThrough : (p : LocalId) -> (sid : LocalId) -> RCExp -> RCExp
 invariantOpArgsThrough p sid (ROp fc lazy op args postDrop) =
     ROp fc lazy op (map (\a => if a == RCLoc p then RCLoc sid else a) args) postDrop
 invariantOpArgsThrough p sid (RDup fc v extra cont) = RDup fc v extra (invariantOpArgsThrough p sid cont)
@@ -268,7 +268,7 @@ invariantOpArgsThrough _ _ e = e
 ||| alongside every other occurrence -- see rc2/doc/loop-conversion.md's
 ||| "Bugs found and fixed" #6 for the spurious-drop double-free this
 ||| left unfixed causes in `fillLoopContinuePostDrop`'s own lookup.
-markInvariantNative : (p : Int) -> (sid : Int) -> RCExp -> RCExp
+markInvariantNative : (p : LocalId) -> (sid : LocalId) -> RCExp -> RCExp
 markInvariantNative p sid (RLet fc var rep value body) =
     let value' = case rep of
                       RBoxed => value
@@ -313,7 +313,7 @@ markInvariantNative _ _ e = e
 ||| cases the same way), unlike summing a `Nat` count via `+`/`sum`
 ||| (always strict in both operands) then comparing `> 0` at the very
 ||| end.
-usesInvariant : Int -> RCExp -> Bool
+usesInvariant : LocalId -> RCExp -> Bool
 usesInvariant p e = existsInvariantUse e
   where
     existsInvariantUse : RCExp -> Bool
@@ -339,19 +339,19 @@ usesInvariant p e = existsInvariantUse e
     existsInvariantUse (RConstCase _ sc alts mDef) =
         sc == RCLoc p || any (\(MkRConstAlt _ body) => existsInvariantUse body) alts || maybe False existsInvariantUse mDef
     existsInvariantUse (RDup _ v _ body) =
-        v == MkLocalId p || existsInvariantUse body
+        v == p || existsInvariantUse body
     existsInvariantUse (RDrop _ vars body) =
-        any (== MkLocalId p) vars || existsInvariantUse body
+        any (== p) vars || existsInvariantUse body
     existsInvariantUse (RFree _ v body) =
-        v == MkLocalId p || existsInvariantUse body
+        v == p || existsInvariantUse body
     existsInvariantUse (RReleaseReuse _ v body) =
-        v == MkLocalId p || existsInvariantUse body
+        v == p || existsInvariantUse body
     existsInvariantUse (RReuseOffer _ sc dupOnShared dropOnUnique body) =
-        sc == MkLocalId p || any (== MkLocalId p) dupOnShared || any (== MkLocalId p) dropOnUnique || existsInvariantUse body
+        sc == p || any (== p) dupOnShared || any (== p) dropOnUnique || existsInvariantUse body
     existsInvariantUse (RLoop _ _ initial prologueDrop body) =
-        any (== RCLoc p) initial || any (== MkLocalId p) prologueDrop || existsInvariantUse body
+        any (== RCLoc p) initial || any (== p) prologueDrop || existsInvariantUse body
     existsInvariantUse (RLoopContinue _ args postDrop) =
-        any (== RCLoc p) args || any (== MkLocalId p) postDrop
+        any (== RCLoc p) args || any (== p) postDrop
     existsInvariantUse _ = False
 
 ||| How many `RDup`s an operand list needs for `p`'s own occurrences in
@@ -361,13 +361,13 @@ usesInvariant p e = existsInvariantUse e
 ||| continue path can re-execute the very same occurrence once per
 ||| iteration, so there's no single "first" occurrence whose own move
 ||| would ever be safe).
-countInvariantDups : (p : Int) -> List RCLocal -> Nat
+countInvariantDups : (p : LocalId) -> List RCLocal -> Nat
 countInvariantDups p args = length (filter (== RCLoc p) args)
 
 ||| Nest `n` `RDup`s for `p` around `e`.
-wrapInvariantDups : FC -> Int -> Nat -> RCExp -> RCExp
+wrapInvariantDups : FC -> LocalId -> Nat -> RCExp -> RCExp
 wrapInvariantDups fc p Z e = e
-wrapInvariantDups fc p (S k) e = RDup fc (MkLocalId p) 0 (wrapInvariantDups fc p k e)
+wrapInvariantDups fc p (S k) e = RDup fc p 0 (wrapInvariantDups fc p k e)
 
 ||| Unconditionally `dup`s every surviving Boxed-context occurrence of
 ||| `p` in `e` (already known, by construction, to contain no
@@ -378,9 +378,9 @@ wrapInvariantDups fc p (S k) e = RDup fc (MkLocalId p) 0 (wrapInvariantDups fc p
 ||| `ConAltNative.idr`'s own `reannotateFieldOwnership` follows (though
 ||| that function tracks `owned` state to decide move-vs-dup; this one
 ||| doesn't need to, see this section's own header note).
-dupInvariantBoxed : (p : Int) -> RCExp -> RCExp
+dupInvariantBoxed : (p : LocalId) -> RCExp -> RCExp
 dupInvariantBoxed p (RV fc v) =
-    if v == RCLoc p then RDup fc (MkLocalId p) 0 (RV fc v) else RV fc v
+    if v == RCLoc p then RDup fc p 0 (RV fc v) else RV fc v
 dupInvariantBoxed p (RAppName fc lazy n args) =
     wrapInvariantDups fc p (countInvariantDups p args) (RAppName fc lazy n args)
 dupInvariantBoxed p (RUnderApp fc n missing args) =
@@ -403,13 +403,13 @@ dupInvariantBoxed p (ROp fc lazy op args postDrop) =
     -- case to ever see).
     let argsList = toList args
         occ = countInvariantDups p argsList
-    in wrapInvariantDups fc p occ (ROp fc lazy op args (postDrop ++ List.replicate occ (MkLocalId p)))
+    in wrapInvariantDups fc p occ (ROp fc lazy op args (postDrop ++ List.replicate occ p))
 -- Mirrors the ROp case immediately above exactly, primitive-agnostic
 -- (RC.idr's own annotate RExtPrim case follows the same contract
 -- as ROp's own -- see doc/c-struct-support.md's "Why a dedicated node").
 dupInvariantBoxed p (RExtPrim fc lazy nm args postDrop) =
     let occ = countInvariantDups p args
-    in wrapInvariantDups fc p occ (RExtPrim fc lazy nm args (postDrop ++ List.replicate occ (MkLocalId p)))
+    in wrapInvariantDups fc p occ (RExtPrim fc lazy nm args (postDrop ++ List.replicate occ p))
 dupInvariantBoxed p (RStructGet fc structVar sf postDrop) =
     wrapInvariantDups fc p (countInvariantDups p [structVar]) (RStructGet fc structVar sf postDrop)
 dupInvariantBoxed p (RForce fc lr v postDrop) =
@@ -450,7 +450,7 @@ dupInvariantBoxed p (RReuseOffer fc sc dupOnShared dropOnUnique cont) = RReuseOf
 -- `wrapInvariantDups` on them is defensive totality, not a load-bearing
 -- path.
 dupInvariantBoxed p (RLoop {sameLen} fc loopParams initial prologueDrop body) =
-    wrapInvariantDups fc p (countInvariantDups p initial + length (filter (== MkLocalId p) prologueDrop))
+    wrapInvariantDups fc p (countInvariantDups p initial + length (filter (== p) prologueDrop))
       (RLoop fc loopParams initial prologueDrop (dupInvariantBoxed p body))
 -- Same defensive reasoning as `RLoop` above -- `markInvariantNative`
 -- already redirected `p`'s own occurrence in a continue's own `args`
@@ -469,7 +469,7 @@ dupInvariantBoxed _ e = e
 ||| to a call argument; invariant parameters stay excluded because
 ||| `markInvariantNative` has no `RAppName` case.
 ||| See `rc2/doc/loop-conversion.md`'s "`applyLoop` -- the wrapping decision" and "Known limitation".
-applyLoopFromId : (nextId0 : Int) -> Maybe Strict -> CalleeTable -> (noPromote : SortedSet Int) -> Name -> RCDef -> (Int, RCDef)
+applyLoopFromId : (nextId0 : Int) -> Maybe Strict -> CalleeTable -> (noPromote : SortedSet LocalId) -> Name -> RCDef -> (Int, RCDef)
 applyLoopFromId nextId0 strict calleeTable noPromote self (MkRCFun args retRep isWorker body) =
     let argIds = map fst args
         (_, found, body') = mapTailAppNames (\fc, n, args' => if n == self then Just (RLoopContinue fc args' []) else Nothing) body
@@ -485,7 +485,7 @@ applyLoopFromId nextId0 strict calleeTable noPromote self (MkRCFun args retRep i
                   -- has since been renamed to a shadow -- so this scan
                   -- reaches the same answer on the original ids as after
                   -- renaming.
-                  invariantIdsPre : SortedSet Int := invariantLoopParamIds (map (\p => (p, RBoxed)) argIds) (collectContinueArgs body')
+                  invariantIdsPre : SortedSet LocalId := invariantLoopParamIds (map (\p => (p, RBoxed)) argIds) (collectContinueArgs body')
                   -- One `nativeArgType`/`callArgOrOpNativeTy` call per
                   -- parameter (not batched across `argIds` -- see this
                   -- module's own "Batched, multi-id native-type
@@ -502,24 +502,24 @@ applyLoopFromId nextId0 strict calleeTable noPromote self (MkRCFun args retRep i
                   -- A parameter read only as a raw pointer (`ptrParams`)
                   -- is shadowed as a `TPtr`, when no `PrimType` read
                   -- claims it.
-                  ptrIds : SortedSet Int := ptrParams strict calleeTable argIds body'
-                  nativeTyOf : Maybe PrimType -> Int -> Maybe NativeTy
+                  ptrIds : SortedSet LocalId := ptrParams strict calleeTable argIds body'
+                  nativeTyOf : Maybe PrimType -> LocalId -> Maybe NativeTy
                   nativeTyOf (Just ty) _ = Just (TPrim ty)
                   nativeTyOf Nothing p = if contains p ptrIds then Just TPtr else Nothing
-                  eligibleVariant : List (Int, NativeTy) := mapMaybe (\p => if contains p invariantIdsPre || contains p noPromote
+                  eligibleVariant : List (LocalId, NativeTy) := mapMaybe (\p => if contains p invariantIdsPre || contains p noPromote
                                                                                 then Nothing
                                                                                 else map (\ty => (p, ty)) (callArgOrOpNativeTy strict calleeTable p body'))
                                                                       argIds
-                  eligibleInvariant : List (Int, NativeTy) := mapMaybe (\p => if contains p invariantIdsPre && not (contains p noPromote)
+                  eligibleInvariant : List (LocalId, NativeTy) := mapMaybe (\p => if contains p invariantIdsPre && not (contains p noPromote)
                                                                                   then map (\ty => (p, ty)) (nativeTyOf (nativeArgType strict p body') p)
                                                                                   else Nothing)
                                                                         argIds
-                  shadowedVariant : List (Int, Int, NativeTy) := assignShadowIds nextId0 eligibleVariant
+                  shadowedVariant : List (LocalId, LocalId, NativeTy) := assignShadowIds nextId0 eligibleVariant
                   nextId1 : Int := nextId0 + cast (length eligibleVariant)
-                  shadowedInvariant : List (Int, Int, NativeTy) := assignShadowIds nextId1 eligibleInvariant
+                  shadowedInvariant : List (LocalId, LocalId, NativeTy) := assignShadowIds nextId1 eligibleInvariant
                   nextId2 : Int := nextId1 + cast (length eligibleInvariant)
                   renamingVariant : Renaming := fromList $ map (\(p, sid, _) => (p, sid)) shadowedVariant
-                  shadowIdsVariant : SortedSet Int := fromList $ map (\(_, sid, _) => sid) shadowedVariant
+                  shadowIdsVariant : SortedSet LocalId := fromList $ map (\(_, sid, _) => sid) shadowedVariant
                   -- Every eligible *variant* parameter gets the
                   -- blanket treatment (every occurrence,
                   -- native and Boxed alike, redirected to the shadow) --
@@ -539,9 +539,9 @@ applyLoopFromId nextId0 strict calleeTable noPromote self (MkRCFun args retRep i
                   -- O(P log P) map lookup instead of a `find` (O(P)
                   -- linear scan) called once per `p` in `argIds` (O(P)
                   -- of them) -- see `rc2/doc/loop-conversion.md`.
-                  shadowedById : SortedMap Int (Int, NativeTy)
+                  shadowedById : SortedMap LocalId (LocalId, NativeTy)
                   shadowedById = SortedMap.fromList $ map (\(p, sid, ty) => (p, (sid, ty))) (shadowedVariant ++ shadowedInvariant)
-                  fullLoopParams : List (Int, Rep)
+                  fullLoopParams : List (LocalId, Rep)
                   fullLoopParams = map (\p => case lookup p shadowedById of
                                                Just (sid, ty) => (sid, RNative ty)
                                                Nothing => (p, RBoxed)) argIds
@@ -558,16 +558,16 @@ applyLoopFromId nextId0 strict calleeTable noPromote self (MkRCFun args retRep i
                   -- above -- but still need excluding from `loopParams`/
                   -- `initial`/every continue's own `args` exactly like
                   -- before).
-                  invariantIds : SortedSet Int
+                  invariantIds : SortedSet LocalId
                   invariantIds = fromList $ mapMaybe (\(p, finalId) => if contains p invariantIdsPre then Just finalId else Nothing)
                                    (zip argIds (map fst fullLoopParams))
                   -- The still-loop-carried params with their starting values, kept
                   -- paired so `loopParams` and `initial` cannot drift in length
                   -- (`fullLoopParams` has one entry per `argIds`, so `zip` drops nothing).
-                  carried : List ((Int, Rep), RCLocal)
+                  carried : List ((LocalId, Rep), RCLocal)
                   carried = filter (\((p, _), _) => not (contains p invariantIds))
                                    (zip fullLoopParams (map RCLoc argIds))
-                  loopParams : List (Int, Rep)
+                  loopParams : List (LocalId, Rep)
                   loopParams = map fst carried
                   finalBody : RCExp
                   finalBody = if null invariantIds
@@ -583,7 +583,7 @@ applyLoopFromId nextId0 strict calleeTable noPromote self (MkRCFun args retRep i
                   -- happens right there instead, so it's excluded here
                   -- to avoid a double drop.
                   prologueDrop : List LocalId
-                  prologueDrop = mapMaybe (\(p, sid, _) => if contains sid invariantIds then Nothing else Just (MkLocalId p))
+                  prologueDrop = mapMaybe (\(p, sid, _) => if contains sid invariantIds then Nothing else Just p)
                                    (shadowedVariant ++ shadowedInvariant)
                   -- Loop-invariant *expression* hoisting (ROp/RCon in
                   -- the loop body's own unconditional prefix, see
@@ -594,7 +594,7 @@ applyLoopFromId nextId0 strict calleeTable noPromote self (MkRCFun args retRep i
                   -- hoisted -- by this pass or the one above), so that
                   -- set alone is the right seed with nothing further to
                   -- compute.
-                  hoistResult : (List (Int, Rep, RCExp), RCExp) := hoistInvariantPrefix (fromList (map fst loopParams)) finalBody
+                  hoistResult : (List (LocalId, Rep, RCExp), RCExp) := hoistInvariantPrefix (fromList (map fst loopParams)) finalBody
 
                   -- `fst`/`snd hoistResult` each read exactly once
                   -- below, so no separate `hoistedExprs`/`finalBody2`
@@ -630,16 +630,16 @@ applyLoopFromId nextId0 strict calleeTable noPromote self (MkRCFun args retRep i
                       foldr wrapOneInvariant (nextId2, withHoistedExprs)
                         (filter (\(_, sid, _) => contains sid invariantIds) shadowedInvariant)
                     where
-                      wrapOneInvariant : (Int, Int, NativeTy) -> (Int, RCExp) -> (Int, RCExp)
+                      wrapOneInvariant : (LocalId, LocalId, NativeTy) -> (Int, RCExp) -> (Int, RCExp)
                       wrapOneInvariant (p, sid, ty) (nid, acc) =
                           if not (usesInvariant p acc)
-                             then (nid, RLet emptyFC sid (RNative ty) (RV emptyFC (RCLoc p)) (RDrop emptyFC [MkLocalId p] acc))
+                             then (nid, RLet emptyFC sid (RNative ty) (RV emptyFC (RCLoc p)) (RDrop emptyFC [p] acc))
                              else
-                               let resultVar = nid
+                               let resultVar = MkLocalId nid
                                    dupped = dupInvariantBoxed p acc
                                in (nid + 1, RLet emptyFC sid (RNative ty) (RV emptyFC (RCLoc p))
                                               (RLet emptyFC resultVar retRep dupped
-                                                (RDrop emptyFC [MkLocalId p] (RV emptyFC (RCLoc resultVar)))))
+                                                (RDrop emptyFC [p] (RV emptyFC (RCLoc resultVar)))))
               in (fst wrapInvariantShadows, MkRCFun args retRep isWorker (snd wrapInvariantShadows))
 applyLoopFromId nextId0 _ _ _ _ d = (nextId0, d)
 
@@ -655,7 +655,7 @@ applyLoopFromId nextId0 _ _ _ _ d = (nextId0, d)
 ||| function threading that starting id through its own return value; this
 ||| thin `Core` wrapper reads and writes the shared counter once each.
 export
-applyLoop : {auto v : Ref VarId Int} -> Maybe Strict -> CalleeTable -> SortedSet Int -> Name -> RCDef -> Core RCDef
+applyLoop : {auto v : Ref VarId Int} -> Maybe Strict -> CalleeTable -> SortedSet LocalId -> Name -> RCDef -> Core RCDef
 applyLoop strict calleeTable noPromote self d = do
     nextId0 <- get VarId
     let (nextId', d') = applyLoopFromId nextId0 strict calleeTable noPromote self d

@@ -140,15 +140,15 @@ buildGroup : {auto r : Ref FreshId Int} -> {auto v : Ref VarId Int}
           -> Maybe Strict
           -> CalleeTable
           -> SortedSet Name
-          -> SortedMap Name (List Int, RCExp)
+          -> SortedMap Name (List LocalId, RCExp)
           -> List Name
-          -> Core (List (Name, RCDef), (Name, SortedSet Int), List (Int, NativeTy))
+          -> Core (List (Name, RCDef), (Name, SortedSet LocalId), List (LocalId, NativeTy))
 buildGroup strict calleeTable existingNames memberDefs groupNames = do
     -- Deterministic order (SortedSet's own Foldable, Prelude.toList,
     -- is sorted by `Ord Name`), so tag assignment doesn't depend on
     -- SCC-traversal order.
     let ordered = Prelude.toList (SortedSet.fromList groupNames)
-    members <- the (Core (List (Name, (List Int, RCExp)))) $
+    members <- the (Core (List (Name, (List LocalId, RCExp)))) $
                  traverse (\n => case lookup n memberDefs of
                                       Just def => pure (n, def)
                                       Nothing => throw $ InternalError "[rc2] MutualLoop: SCC member not found") ordered
@@ -186,8 +186,8 @@ buildGroup strict calleeTable existingNames memberDefs groupNames = do
     mergedName <- freshName existingNames
     tagId <- freshVarId
     slotIds <- traverse (const freshVarId) (replicate slotCount ())
-    let slotAt : Nat -> Int
-        slotAt g = fromMaybe 0 (lookup g (zip [0 .. slotCount] slotIds))
+    let slotAt : Nat -> LocalId
+        slotAt g = fromMaybe deadId (lookup g (zip [0 .. slotCount] slotIds))
     alts <- traverse (\(((name_i, (args_i, body_i)), tag_i), pos_i) => do
                 let ren : Renaming = SortedMap.fromList (zip args_i (map slotAt pos_i))
                 let renamedBody = renameRCExp ren body_i
@@ -200,11 +200,11 @@ buildGroup strict calleeTable existingNames memberDefs groupNames = do
                       (name_i, MkRCFun (map (\i => (i, RBoxed)) args_i) RBoxed False
                             (RAppName EmptyFC Nothing mergedName (RCConst (I64 (cast tag_i)) :: placed slotCount pos_i (map RCLoc args_i)))))
                     (zip membersWithTag positions)
-    let boxedSlots : SortedSet Int :=
+    let boxedSlots : SortedSet LocalId :=
             SortedSet.fromList (concatMap (\(k, o, w) => if isJust k then [] else map slotAt (take w [o ..]))
                                           (zip3 classes classOffsets widths))
     -- `strictnative`: a native class's slots are shown to hold its type, and the tag an `Int64`
-    let shown : List (Int, NativeTy) :=
+    let shown : List (LocalId, NativeTy) :=
             if isNothing strict then []
             else (tagId, TPrim Int64Type) ::
                  concatMap (\(k, o, w) => maybe [] (\ty => map (\i => (slotAt i, ty)) (take w [o ..])) k)
@@ -249,7 +249,7 @@ buildGroup strict calleeTable existingNames memberDefs groupNames = do
 ||| pass through completely unchanged. Also returns, per merged function,
 ||| the slots Loop must never promote (`buildGroup`'s `noPromote`).
 export
-applyMutualLoop : {auto v : Ref VarId Int} -> Maybe Strict -> List (Name, RCDef) -> Core (List (Name, RCDef), SortedMap Name (SortedSet Int), Maybe Strict)
+applyMutualLoop : {auto v : Ref VarId Int} -> Maybe Strict -> List (Name, RCDef) -> Core (List (Name, RCDef), SortedMap Name (SortedSet LocalId), Maybe Strict)
 applyMutualLoop strict defs = do
     _ <- newRef FreshId 0
     let memberDefs = SortedMap.fromList $ mapMaybe
@@ -268,7 +268,7 @@ applyMutualLoop strict defs = do
     let strict' = map (\st => { params $= \ps => foldl (\m, (i, ty) => insert i [ty] m) ps (concatMap (\(_, _, sh) => sh) built) } st) strict
     pure (untouched ++ newDefs, SortedMap.fromList (map (\(_, np, _) => np) built), strict')
   where
-    buildGraph : SortedMap Name (List Int, RCExp) -> Graph
+    buildGraph : SortedMap Name (List LocalId, RCExp) -> Graph
     buildGraph memberDefs =
         let allNames = SortedSet.fromList (map (\(n, _) => n) (SortedMap.toList memberDefs))
         in fromList $ map (\(n, (_, body)) =>

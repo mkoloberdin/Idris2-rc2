@@ -71,14 +71,14 @@ record LiftState where
 ||| numbered where it is first read.
 record Frame where
   constructor MkFrame
-  env : SortedMap Name Int
+  env : SortedMap Name LocalId
   scope : List Name
-  captures : Maybe (Ref Captures (SortedMap Name Int))
+  captures : Maybe (Ref Captures (SortedMap Name LocalId))
 
-bindName : Name -> Int -> Frame -> Frame
+bindName : Name -> LocalId -> Frame -> Frame
 bindName x i fr = { env $= insert x i, scope $= (x ::) } fr
 
-lookupVar : {auto v : Ref VarId Int} -> Frame -> Name -> Core Int
+lookupVar : {auto v : Ref VarId Int} -> Frame -> Name -> Core LocalId
 lookupVar fr x = case lookup x (env fr) of
     Just i => pure i
     Nothing => case captures fr of
@@ -338,7 +338,7 @@ mutual
     ||| is never merged with a lambda inside it): the thunk.
     lift : Norm (Frame -> FC -> LiftOrigin -> List Name -> NamedCExp -> Core (Name, List RCLocal))
     lift fr fc origin bound body = do
-        ref <- newRef Captures (the (SortedMap Name Int) empty)
+        ref <- newRef Captures (the (SortedMap Name LocalId) empty)
         boundIds <- traverse (const freshVarId) bound
         let inner = MkFrame (fromList (zip bound boundIds)) (bound ++ scope fr) (Just ref)
         bodyRC <- normalize inner body
@@ -628,7 +628,7 @@ mutual
         ||| Narrow `RNative ty` to `RInlineNative ty` when `valueRC` is a bare
         ||| `ROp` and `var` is used exactly once in `bodyRC`; otherwise `rep`
         ||| is unchanged. See rc2/doc/native-type-inference.md, "`InlineMap`".
-        inlineableRep : Rep -> RCExp -> Int -> RCExp -> Rep
+        inlineableRep : Rep -> RCExp -> LocalId -> RCExp -> Rep
         inlineableRep (RNative ty) (ROp {}) var bodyRC =
             if countUsesR (RCLoc var) bodyRC == 1 then RInlineNative ty else RNative ty
         inlineableRep rep _ _ _ = rep
@@ -639,13 +639,13 @@ mutual
         ||| for a native (unboxed, unrefcounted) local, or for a Boxed local
         ||| that's in `natives` anyway (alwaysUnboxedBoxedLocalsR -- see its own
         ||| comment for why that's just as unconditionally a no-op).
-        dropDeadLet : FC -> SortedSet RCLocal -> Rep -> Int -> RCExp -> RCExp -> RCExp
+        dropDeadLet : FC -> SortedSet RCLocal -> Rep -> LocalId -> RCExp -> RCExp -> RCExp
         dropDeadLet fc natives RBoxed loc value body =
             if contains (RCLoc loc) natives
                then body
                else if freeableShape value
-                       then RFree fc (MkLocalId loc) body
-                       else RDrop fc [MkLocalId loc] body
+                       then RFree fc loc body
+                       else RDrop fc [loc] body
           where
             ||| Whether a just-built value (still in its pre-annotation, Phase 1
             ||| shape) is provably a brand-new, never-shared heap allocation:

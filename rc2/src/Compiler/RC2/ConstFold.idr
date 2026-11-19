@@ -121,7 +121,7 @@ record KnownCon where
 record UseInfo where
   constructor MkUseInfo
   escaping : SortedSet RCLocal
-  natives : SortedSet Int
+  natives : SortedSet LocalId
   boxedUses : SortedSet RCLocal
 
 useInfo : RCExp -> UseInfo
@@ -191,19 +191,19 @@ useInfo = go (MkUseInfo empty empty empty)
 record Env where
   constructor MkEnv
   uses : Maybe UseInfo
-  consts : SortedMap Int (Subset RCLocal IsAnyConstLocal)
-  aliases : SortedMap Int RCLocal
-  knownCons : SortedMap Int KnownCon
-  knownPartials : SortedMap Int (Name, Nat, List RCLocal)
-  bigLits : SortedMap Int Constant
-  widened : SortedMap Int (PrimType, RCLocal)
+  consts : SortedMap LocalId (Subset RCLocal IsAnyConstLocal)
+  aliases : SortedMap LocalId RCLocal
+  knownCons : SortedMap LocalId KnownCon
+  knownPartials : SortedMap LocalId (Name, Nat, List RCLocal)
+  bigLits : SortedMap LocalId Constant
+  widened : SortedMap LocalId (PrimType, RCLocal)
 
 ||| `knownCons`: whether to fold known constructors at all, which costs
 ||| a `useInfo` walk up front.
 emptyEnv : (knownCons : Bool) -> RCExp -> Env
 emptyEnv knownCons body = MkEnv (if knownCons then Just (useInfo body) else Nothing) empty empty empty empty empty empty
 
-insertConst : Int -> Subset RCLocal IsAnyConstLocal -> Env -> Env
+insertConst : LocalId -> Subset RCLocal IsAnyConstLocal -> Env -> Env
 insertConst i c = { consts $= insert i c }
 
 ||| Resolve `l` against `env` if it's a variable this pass has already
@@ -318,7 +318,7 @@ findConAlt tag [] = Nothing
 findConAlt tag (alt@(MkRConAlt _ _ tag' _ _) :: rest) =
     if tag == tag' then Just alt else findConAlt tag rest
 
-insertConArgs : List Int -> List RCLocal -> Env -> Env
+insertConArgs : List LocalId -> List RCLocal -> Env -> Env
 insertConArgs (i :: is) (v :: vs) env =
     case isConstLocalProof v of
          Just prf => insertConArgs is vs (insertConst i (Element v prf) env)
@@ -454,7 +454,7 @@ foldConst caf env (RLet fc var rep value body) =
     -- A value held as C `NULL` (an erased value, the world token, a
     -- nullary constructor): every reader takes the constant instead, and
     -- the `let` goes once none is left.
-    foldNull : Int -> Subset RCLocal IsAnyConstLocal -> RCExp
+    foldNull : LocalId -> Subset RCLocal IsAnyConstLocal -> RCExp
     foldNull var c =
         let body' = foldConst caf (insertConst var c env) body
         in if mentionsLocal (RCLoc var) body'
@@ -647,7 +647,7 @@ foldConst caf env (RConCase fc sc alts mDef) =
     -- the constructor's one native field, and is otherwise boxed once
     -- by a `let` -- never again at every Boxed read. `Nothing` when
     -- the field lists don't line up.
-    bindKnownConArgs : (boxVar : Int) -> Maybe Nat -> Nat -> List Int -> List RCLocal -> Env
+    bindKnownConArgs : (boxVar : LocalId) -> Maybe Nat -> Nat -> List LocalId -> List RCLocal -> Env
                     -> Maybe (Env, RCExp -> RCExp)
     bindKnownConArgs _ _ _ [] [] env = Just (env, id)
     bindKnownConArgs boxVar boxPos k (i :: is) (v :: vs) env =
@@ -666,7 +666,7 @@ foldConst caf env (RConCase fc sc alts mDef) =
     -- field-count mismatch can't come from a well-typed program, and
     -- the scrutinee's local may already name a box instead of the
     -- constructor, so it crashes rather than falling back to a `case`.
-    foldKnown : Int -> Maybe RCExp
+    foldKnown : LocalId -> Maybe RCExp
     foldKnown i = do
         MkKnownCon n tag args boxPos <- lookup i env.knownCons
         Just $ case findKnownAlt n tag alts of
@@ -755,7 +755,7 @@ foldConstDef _ _ d@(MkRCForeign _ _ _) = d
 ||| `rc2/doc/constant-constructor-specialization.md`'s "Why nothing new
 ||| is needed downstream".
 export
-foldConstDefWith : CafTable -> List (Int, RCLocal) -> RCDef -> RCDef
+foldConstDefWith : CafTable -> List (LocalId, RCLocal) -> RCDef -> RCDef
 foldConstDefWith caf seed d =
     case d of
          MkRCFun args retRep isWorker body => MkRCFun args retRep isWorker (refreshReps (foldConst caf (seeded body) body))

@@ -21,7 +21,7 @@ skipping one declaration at the very last stage.
 
 ## What "never referenced" actually is
 
-`RConAlt`'s own destructured fields (`MkRConAlt`'s `args : List Int`)
+`RConAlt`'s own destructured fields (`MkRConAlt`'s `args : List LocalId`)
 are plain variable ids, positionally aligned 1:1 with the matched
 constructor's own real fields (`Compiler.RC2.Emit`'s `emitConAltBody`
 indexes `sc->args[k]` by position, so an entry can't just be deleted
@@ -75,7 +75,7 @@ whether it is -- just the estimate of how often it matters.
 
 ## Why `0`, not a structural "no binding" marker
 
-`args : List Int` staying exactly that (rather than, say, `List
+`args : List LocalId` (formerly `List Int`) staying exactly that (rather than, say, `List
 (Maybe Int)`) was a deliberate choice to keep this pass's own blast
 radius small: `RConAlt.args` is threaded through essentially every
 pass in the pipeline (`ConstFold`, `ConAltNative`, `DualABI`, `Sink`,
@@ -86,8 +86,8 @@ alt's own body -- changing its type would force every one of those
 call sites to at least re-typecheck, for no benefit, since none of
 them need to know or care whether a given field has a real binding.
 
-Reusing the plain `Int` domain instead needs exactly one program-wide
-invariant to stay sound: `0` is never a genuine variable id anywhere.
+Reusing the id domain (`LocalId`, `deadId`) instead needs exactly one program-wide
+invariant to stay sound: `deadId` (number `0`) is never a genuine variable id anywhere.
 `Compiler.RC2.Util`'s own shared `VarId` counter -- the single source
 every fresh id in the whole pipeline is drawn from, `Compiler.RC2.RC`'s
 own top-level parameters and `RConAlt` fields included -- now starts

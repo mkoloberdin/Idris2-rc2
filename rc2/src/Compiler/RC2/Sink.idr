@@ -59,14 +59,14 @@ genuinelyUsedR (RConstCase _ sc alts mDef) =
     let altsUsed = map (\(MkRConstAlt _ body) => genuinelyUsedR body) alts
         allUsed = maybe altsUsed (\d => genuinelyUsedR d :: altsUsed) mDef
     in insert sc (concat allUsed)
-genuinelyUsedR (RDup _ v _ body) = insert (locOf v) (genuinelyUsedR body)
+genuinelyUsedR (RDup _ v _ body) = insert (RCLoc v) (genuinelyUsedR body)
 genuinelyUsedR (RDrop _ _ body) = genuinelyUsedR body
 genuinelyUsedR (RFree _ _ body) = genuinelyUsedR body
 genuinelyUsedR (RReleaseReuse _ _ body) = genuinelyUsedR body
 genuinelyUsedR (RReuseOffer _ sc dupOnShared dropOnUnique body) =
-    union (insert (locOf sc) (fromList (map locOf dupOnShared) `union` fromList (map locOf dropOnUnique))) (genuinelyUsedR body)
+    union (insert (RCLoc sc) (fromList (map RCLoc dupOnShared) `union` fromList (map RCLoc dropOnUnique))) (genuinelyUsedR body)
 genuinelyUsedR (RLoop _ _ initial _ body) = union (fromList initial) (genuinelyUsedR body)
-genuinelyUsedR (RLoopContinue _ args postDrop) = union (fromList args) (fromList (map locOf postDrop))
+genuinelyUsedR (RLoopContinue _ args postDrop) = union (fromList args) (fromList (map RCLoc postDrop))
 genuinelyUsedR _ = empty
 
 ||| Strips every occurrence of `var` from any `RDrop`'s own `vars` list
@@ -77,10 +77,10 @@ genuinelyUsedR _ = empty
 ||| `Compiler.RC2.Loop`, unlike e.g. `Compiler.RC2.ConAltNative`'s
 ||| shallower `peelWrappers` -- see doc/branch-sinking.md's "The
 ||| rewrite itself".
-removeVarDrop : Int -> RCExp -> RCExp
+removeVarDrop : LocalId -> RCExp -> RCExp
 removeVarDrop var (RLet fc v rep value body) = RLet fc v rep value (removeVarDrop var body)
 removeVarDrop var (RDrop fc vars body) =
-    let vars' = filter (/= MkLocalId var) vars
+    let vars' = filter (/= var) vars
         body' = removeVarDrop var body
     in if null vars' then body' else RDrop fc vars' body'
 -- Like `genuinelyUsedR`, never looks inside an `RMemoize`.
@@ -92,7 +92,7 @@ removeVarDrop var e = mapChildren (removeVarDrop var) e
 ||| rewritten branch (its own stale `drop [var, ...]`, if any, stripped
 ||| -- unchanged otherwise) if `var` is never genuinely read there at
 ||| all.
-stripIfUnused : Int -> RCExp -> Maybe RCExp
+stripIfUnused : LocalId -> RCExp -> Maybe RCExp
 stripIfUnused var branch =
     if contains (RCLoc var) (genuinelyUsedR branch)
        then Nothing
@@ -103,7 +103,7 @@ stripIfUnused var branch =
 ||| `RCon` field not `dup`'d first). Each needs an explicit `drop` in every
 ||| arm `value` doesn't sink into. See doc/branch-sinking.md, "The rewrite
 ||| itself" (also why constant-shaped operands are excluded).
-consumedOperands : SortedMap Int Rep -> RCExp -> List LocalId
+consumedOperands : SortedMap LocalId Rep -> RCExp -> List LocalId
 consumedOperands reps = go []
   where
     boxedIds : List RCLocal -> List LocalId
@@ -168,7 +168,7 @@ alreadyDropped e = foldMap alreadyDropped (children e)
 addOperandDrops : FC -> List LocalId -> RCExp -> Maybe RCExp
 addOperandDrops _ [] branch = Just branch
 addOperandDrops fc consumed branch =
-    if any (\op => contains (locOf op) (genuinelyUsedR branch) || contains op (alreadyDropped branch)) consumed
+    if any (\op => contains (RCLoc op) (genuinelyUsedR branch) || contains op (alreadyDropped branch)) consumed
        then Nothing
        else Just (RDrop fc consumed branch)
 
@@ -222,7 +222,7 @@ sinkEligible _ = False
 ||| reference may be spent by evaluating the branch condition, so
 ||| moving `value`'s own read of it to after that point is just as
 ||| unsafe as `var` being the deciding operand outright.
-isDecidingOperand : Int -> RCExp -> RCExp -> Bool
+isDecidingOperand : LocalId -> RCExp -> RCExp -> Bool
 isDecidingOperand var value branch =
     let candidates = insert (RCLoc var) (genuinelyUsedR value)
         deciders = case branch of
@@ -247,7 +247,7 @@ isDecidingOperand var value branch =
 ||| `fc` is the *enclosing branch node's* own `FC`, needed since a
 ||| fresh `RDrop` needs one of its own and an arm's body isn't
 ||| necessarily a branch node to borrow one from.
-stripForSink : Int -> FC -> List LocalId -> RCExp -> Maybe RCExp
+stripForSink : LocalId -> FC -> List LocalId -> RCExp -> Maybe RCExp
 stripForSink var fc consumed branch = stripIfUnused var branch >>= addOperandDrops fc consumed
 
 ||| `stripForSink` over every alt body plus the optional default body
@@ -270,7 +270,7 @@ stripForSink var fc consumed branch = stripIfUnused var branch >>= addOperandDro
 ||| computation in place is strictly better). See
 ||| doc/branch-sinking.md's "The rewrite itself" for the fuller
 ||| rationale.
-sinkIntoBodies : FC -> Int -> Rep -> RCExp -> List LocalId -> List RCExp -> Maybe RCExp -> Maybe (List RCExp, Maybe RCExp)
+sinkIntoBodies : FC -> LocalId -> Rep -> RCExp -> List LocalId -> List RCExp -> Maybe RCExp -> Maybe (List RCExp, Maybe RCExp)
 sinkIntoBodies fc var rep value consumed altBodies mDefBody =
     let altStripped : List (RCExp, Maybe RCExp)
         altStripped = map (\body => (body, stripForSink var fc consumed body)) altBodies
@@ -292,7 +292,7 @@ sinkIntoBodies fc var rep value consumed altBodies mDefBody =
           then Nothing
           else Just (map pick altStripped, map pick defStripped)
 
-trySinkIntoArms : SortedMap Int Rep -> Int -> Rep -> RCExp -> RCExp -> Maybe RCExp
+trySinkIntoArms : SortedMap LocalId Rep -> LocalId -> Rep -> RCExp -> RCExp -> Maybe RCExp
 trySinkIntoArms reps var rep value (RCmpCase fc op args pd t f) =
     let consumed = consumedOperands reps value
     in case (stripForSink var fc consumed t, stripForSink var fc consumed f) of
@@ -340,18 +340,18 @@ readBy value l = contains l (genuinelyUsedR value)
 ||| already spent. See "Sinking past an unrelated let". Then checks
 ||| `isDecidingOperand` (see its own doc comment) before
 ||| dispatching to `trySinkIntoArms`.
-trySinkInto : SortedMap Int Rep -> Int -> Rep -> RCExp -> RCExp -> Maybe RCExp
+trySinkInto : SortedMap LocalId Rep -> LocalId -> Rep -> RCExp -> RCExp -> Maybe RCExp
 trySinkInto reps var rep value (RDup fc v extra cont) =
-    if v == MkLocalId var then Nothing else map (RDup fc v extra) (trySinkInto reps var rep value cont)
+    if v == var then Nothing else map (RDup fc v extra) (trySinkInto reps var rep value cont)
 trySinkInto reps var rep value (RDrop fc vs cont) =
-    if (MkLocalId var `elem` vs) || any (readBy value . locOf) vs then Nothing else map (RDrop fc vs) (trySinkInto reps var rep value cont)
+    if (var `elem` vs) || any (readBy value . RCLoc) vs then Nothing else map (RDrop fc vs) (trySinkInto reps var rep value cont)
 trySinkInto reps var rep value (RFree fc v cont) =
-    if v == MkLocalId var || readBy value (locOf v) then Nothing else map (RFree fc v) (trySinkInto reps var rep value cont)
+    if v == var || readBy value (RCLoc v) then Nothing else map (RFree fc v) (trySinkInto reps var rep value cont)
 trySinkInto reps var rep value (RReleaseReuse fc v cont) =
-    if v == MkLocalId var || readBy value (locOf v) then Nothing else map (RReleaseReuse fc v) (trySinkInto reps var rep value cont)
+    if v == var || readBy value (RCLoc v) then Nothing else map (RReleaseReuse fc v) (trySinkInto reps var rep value cont)
 trySinkInto reps var rep value (RReuseOffer fc sc dupOnShared dropOnUnique cont) =
-    if (sc == MkLocalId var) || (MkLocalId var `elem` dupOnShared) || (MkLocalId var `elem` dropOnUnique)
-         || any (readBy value . locOf) (sc :: dupOnShared ++ dropOnUnique)
+    if (sc == var) || (var `elem` dupOnShared) || (var `elem` dropOnUnique)
+         || any (readBy value . RCLoc) (sc :: dupOnShared ++ dropOnUnique)
        then Nothing
        else map (RReuseOffer fc sc dupOnShared dropOnUnique) (trySinkInto reps var rep value cont)
 trySinkInto reps var rep value (RLet fc y repY valueY cont) =
@@ -384,7 +384,7 @@ trySinkInto _ _ _ _ _ = Nothing
 ||| Seeded empty (see `applySink` below), extended at every `RLet`
 ||| (its own declared `Rep`) and `RLoop` (its own `loopParams`).
 export
-applySinkExp : SortedMap Int Rep -> RCExp -> RCExp
+applySinkExp : SortedMap LocalId Rep -> RCExp -> RCExp
 applySinkExp reps (RLet fc var rep value body) =
     let value' = applySinkExp reps value
         reps' = insert var rep reps

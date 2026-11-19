@@ -30,7 +30,7 @@ import Data.Vect
 ||| `hole` of `C`, and `c` is the capture at position `cPos`.
 record Extender where
   constructor MkExtender
-  params : List Int
+  params : List LocalId
   cPos : Nat
   con : (FC, Name, ConInfo, Maybe Int)
   fields : List RCLocal
@@ -57,7 +57,7 @@ extenderOf _ _ = Nothing
 cellFor : Extender -> List RCLocal -> RCExp
 cellFor e caps =
     let (fc, n, ci, tag) = e.con
-        sub : SortedMap Int RCLocal
+        sub : SortedMap LocalId RCLocal
         sub = fromList (zip e.params caps)
         field = \f => case f of
                           RCLoc i => fromMaybe RCNull (SortedMap.lookup i sub)
@@ -67,17 +67,17 @@ cellFor e caps =
 -------------------------------------------------------------------------------
 -- Finding a context parameter
 
-mentions : Int -> RCExp -> Bool
+mentions : LocalId -> RCExp -> Bool
 mentions c = mentionsLocal (RCLoc c)
 
 ||| Whether `c` (parameter `j` of `f`) is used only as a context:
 ||| extended at self tail calls, passed unchanged at self tail calls,
 ||| applied at most once per path and never after that. Returns the
 ||| extension sites (their let-bound partials) on success.
-contextSites : Name -> Nat -> Int -> SortedMap Name Extender -> RCExp -> Maybe (SortedMap Int (Name, List RCLocal))
+contextSites : Name -> Nat -> LocalId -> SortedMap Name Extender -> RCExp -> Maybe (SortedMap LocalId (Name, List RCLocal))
 contextSites f j c exts body = go empty body
   where
-    selfArgOk : SortedMap Int (Name, List RCLocal) -> List RCLocal -> Maybe (SortedMap Int (Name, List RCLocal))
+    selfArgOk : SortedMap LocalId (Name, List RCLocal) -> List RCLocal -> Maybe (SortedMap LocalId (Name, List RCLocal))
     selfArgOk pending args = do
         a <- getAt j args
         guard (length (filter (== RCLoc c) args) == (if a == RCLoc c then 1 else 0))
@@ -86,7 +86,7 @@ contextSites f j c exts body = go empty body
                         else map (singleton v) (lookup v pending)
              _ => Nothing
 
-    go : SortedMap Int (Name, List RCLocal) -> RCExp -> Maybe (SortedMap Int (Name, List RCLocal))
+    go : SortedMap LocalId (Name, List RCLocal) -> RCExp -> Maybe (SortedMap LocalId (Name, List RCLocal))
     go pending (RLet _ v _ value rest) = case value of
         RUnderApp _ l 1 caps =>
             case lookup l exts of
@@ -126,13 +126,13 @@ contextSites f j c exts body = go empty body
 -------------------------------------------------------------------------------
 -- Rewriting
 
-data Mode = Entry | Acc Int Int
+data Mode = Entry | Acc LocalId LocalId
 
-rewriteBody : {auto v : Ref VarId Int} -> Name -> Name -> Nat -> Int -> Nat
-           -> SortedMap Name Extender -> SortedMap Int (Name, List RCLocal) -> Mode -> RCExp -> Core RCExp
+rewriteBody : {auto v : Ref VarId Int} -> Name -> Name -> Nat -> LocalId -> Nat
+           -> SortedMap Name Extender -> SortedMap LocalId (Name, List RCLocal) -> Mode -> RCExp -> Core RCExp
 rewriteBody f f' j c k exts sites mode = go
   where
-    fill : FC -> Int -> RCLocal -> RCExp -> Core RCExp
+    fill : FC -> LocalId -> RCLocal -> RCExp -> Core RCExp
     fill fc last value rest = do
         u <- freshVarId
         pure $ RLet fc u RBoxed (RFill fc (RCLoc last) k value []) rest
@@ -190,7 +190,7 @@ rewriteBody f f' j c k exts sites mode = go
 
 ||| The first parameter of `f` that qualifies as a context, with its
 ||| extension sites and the hole's field index.
-contextParam : Name -> List (Int, Rep) -> SortedMap Name Extender -> RCExp -> Maybe (Nat, Int, Nat, SortedMap Int (Name, List RCLocal))
+contextParam : Name -> List (LocalId, Rep) -> SortedMap Name Extender -> RCExp -> Maybe (Nat, LocalId, Nat, SortedMap LocalId (Name, List RCLocal))
 contextParam f params exts body = 
     if hasExtender body then head' (mapMaybe try (zip [0 .. length params] params)) else Nothing
   where
@@ -204,7 +204,7 @@ contextParam f params exts body =
     hasExtender _ = False
 
   where
-    try : (Nat, (Int, Rep)) -> Maybe (Nat, Int, Nat, SortedMap Int (Name, List RCLocal))
+    try : (Nat, (LocalId, Rep)) -> Maybe (Nat, LocalId, Nat, SortedMap LocalId (Name, List RCLocal))
     try (j, (c, RBoxed)) = do
         sites <- contextSites f j c exts body
         guard (not (null sites))

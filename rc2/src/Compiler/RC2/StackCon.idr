@@ -33,7 +33,7 @@ ParamKey = (Name, Nat)
 
 ||| The parameters `p` is passed to by `body`, or `Nothing` when `p` is read in
 ||| any other way than by a `case` (a `reuseOffer` of `p` included).
-paramDeps : Int -> RCExp -> Maybe (List ParamKey)
+paramDeps : LocalId -> RCExp -> Maybe (List ParamKey)
 paramDeps p = go
   where
     isP : RCLocal -> Bool
@@ -47,12 +47,12 @@ paramDeps p = go
     go (RDrop _ _ k) = go k
     go (RFree _ _ k) = go k
     go (RReleaseReuse _ _ k) = go k
-    go (RReuseOffer _ sc ds us k) = if any (isP . locOf) (sc :: ds ++ us) then Nothing else go k
+    go (RReuseOffer _ sc ds us k) = if any (isP . RCLoc) (sc :: ds ++ us) then Nothing else go k
     go (RConCase _ _ alts mDef) =
         concat <$> traverse go (map (\(MkRConAlt _ _ _ _ b) => b) alts ++ maybe [] pure mDef)
     go (RAppName _ lazy g args) =
         if isJust lazy then (if any isP args then Nothing else Just []) else Just (positions g args)
-    go (RAppNameRep _ g _ _ pd args) = if any isP (map locOf pd) then Nothing else Just (positions g args)
+    go (RAppNameRep _ g _ _ pd args) = if any isP (map RCLoc pd) then Nothing else Just (positions g args)
     go e = if any isP (directReads e) then Nothing else concat <$> traverse go (children e)
 
 ||| The parameters no callee lets escape (a greatest fixed point: a parameter
@@ -89,7 +89,7 @@ record Safe where
 
 ||| Whether the local `b` stays in the frame in `body`: read by a `case`, or passed to a
 ||| parameter in `params`.
-kept : SortedSet ParamKey -> Int -> RCExp -> Bool
+kept : SortedSet ParamKey -> LocalId -> RCExp -> Bool
 kept params b = go
   where
     isB : RCLocal -> Bool
@@ -103,15 +103,15 @@ kept params b = go
     go (RDrop _ _ k) = go k
     go (RFree _ _ k) = go k
     go (RReleaseReuse _ _ k) = go k
-    go (RReuseOffer _ sc ds us k) = not (any (isB . locOf) (sc :: ds ++ us)) && go k
+    go (RReuseOffer _ sc ds us k) = not (any (isB . RCLoc) (sc :: ds ++ us)) && go k
     go (RConCase _ _ alts mDef) = all go (map (\(MkRConAlt _ _ _ _ body) => body) alts ++ maybe [] pure mDef)
     go (RAppName _ lazy g args) = if any isB args then isNothing lazy && toParams g args else True
-    go (RAppNameRep _ g _ _ pd args) = not (any isB (map locOf pd)) && toParams g args
+    go (RAppNameRep _ g _ _ pd args) = not (any isB (map RCLoc pd)) && toParams g args
     go e = not (any isB (directReads e)) && all go (children e)
 
 ||| For the parameter `p`: the field positions whose binder, in a `case` on `p`, leaves the
 ||| frame, and the parameters `p` is passed to.
-fieldUses : SortedSet ParamKey -> Int -> RCExp -> (SortedSet Nat, List ParamKey)
+fieldUses : SortedSet ParamKey -> LocalId -> RCExp -> (SortedSet Nat, List ParamKey)
 fieldUses params p = go
   where
     isP : RCLocal -> Bool
@@ -168,8 +168,8 @@ isBoxed _ = False
 ||| `v`'s ownership of a field: the local to `drop`, nothing for an immortal
 ||| constant, or `Nothing` when the local is not known to be Boxed or the constant
 ||| is boxed afresh when read (a native literal), which nothing would release.
-fieldOwner : SortedMap Int Rep -> RCLocal -> Maybe (List LocalId)
-fieldOwner env (RCLoc i) = if maybe False isBoxed (lookup i env) then Just [MkLocalId i] else Nothing
+fieldOwner : SortedMap LocalId Rep -> RCLocal -> Maybe (List LocalId)
+fieldOwner env (RCLoc i) = if maybe False isBoxed (lookup i env) then Just [i] else Nothing
 fieldOwner _ (RCConst c) = if isJust (litRep c) then Nothing else Just []
 fieldOwner _ _ = Just []
 
@@ -181,14 +181,14 @@ asCon _ = Nothing
 
 ||| `body` with the stack constructor `v` (owning `fs`) in place of the heap one,
 ||| or `Nothing` when `v` is used in a way a stack constructor cannot be.
-rewriteUses : Safe -> Int -> List LocalId -> RCExp -> Maybe RCExp
+rewriteUses : Safe -> LocalId -> List LocalId -> RCExp -> Maybe RCExp
 rewriteUses ok v fs = go
   where
     isV : RCLocal -> Bool
     isV = (== RCLoc v)
 
     isVId : LocalId -> Bool
-    isVId = (== MkLocalId v)
+    isVId = (== v)
 
     dropFields : RCExp -> RCExp
     dropFields k = if null fs then k else RDrop emptyFC fs k
@@ -203,7 +203,7 @@ rewriteUses ok v fs = go
 
     takesV : RCExp -> Bool
     takesV (RAppName _ _ _ args) = any isV args
-    takesV (RAppNameRep _ _ _ _ pd args) = any isV (map locOf pd ++ args)
+    takesV (RAppNameRep _ _ _ _ pd args) = any isV (map RCLoc pd ++ args)
     takesV _ = False
 
     okCall : RCExp -> Maybe ()
@@ -211,7 +211,7 @@ rewriteUses ok v fs = go
         i <- argIndex args
         guard (contains (g, i) ok.params)
     okCall (RAppNameRep _ g _ _ pd args) = do
-        guard (not (any isV (map locOf pd)))
+        guard (not (any isV (map RCLoc pd)))
         i <- argIndex args
         guard (contains (g, i) ok.params)
     okCall _ = Nothing
@@ -220,7 +220,7 @@ rewriteUses ok v fs = go
     ||| frame in `rest`: a `case` on `y` in this function must not bind it (the field's own
     ||| fields are released when `y` dies, while a binder could still read them), and a
     ||| callee must keep it (`Safe`'s `fields`).
-    fieldKept : Int -> Nat -> RCExp -> Bool
+    fieldKept : LocalId -> Nat -> RCExp -> Bool
     fieldKept y k = keep
       where
         isY : RCLocal -> Bool
@@ -239,7 +239,7 @@ rewriteUses ok v fs = go
             (not (isY sc) || all unbound alts)
               && all keep (map (\(MkRConAlt _ _ _ _ b) => b) alts ++ maybe [] pure mDef)
         keep (RAppName _ _ g args) = not (any isY args) || toFields g args
-        keep (RAppNameRep _ g _ _ pd args) = not (any isY (map locOf pd)) && (not (any isY args) || toFields g args)
+        keep (RAppNameRep _ g _ _ pd args) = not (any isY (map RCLoc pd)) && (not (any isY args) || toFields g args)
         keep e = not (any isY (directReads e)) && all keep (children e)
 
     peelWrappers : RCExp -> Maybe (RCExp -> RCExp, RCExp)
@@ -302,7 +302,7 @@ runHasCon e = isJust (asCon e)
 mutual
   ||| Walks a body, replacing every qualifying `let v = con ..`. `noFlat` is set
   ||| inside a value already moved out in front of its `let`.
-  stackWalk : Safe -> SortedMap Int Rep -> Bool -> RCExp -> RCExp
+  stackWalk : Safe -> SortedMap LocalId Rep -> Bool -> RCExp -> RCExp
   stackWalk ok env noFlat (RLet fc x rep value body) =
       let env' = insert x rep env
           tryFlat = not noFlat && runHasCon value
@@ -317,7 +317,7 @@ mutual
       let boxedScrut = case sc of
                             RCLoc s => maybe False isBoxed (lookup s env)
                             _ => False
-          bind : SortedMap Int Rep -> List Int -> SortedMap Int Rep
+          bind : SortedMap LocalId Rep -> List LocalId -> SortedMap LocalId Rep
           bind m as = if boxedScrut then foldl (\m', a => insert a RBoxed m') m as else m
       in RConCase fc sc (map (\(MkRConAlt n ci t as b) => MkRConAlt n ci t as (stackWalk ok (bind env as) noFlat b)) alts)
                   (map (stackWalk ok env noFlat) mDef)
@@ -325,7 +325,7 @@ mutual
 
   ||| The statements `flatten` put in front of the `let` of `x` (their values already
   ||| walked), each tried as a stack constructor; `True` when one became one.
-  stackChain : Safe -> SortedMap Int Rep -> Int -> RCExp -> (RCExp, Bool)
+  stackChain : Safe -> SortedMap LocalId Rep -> LocalId -> RCExp -> (RCExp, Bool)
   stackChain ok env x (RDup fc a n k) = mapFst (RDup fc a n) (stackChain ok env x k)
   stackChain ok env x (RDrop fc vs k) = mapFst (RDrop fc vs) (stackChain ok env x k)
   stackChain ok env x (RLet fc y rep v inner) =
@@ -336,7 +336,7 @@ mutual
   stackChain _ _ _ e = (e, False)
 
   ||| `let y = v in inner`, as a stack constructor when `y` qualifies.
-  letWith : Safe -> SortedMap Int Rep -> FC -> Int -> Rep -> RCExp -> RCExp -> (RCExp, Bool)
+  letWith : Safe -> SortedMap LocalId Rep -> FC -> LocalId -> Rep -> RCExp -> RCExp -> (RCExp, Bool)
   letWith ok env fc v rep value body =
       case tryStack of
            Just e => (e, True)

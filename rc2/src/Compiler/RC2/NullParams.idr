@@ -63,7 +63,7 @@ record Fn where
   constructor MkFn
   ident : Int
   name : Name
-  params : List Int
+  params : List LocalId
   facts : List Fact
 
 ||| The functions some reference to which is not a call or a partial
@@ -99,7 +99,7 @@ record Site where
 
 sitesOf : SortedMap Name Int -> Fn -> List Site
 sitesOf ids g =
-    let paramIx : SortedMap Int Nat := fromList [ (p, k) | (k, p) <- withIndex g.params ]
+    let paramIx : SortedMap LocalId Nat := fromList [ (p, k) | (k, p) <- withIndex g.params ]
         arg : RCLocal -> Arg := \case
             RCWorld => AWorld
             RCErased => AErased
@@ -202,7 +202,7 @@ forwardStates arityOf typed sites =
 ||| world (by type, or because every caller passes it) or an erased value
 ||| (every caller passes it). `roots` are the names called from outside.
 export
-nullParamTable : (roots : List Name) -> List (Name, RCDef) -> SortedMap Name (SortedMap Int NativeTy)
+nullParamTable : (roots : List Name) -> List (Name, RCDef) -> SortedMap Name (SortedMap LocalId NativeTy)
 nullParamTable roots defs =
     let ids : SortedMap Name Int := numberNames (map fst defs)
         fns : List Fn := mapMaybe (\case
@@ -222,7 +222,7 @@ nullParamTable roots defs =
             forwardStates (fromList (map (\g => (g.ident, length g.params)) fns)) typed closedSites
     in fromList (mapMaybe (entry typed states) fns)
   where
-    entry : SortedMap Int (SortedSet Nat) -> SortedMap Int (List St) -> Fn -> Maybe (Name, SortedMap Int NativeTy)
+    entry : SortedMap Int (SortedSet Nat) -> SortedMap Int (List St) -> Fn -> Maybe (Name, SortedMap LocalId NativeTy)
     entry typed states g =
         case mapMaybe (\(j, p) => map (p,) (typeAt j)) (withIndex g.params) of
              [] => Nothing

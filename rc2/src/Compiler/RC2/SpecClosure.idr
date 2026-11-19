@@ -84,7 +84,7 @@ record Opportunity where
 
 ||| See the doc's "Internal structure" -> "Records" paragraph.
 Bound : Type
-Bound = SortedMap Int KnownClosure
+Bound = SortedMap LocalId KnownClosure
 
 ||| See the doc's "Internal structure" -> "Finding a known closure at a
 ||| use site" paragraph.
@@ -114,7 +114,7 @@ collectOpportunities bound e = foldSubExprs (++) [] (collectOpportunities bound)
 ||| uses the result, and a closure is not a lazy cell, so there `force`
 ||| is the identity (`Prelude.Types.maybe`/`either`, whose function
 ||| arguments are `Lazy`). See the doc's "Forcing a closure parameter".
-unforceParam : Int -> RCExp -> RCExp
+unforceParam : LocalId -> RCExp -> RCExp
 unforceParam p e@(RLet _ t _ (RForce _ _ (RCLoc q) _) rest) =
     if q == p then unforceParam p (renameRCExp (insert t p empty) rest)
               else mapSubExprs (unforceParam p) e
@@ -195,7 +195,7 @@ paramUses captured v missing callee argPos e =
 ||| Rewrites the `missing`-long apply chain rooted at `paramVar` into a
 ||| direct call to `targetName`, fed `capturedParams` followed by the
 ||| chain's own applied arguments, in order.
-rewriteApply : (paramVar : Int) -> (targetName : Name) -> (missing : Nat) -> (capturedParams : List Int) -> RCExp -> RCExp
+rewriteApply : (paramVar : LocalId) -> (targetName : Name) -> (missing : Nat) -> (capturedParams : List LocalId) -> RCExp -> RCExp
 rewriteApply paramVar targetName missing capturedParams = go
   where
     go : RCExp -> RCExp
@@ -205,7 +205,7 @@ rewriteApply paramVar targetName missing capturedParams = go
 
 ||| See the doc's "Internal structure" -> "Self-recursive passthrough"
 ||| paragraph.
-rewriteSelfCall : (callee : Name) -> (argPos : Nat) -> (paramVar : Int) -> (cloneName : Name) -> (capturedParams : List Int) -> RCExp -> RCExp
+rewriteSelfCall : (callee : Name) -> (argPos : Nat) -> (paramVar : LocalId) -> (cloneName : Name) -> (capturedParams : List LocalId) -> RCExp -> RCExp
 rewriteSelfCall callee argPos paramVar cloneName capturedParams = go
   where
     go : RCExp -> RCExp
@@ -233,8 +233,8 @@ rewriteSelfCall callee argPos paramVar cloneName capturedParams = go
 ||| type's own doc comment for why the two stay separate).
 buildClone : {auto fr : Ref FreshId Int} -> {auto v : Ref VarId Int}
           -> (callee : Name) -> (argPos : Nat)
-          -> (paramVar : Int) -> (targetName : Name) -> (missing : Nat) -> (capturedCount : Nat)
-          -> (args : List (Int, Rep)) -> (retRep : Rep) -> (body : RCExp)
+          -> (paramVar : LocalId) -> (targetName : Name) -> (missing : Nat) -> (capturedCount : Nat)
+          -> (args : List (LocalId, Rep)) -> (retRep : Rep) -> (body : RCExp)
           -> Core (Name, RCDef)
 buildClone callee argPos paramVar targetName missing capturedCount args retRep body = do
     cloneId <- freshId
@@ -275,7 +275,7 @@ buildClone callee argPos paramVar targetName missing capturedCount args retRep b
 
 ||| `True` iff `e` still references `paramVar` -- see the doc's "The
 ||| proposed rc2-native design" -> "3. Profitability check" section.
-stillAppliesParam : Int -> RCExp -> Bool
+stillAppliesParam : LocalId -> RCExp -> Bool
 stillAppliesParam paramVar e = countUsesR (RCLoc paramVar) e > 0
 
 ||| Drops the closure `buildClone` binds at a clone's entry for its
