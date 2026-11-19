@@ -65,14 +65,17 @@ types onto it, with no change of behaviour (it still calls `malloc`):
 | allocation site | cell? |
 |---|---|
 | `newConstructor`, `mkClosure`, `mkDouble`, `mkInt64`, `mkBits64` (`memory.c`) | yes |
-| `newIORef` (`ioprims.c:15`), `mkLazy` (`rt.c:541`), `mkGCPointer` | yes |
-| `mkInteger`, `mkArray`, `mkBuffer`, `mkThreadID`, the `String` of `cast Integer String` (`numeric.c:443`), `allocString` | no |
+| `newIORef` (`ioprims.c`), `mkLazy` (`rt.c`), `mkGCPointer` | yes |
+| `mkInteger`, `mkArray`, `mkBuffer`, `mkThreadID`, the `String` of `cast Integer String` (`numeric.c`), `allocString` | no |
 | `libs/rc2base`'s `Mutex`/`Condition`/`Semaphore`/`Barrier`/`JoinHandle`/`Channel` (`concurrency_util.c`) | no |
 
-The release side is split by tag too: `idris2rc2_teardown` ends in
-`idris2rc2_cellFreeInline`, which asks `idris2rc2_cellPooled` (the allocation
-decision again, from the tag and the arity) and sends what is not a pool cell to
-`free()`. The closure shells freed by `idris2rc2_trampoline` and `idris2rc2_applyClosureN` (`rt.c`) and
+The release side follows the allocation: `idris2rc2_teardown` ends in
+`idris2rc2_cellFreeInline`, which asks `idris2rc2_cellPooled` (the `POOLED` bit
+the allocation set in the header, `constructor-layout.md`, "The reserved byte")
+and sends what is not a pool cell to `free()`. The inline allocation takes only
+the pop of a free list (`idris2rc2_poolTryAlloc`); an empty list, and the pool
+off, go to `idris2rc2_cellAlloc`, which writes the header of what it hands out
+itself, so a `malloc`'d cell is never marked. The closure shells freed by `idris2rc2_trampoline` and `idris2rc2_applyClosureN` (`rt.c`) and
 `idris2rc2_releaseReuse` (`rt.h`) are cells. The channel nodes
 (`concurrency_util.c`) and the thread primitives are not, and must not move.
 Nothing outside the runtime frees a cell: an `%export` result is a separate copy.
@@ -311,8 +314,8 @@ is single-threaded.
   (`Emit.idr`, the comment above `applyChain`).
 - **Pool off.** `IDRIS2RC2_POOL=0` (environment, read before any other
   constructor) or `-DIDRIS2RC2_NO_POOL` (compile time) make every cell a `malloc`
-  block: `cellAlloc` and `idris2rc2_cellPooled` test `idris2rc2_poolOn`, a predictable
-  branch.
+  block: `cellAlloc` tests `idris2rc2_poolOn`, a predictable branch, and no
+  page gets a free list, so the inline allocation always falls through to it.
   `verify.sh` sets it for its valgrind runs (`LEAK_SENSITIVE_TESTS`): a pool in
   4 MiB `mmap` segments hides every leak, double free and use after free from
   valgrind, so those tests would pass without checking anything. The same switch
@@ -415,9 +418,10 @@ every call saved six registers, and `idris2rc2_cellFree` about 22, because it wo
 out the size of the cell from its tag only to decide pool or `malloc`. The release is
 now `idris2rc2_poolFreeInline` (owner test, push on the free list, `used--`, one test
 of the state) with the rare cases out of line (`idris2rc2_poolAfter`,
-`idris2rc2_poolFreeRemote`), and `idris2rc2_cellPooled` decides pool or `malloc` from
+`idris2rc2_poolFreeRemote`), and `idris2rc2_cellPooled` decided pool or `malloc` from
 the tag and the arity with the same size macros the allocation uses
-(`IDRIS2RC2_CON_BYTES`, `IDRIS2RC2_CLOSURE_BYTES`). `teardown` and the closure-shell
+(`IDRIS2RC2_CON_BYTES`, `IDRIS2RC2_CLOSURE_BYTES`); it now reads a bit of the
+header instead (`constructor-layout.md`, "The reserved byte"). `teardown` and the closure-shell
 frees of the runtime inline it; the generated C still calls `idris2rc2_cellFree`, so
 the 10,739 `releaseReuse` sites do not grow.
 

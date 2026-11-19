@@ -96,7 +96,8 @@ only ever read and written through `av`, an IORef only through `v`.
   saturated closure in `v` always means "not evaluated yet".
 - A thunk with no captures is a 0-ary closure; `idris2rc2_dispatchFn`
   already handles arity 0.
-- `header.reserved` is 1 once a value is stored. Whether a cell is
+- `header.reserved` has `IDRIS2RC2_HDR_FLAG` once a value is stored
+  (`constructor-layout.md`, "The reserved byte"). Whether a cell is
   evaluated is decided by this flag, never by looking at `v`: an
   unevaluated `v` is a closure another thread may free at any moment.
   The cell stays the size of an IORef.
@@ -107,7 +108,7 @@ only ever read and written through `av`, an IORef only through `v`.
 
 1. Not a cell (tag is not `LAZY`): return `v` itself (dup'd). This is
    what lets a delayed value be a plain value (below).
-2. An evaluated cell (an acquire load of `reserved` reads 1): return
+2. An evaluated cell (an acquire load of `reserved` has the flag): return
    `v` dup'd, without the lock. A value is written once and never
    replaced while the cell lives.
 3. A cell whose `v` is a saturated closure:
@@ -125,9 +126,10 @@ only ever read and written through `av`, an IORef only through `v`.
      closure, then trampoline, then drop the reference. The closure
      stays in the cell, so another thread can evaluate it at the same
      time.
-   - Pop, take the lock. If `reserved` is still 0, store the result
+   - Pop, take the lock. If the flag is still clear, store the result
      with one dup, so the cell and the caller each own a reference, set
-     `reserved` (a release store), and drop the cell's reference to the
+     the flag (an atomic OR with release order, which keeps the byte's
+     other bit), and drop the cell's reference to the
      closure; if another thread stored first, drop
      this result and return the stored one dup'd. A thunk
      may run more than once when two threads force it together; that

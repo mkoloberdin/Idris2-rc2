@@ -139,12 +139,33 @@ wrapping into a corrupt, too-short `len`.
 
 **One block.** `idris2rc2_mkEmptyString` and `idris2rc2_mkStringLen` allocate the
 cell and its `len + 1` content bytes together: `str` points just past the
-struct and `header.reserved` is 1. Teardown frees the second block only
-when `reserved` is 0, which is the case for the one string whose bytes come
-from elsewhere (`cast Integer String`, whose digits GMP allocates) and for the
-immortal constants, which are never torn down. Nothing may replace `str` of a
-string with `reserved` set, or `realloc` its cell (`str` is an interior pointer). Before this, every string took two
+struct and `header.reserved` has `IDRIS2RC2_HDR_FLAG` (below). Teardown frees
+the second block only when the flag is clear, which is the case for the one
+string whose bytes come from elsewhere (`cast Integer String`, whose digits GMP
+allocates) and for the immortal constants, which are never torn down. Nothing
+may replace `str` of a string with the flag set, or `realloc` its cell (`str`
+is an interior pointer). Before this, every string took two
 `malloc`/`free` pairs.
+
+## The reserved byte
+
+The last byte of the header holds two bits (`IDRIS2RC2_HDR_*`,
+`idris2rc2_datatypes.h`):
+
+| Bit | Name | Meaning |
+|---|---|---|
+| `0x01` | `FLAG` | depends on the tag: a String's bytes share its allocation (above); a lazy value is evaluated (`lazy-memoization.md`) |
+| `0x80` | `POOLED` | the cell came from the pool (`small-object-allocator.md`) |
+
+`POOLED` is set where the cell is handed out (`idris2rc2_cellAllocInline`,
+`idris2rc2_cellAlloc`) and read where it is released: `idris2rc2_cellPooled` is
+that one test. Before, the release worked the decision out again from the tag,
+the arity and `idris2rc2_poolOn`: a second `switch` on the tag in every
+teardown. A constant constructor or closure (a static, `STOCKVAL`) and a cell
+in a C frame (`stack-con.md`) have neither bit, and are never released.
+
+A lazy cell sets `FLAG` with an atomic OR (`idris2rc2_force`), not a store, so
+that `POOLED` stays.
 
 ## Pitfall: the runtime `Makefile`
 
