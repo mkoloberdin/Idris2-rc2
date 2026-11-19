@@ -543,14 +543,16 @@ splitBorrowsV natives owned = splitBorrows natives owned . toList
 ||| degenerate case -- e.g. `RStructSet`'s `structVar`/`value` happening
 ||| to be the same local) is only marked drop-worthy on its first
 ||| occurrence, not both.
-dropIfLastUse : (natives : SortedSet RCLocal) -> Owned -> List RCLocal -> List RCLocal
+dropIfLastUse : (natives : SortedSet RCLocal) -> Owned -> List RCLocal -> List LocalId
 dropIfLastUse _ _ [] = []
-dropIfLastUse natives owned (v :: vars) =
-    if not (isHeapLocal v) || contains v natives
-        then dropIfLastUse natives owned vars
-        else if contains v owned
-                then v :: dropIfLastUse natives (delete v owned) vars
-                else dropIfLastUse natives owned vars
+dropIfLastUse natives owned (v :: vars) = case idOf v of
+    Nothing => dropIfLastUse natives owned vars
+    Just i =>
+        if contains v natives
+            then dropIfLastUse natives owned vars
+            else if contains v owned
+                    then i :: dropIfLastUse natives (delete v owned) vars
+                    else dropIfLastUse natives owned vars
 
 ||| Which of an `ROp`'s operands need dropping once it's done reading
 ||| them -- i.e. every genuinely Boxed one (native locals and RCConst
@@ -563,8 +565,8 @@ dropIfLastUse natives owned (v :: vars) =
 ||| give this read its own reference to consume. Becomes `ROp`'s
 ||| `postDrop` field (see its doc comment) -- this is the one place
 ||| Compiler.RC2.Emit lowers this decision rather than re-deriving it.
-boxedOperands : (natives : SortedSet RCLocal) -> List RCLocal -> List RCLocal
-boxedOperands natives = filter (\v => isHeapLocal v && not (contains v natives))
+boxedOperands : (natives : SortedSet RCLocal) -> List RCLocal -> List LocalId
+boxedOperands natives = mapMaybe (\v => if contains v natives then Nothing else idOf v)
 
 mutual
     branchBody : SortedSet RCLocal -> SortedSet RCLocal -> RCExp -> Core RCExp

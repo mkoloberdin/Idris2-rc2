@@ -187,26 +187,26 @@ reannotateFieldOwnership fid owned (ROp fc lazy op args postDrop) =
     let argsList = toList args
         occ = length (filter (== RCLoc fid) argsList)
         (nDups, owned') = countDupsNeeded fid owned argsList
-        postDrop' = postDrop ++ List.replicate occ (RCLoc fid)
+        postDrop' = postDrop ++ List.replicate occ (MkLocalId fid)
     in (owned', wrapNDups fc fid nDups (ROp fc lazy op args postDrop'))
 -- Mirrors the ROp case above exactly, primitive-agnostic -- see
 -- doc/c-struct-support.md's "Why a dedicated node".
 reannotateFieldOwnership fid owned (RExtPrim fc lazy p args postDrop) =
     let occ = length (filter (== RCLoc fid) args)
         (nDups, owned') = countDupsNeeded fid owned args
-        postDrop' = postDrop ++ List.replicate occ (RCLoc fid)
+        postDrop' = postDrop ++ List.replicate occ (MkLocalId fid)
     in (owned', wrapNDups fc fid nDups (RExtPrim fc lazy p args postDrop'))
 reannotateFieldOwnership fid owned (RStructGet fc structVar sf postDrop) =
     let isField = structVar == RCLoc fid
         dropHere = isField && owned
         owned' = if isField then False else owned
-        postDrop' = if dropHere then postDrop ++ [RCLoc fid] else postDrop
+        postDrop' = if dropHere then postDrop ++ [MkLocalId fid] else postDrop
     in (owned', RStructGet fc structVar sf postDrop')
 reannotateFieldOwnership fid owned (RForce fc lr v postDrop) =
     let isField = v == RCLoc fid
         dropHere = isField && owned
         owned' = if isField then False else owned
-        postDrop' = if dropHere then postDrop ++ [RCLoc fid] else postDrop
+        postDrop' = if dropHere then postDrop ++ [MkLocalId fid] else postDrop
     in (owned', RForce fc lr v postDrop')
 reannotateFieldOwnership fid owned (RStructSet fc structVar sf value postDrop) =
     let scField = structVar == RCLoc fid
@@ -215,8 +215,8 @@ reannotateFieldOwnership fid owned (RStructSet fc structVar sf value postDrop) =
         owned1 = if scField then False else owned
         dropVal = valField && owned1
         owned2 = if valField then False else owned1
-        postDrop' = postDrop ++ (if dropSc then [RCLoc fid] else [])
-                             ++ (if dropVal then [RCLoc fid] else [])
+        postDrop' = postDrop ++ (if dropSc then [MkLocalId fid] else [])
+                             ++ (if dropVal then [MkLocalId fid] else [])
     in (owned2, RStructSet fc structVar sf value postDrop')
 -- Every branch case below returns `False` unconditionally --
 -- `finalizeBranch` leaves `fid` fully consumed on every arm it
@@ -229,7 +229,7 @@ reannotateFieldOwnership fid owned (RStructSet fc structVar sf value postDrop) =
 reannotateFieldOwnership fid owned (RFill fc cell k value postDrop) =
     let (nDups, owned1) = countDupsNeeded fid owned [value]
         isCell = cell == RCLoc fid
-        postDrop' = postDrop ++ (if isCell && owned1 then [RCLoc fid] else [])
+        postDrop' = postDrop ++ (if isCell && owned1 then [MkLocalId fid] else [])
     in (if isCell then False else owned1, wrapNDups fc fid nDups (RFill fc cell k value postDrop'))
 reannotateFieldOwnership fid owned (RCmpCase fc op args postDrop t f) =
     -- markNativeOccurrences already redirected every native-context

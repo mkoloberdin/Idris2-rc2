@@ -55,22 +55,22 @@ renameNamesG f cl = go
     go : RCExp -> RCExp
     go (RV fc v) = RV fc (l v)
     go (RAppName fc lazy n args) = RAppName fc lazy (f n) (ls args)
-    go (RAppNameRep {sameLen} fc n argReps retRep postDrop args) = mapRepCallArgs fc (f n) argReps retRep (ls postDrop) args l
-    go (RAppFFIInline fc ccs fargs ret postDrop args) = RAppFFIInline fc ccs fargs ret (ls postDrop) (ls args)
+    go (RAppNameRep {sameLen} fc n argReps retRep postDrop args) = mapRepCallArgs fc (f n) argReps retRep postDrop args l
+    go (RAppFFIInline fc ccs fargs ret postDrop args) = RAppFFIInline fc ccs fargs ret postDrop (ls args)
     go (RUnderApp fc n missing args) = let (n', missing') = cl n missing in RUnderApp fc n' missing' (ls args)
     go (RDelay fc lr n caps) = RDelay fc lr (f n) (ls caps)
-    go (RForce fc lr v postDrop) = RForce fc lr (l v) (ls postDrop)
+    go (RForce fc lr v postDrop) = RForce fc lr (l v) postDrop
     go (RApp fc lazy c args) = RApp fc lazy (l c) (map l args)
     go (RLet fc var rep value body) = RLet fc var rep (go value) (go body)
     go (RCon fc n ci tag args reuseFrom) = RCon fc n ci tag (ls args) (map l reuseFrom)
     go (RRetPack fc n tag fields) = RRetPack fc n tag (ls fields)
     go (RStackCon fc n ci tag args) = RStackCon fc n ci tag (ls args)
-    go (ROp fc lazy op args postDrop) = ROp fc lazy op (map l args) (ls postDrop)
-    go (RExtPrim fc lazy p args postDrop) = RExtPrim fc lazy p (ls args) (ls postDrop)
-    go (RStructGet fc sv sf postDrop) = RStructGet fc (l sv) sf (ls postDrop)
-    go (RStructSet fc sv sf value postDrop) = RStructSet fc (l sv) sf (l value) (ls postDrop)
-    go (RFill fc cell k value postDrop) = RFill fc (l cell) k (l value) (ls postDrop)
-    go (RCmpCase fc op args postDrop t e) = RCmpCase fc op (map l args) (ls postDrop) (go t) (go e)
+    go (ROp fc lazy op args postDrop) = ROp fc lazy op (map l args) postDrop
+    go (RExtPrim fc lazy p args postDrop) = RExtPrim fc lazy p (ls args) postDrop
+    go (RStructGet fc sv sf postDrop) = RStructGet fc (l sv) sf postDrop
+    go (RStructSet fc sv sf value postDrop) = RStructSet fc (l sv) sf (l value) postDrop
+    go (RFill fc cell k value postDrop) = RFill fc (l cell) k (l value) postDrop
+    go (RCmpCase fc op args postDrop t e) = RCmpCase fc op (map l args) postDrop (go t) (go e)
     go (RConCase fc sc alts mDef) =
         RConCase fc (l sc) (map (\(MkRConAlt n ci tag as body) => MkRConAlt n ci tag as (go body)) alts) (map go mDef)
     go (RConstCase fc sc alts mDef) =
@@ -84,8 +84,8 @@ renameNamesG f cl = go
     go (RReleaseReuse fc v body) = RReleaseReuse fc (l v) (go body)
     go (RReuseOffer fc sc dupOnShared dropOnUnique body) =
         RReuseOffer fc (l sc) (ls dupOnShared) (ls dropOnUnique) (go body)
-    go (RLoop {sameLen} fc params initial prologueDrop body) = mapLoop fc params initial id l (ls prologueDrop) (go body)
-    go (RLoopContinue fc args postDrop) = RLoopContinue fc (ls args) (ls postDrop)
+    go (RLoop {sameLen} fc params initial prologueDrop body) = mapLoop fc params initial id l prologueDrop (go body)
+    go (RLoopContinue fc args postDrop) = RLoopContinue fc (ls args) postDrop
     go (RMemoize fc n rep body) = RMemoize fc n rep (go body)
 
 ------------------------------------------------------------------------
@@ -113,22 +113,22 @@ where
   go : RCExp -> Bool
   go (RV _ v) = l v
   go (RAppName _ _ _ args) = ls args
-  go (RAppNameRep _ _ _ _ postDrop args) = ls postDrop || ls args
+  go (RAppNameRep _ _ _ _ _ args) = ls args
   go (RAppFFIInline {}) = True
   go (RUnderApp _ _ _ args) = ls args
   go (RDelay _ _ _ caps) = ls caps
-  go (RForce _ _ v postDrop) = l v || ls postDrop
+  go (RForce _ _ v _) = l v
   go (RApp _ _ c args) = l c || any l args
   go (RLet _ _ _ value body) = go value || go body
   go (RCon _ _ _ _ args reuseFrom) = ls args || maybe False l reuseFrom
   go (RRetPack _ _ _ fields) = ls fields
   go (RStackCon _ _ _ _ args) = ls args
-  go (ROp _ _ _ args postDrop) = any l args || ls postDrop
-  go (RExtPrim _ _ _ args postDrop) = ls args || ls postDrop
-  go (RStructGet _ sv _ postDrop) = l sv || ls postDrop
-  go (RStructSet _ sv _ value postDrop) = l sv || l value || ls postDrop
-  go (RFill _ cell _ value postDrop) = l cell || l value || ls postDrop
-  go (RCmpCase _ _ args postDrop t e) = any l args || ls postDrop || go t || go e
+  go (ROp _ _ _ args _) = any l args
+  go (RExtPrim _ _ _ args _) = ls args
+  go (RStructGet _ sv _ _) = l sv
+  go (RStructSet _ sv _ value _) = l sv || l value
+  go (RFill _ cell _ value _) = l cell || l value
+  go (RCmpCase _ _ args _ t e) = any l args || go t || go e
   go (RConCase _ sc alts mDef) =
       l sc || any (\(MkRConAlt _ _ _ _ body) => go body) alts || maybe False go mDef
   go (RConstCase _ sc alts mDef) =
@@ -141,8 +141,8 @@ where
   go (RFree _ v body) = l v || go body
   go (RReleaseReuse _ v body) = l v || go body
   go (RReuseOffer _ sc dupOnShared dropOnUnique body) = l sc || ls dupOnShared || ls dropOnUnique || go body
-  go (RLoop _ _ initial prologueDrop body) = ls initial || ls prologueDrop || go body
-  go (RLoopContinue _ args postDrop) = ls args || ls postDrop
+  go (RLoop _ _ initial _ body) = ls initial || go body
+  go (RLoopContinue _ args _) = ls args
   go (RMemoize _ _ _ body) = go body
 
 ||| `renameNamesG` with the closures renamed as the other names are.
@@ -293,6 +293,9 @@ eqLs env [] [] = True
 eqLs env (x :: xs) (y :: ys) = eqL env x y && eqLs env xs ys
 eqLs _ _ _ = False
 
+eqIds : Env -> List LocalId -> List LocalId -> Bool
+eqIds env xs ys = eqLs env (map locOf xs) (map locOf ys)
+
 eqMaybeL : Env -> Maybe RCLocal -> Maybe RCLocal -> Bool
 eqMaybeL _ Nothing Nothing = True
 eqMaybeL env (Just x) (Just y) = eqL env x y
@@ -318,14 +321,14 @@ mutual
   eqE env (RAppName _ l1 n1 a1) (RAppName _ l2 n2 a2) =
       if eqLazy l1 l2 && eqName env n1 n2 && eqLs env a1 a2 then Just env else Nothing
   eqE env (RAppNameRep _ n1 ar1 rr1 pd1 a1) (RAppNameRep _ n2 ar2 rr2 pd2 a2) =
-      if eqName env n1 n2 && eqReps ar1 ar2 && eqRep rr1 rr2 && eqLs env pd1 pd2 && eqLs env a1 a2
+      if eqName env n1 n2 && eqReps ar1 ar2 && eqRep rr1 rr2 && eqIds env pd1 pd2 && eqLs env a1 a2
          then Just env else Nothing
   eqE env (RUnderApp _ n1 m1 a1) (RUnderApp _ n2 m2 a2) =
       if m1 == m2 && eqName env n1 n2 && eqLs env a1 a2 then Just env else Nothing
   eqE env (RDelay _ lr1 n1 c1) (RDelay _ lr2 n2 c2) =
       if show lr1 == show lr2 && eqName env n1 n2 && eqLs env c1 c2 then Just env else Nothing
   eqE env (RForce _ lr1 v1 pd1) (RForce _ lr2 v2 pd2) =
-      if show lr1 == show lr2 && eqL env v1 v2 && eqLs env pd1 pd2 then Just env else Nothing
+      if show lr1 == show lr2 && eqL env v1 v2 && eqIds env pd1 pd2 then Just env else Nothing
   eqE env (RApp _ l1 c1 a1) (RApp _ l2 c2 a2) =
       if eqLazy l1 l2 && eqL env c1 c2 && eqLs env (forget a1) (forget a2) then Just env else Nothing
   eqE env (RLet _ v1 r1 val1 b1) (RLet _ v2 r2 val2 b2) =
@@ -337,14 +340,14 @@ mutual
   eqE env (RRetPack _ n1 t1 f1) (RRetPack _ n2 t2 f2) =
       if n1 == n2 && t1 == t2 && eqLs env f1 f2 then Just env else Nothing
   eqE env (ROp _ l1 o1 a1 pd1) (ROp _ l2 o2 a2 pd2) =
-      if eqLazy l1 l2 && show o1 == show o2 && eqLs env (toList a1) (toList a2) && eqLs env pd1 pd2
+      if eqLazy l1 l2 && show o1 == show o2 && eqLs env (toList a1) (toList a2) && eqIds env pd1 pd2
          then Just env else Nothing
   eqE env (RExtPrim _ l1 p1 a1 pd1) (RExtPrim _ l2 p2 a2 pd2) =
-      if eqLazy l1 l2 && p1 == p2 && eqLs env a1 a2 && eqLs env pd1 pd2 then Just env else Nothing
+      if eqLazy l1 l2 && p1 == p2 && eqLs env a1 a2 && eqIds env pd1 pd2 then Just env else Nothing
   eqE env (RFill _ c1 k1 v1 pd1) (RFill _ c2 k2 v2 pd2) =
-      if k1 == k2 && eqL env c1 c2 && eqL env v1 v2 && eqLs env pd1 pd2 then Just env else Nothing
+      if k1 == k2 && eqL env c1 c2 && eqL env v1 v2 && eqIds env pd1 pd2 then Just env else Nothing
   eqE env (RCmpCase _ o1 a1 pd1 t1 e1) (RCmpCase _ o2 a2 pd2 t2 e2) =
-      if show (Subset.fst o1) == show (Subset.fst o2) && eqLs env (toList a1) (toList a2) && eqLs env pd1 pd2
+      if show (Subset.fst o1) == show (Subset.fst o2) && eqLs env (toList a1) (toList a2) && eqIds env pd1 pd2
          then eqE env t1 t2 >>= \env1 => eqE env1 e1 e2
          else Nothing
   eqE env (RConCase _ s1 alts1 d1) (RConCase _ s2 alts2 d2) =
@@ -362,11 +365,11 @@ mutual
   eqE env (RReuseOffer _ s1 d1 u1 b1) (RReuseOffer _ s2 d2 u2 b2) =
       if eqL env s1 s2 && eqLs env d1 d2 && eqLs env u1 u2 then eqE env b1 b2 else Nothing
   eqE env (RLoop _ ps1 i1 pd1 b1) (RLoop _ ps2 i2 pd2 b2) =
-      if eqLs env i1 i2 && eqLs env pd1 pd2 && eqReps (map snd ps1) (map snd ps2)
+      if eqLs env i1 i2 && eqIds env pd1 pd2 && eqReps (map snd ps1) (map snd ps2)
          then bindAll env (map fst ps1) (map fst ps2) >>= \env1 => eqE env1 b1 b2
          else Nothing
   eqE env (RLoopContinue _ a1 pd1) (RLoopContinue _ a2 pd2) =
-      if eqLs env a1 a2 && eqLs env pd1 pd2 then Just env else Nothing
+      if eqLs env a1 a2 && eqIds env pd1 pd2 then Just env else Nothing
   eqE _ _ _ = Nothing
 
   eqMaybe : Env -> Maybe RCExp -> Maybe RCExp -> Maybe Env

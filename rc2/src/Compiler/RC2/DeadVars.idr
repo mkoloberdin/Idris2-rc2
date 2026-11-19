@@ -159,9 +159,9 @@ dropAliasLets ren e =
          e'@(RLet _ x _ (RV _ _) body) => if isJust (lookup x ren) then body else e'
          e' => e'
 
-||| The `dup`s, `drop`s and `free`s that read a constant, and the constants
-||| in the `postDrop` lists, removed: they do nothing, and `Emit` reads those
-||| lists as variables only.
+||| The `dup`s, `drop`s and `free`s that read a constant, removed: they do
+||| nothing, and `Emit` reads their operands as variables only. (`postDrop` and
+||| `prologueDrop` list `LocalId`s, which a constant never is: `mapIds` drops it.)
 dropConstOwnership : RCExp -> RCExp
 dropConstOwnership e = clean (mapChildren dropConstOwnership e)
   where
@@ -174,17 +174,6 @@ dropConstOwnership e = clean (mapChildren dropConstOwnership e)
     clean (RDrop fc vs k) = case keep vs of
                                  [] => k
                                  vs' => RDrop fc vs' k
-    clean (ROp fc lz op args pd) = ROp fc lz op args (keep pd)
-    clean (RExtPrim fc lz p args pd) = RExtPrim fc lz p args (keep pd)
-    clean (RStructGet fc sv sf pd) = RStructGet fc sv sf (keep pd)
-    clean (RStructSet fc sv sf value pd) = RStructSet fc sv sf value (keep pd)
-    clean (RFill fc cell k value pd) = RFill fc cell k value (keep pd)
-    clean (RForce fc lr v pd) = RForce fc lr v (keep pd)
-    clean (RCmpCase fc op args pd t f) = RCmpCase fc op args (keep pd) t f
-    clean (RAppNameRep {sameLen} fc n argReps retRep pd args) = RAppNameRep fc n argReps retRep (keep pd) args
-    clean (RAppFFIInline fc ccs fargs ret pd args) = RAppFFIInline fc ccs fargs ret (keep pd) args
-    clean (RLoopContinue fc args pd) = RLoopContinue fc args (keep pd)
-    clean (RLoop {sameLen} fc ps initial pd k) = RLoop fc ps initial (keep pd) k
     clean e' = e'
 
 ||| The ids that occur more than once in `ids`.

@@ -87,14 +87,14 @@ nativeBound args body = union (fromList (mapMaybe nativeParam args)) (go body)
 ||| in `postDrop`, and then the callee may free it -- and a field of it
 ||| -- while still reading `v`, which is exactly what a `dup v` in front
 ||| guards against.
-readsOnly : SortedSet Int -> List RCLocal -> List RCLocal -> Bool
+readsOnly : SortedSet Int -> List RCLocal -> List LocalId -> Bool
 readsOnly ns args pd = all ok args
   where
-    occurrences : RCLocal -> List RCLocal -> Nat
+    occurrences : Eq a => a -> List a -> Nat
     occurrences x xs = length (filter (== x) xs)
 
     ok : RCLocal -> Bool
-    ok x@(RCLoc i) = contains i ns || contains (nullBoundKey i) ns || occurrences x args <= occurrences x pd
+    ok x@(RCLoc i) = contains i ns || contains (nullBoundKey i) ns || occurrences x args <= occurrences (MkLocalId i) pd
     ok _ = True
 
 ||| The `postDrop` list of the first node after a run of `RDup`s, with
@@ -109,7 +109,7 @@ readsOnly ns args pd = all ok args
 ||| the node may be the value of a `let` whose own `RDup`s lead it,
 ||| unless that `let` is `RInlineNative` (its node is spliced at the one
 ||| use site, possibly past another consumer of the local).
-findPostDrop : SortedSet Int -> RCExp -> Maybe (List RCLocal, List RCLocal -> RCExp)
+findPostDrop : SortedSet Int -> RCExp -> Maybe (List LocalId, List LocalId -> RCExp)
 findPostDrop ns (RDup fc w extra body) =
     (\(pd, set) => (pd, \pd' => RDup fc w extra (set pd'))) <$> findPostDrop ns body
 findPostDrop ns (RLet fc x rep value body) =
@@ -133,7 +133,7 @@ spanDups : RCExp -> (List (FC, RCLocal, Nat), RCExp)
 spanDups (RDup fc v extra body) = let (ds, rest) = spanDups body in ((fc, v, extra) :: ds, rest)
 spanDups e = ([], e)
 
-dropN : Nat -> RCLocal -> List RCLocal -> List RCLocal
+dropN : Nat -> LocalId -> List LocalId -> List LocalId
 dropN Z _ pd = pd
 dropN (S k) v pd = dropN k v (delete v pd)
 
@@ -159,12 +159,14 @@ cancelRun ns e =
                       else Just (foldl (\acc, (fc, v, x) => RDup fc v x acc) (set pd') kept)
   where
     -- `extra` is the count MINUS one.
-    step : (List (FC, RCLocal, Nat), List RCLocal) -> (FC, RCLocal, Nat) -> (List (FC, RCLocal, Nat), List RCLocal)
-    step (kept, pd) d@(fc, v, x) =
-        let k = min (S x) (length (filter (== v) pd))
-        in if k == 0 then (d :: kept, pd)
-           else if k == S x then (kept, dropN k v pd)
-           else ((fc, v, minus x k) :: kept, dropN k v pd)
+    step : (List (FC, RCLocal, Nat), List LocalId) -> (FC, RCLocal, Nat) -> (List (FC, RCLocal, Nat), List LocalId)
+    step (kept, pd) d@(fc, v, x) = case idOf v of
+        Nothing => (d :: kept, pd)
+        Just i =>
+            let k = min (S x) (length (filter (== i) pd))
+            in if k == 0 then (d :: kept, pd)
+               else if k == S x then (kept, dropN k i pd)
+               else ((fc, v, minus x k) :: kept, dropN k i pd)
 
 ||| Renames `x` to `w` in the first `RDrop` naming `x` through a run of
 ||| `RDup`/`RDrop`, for `cancelDupDrop`'s alias case: `let x = w` just

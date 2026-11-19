@@ -52,7 +52,7 @@ paramDeps p = go
         concat <$> traverse go (map (\(MkRConAlt _ _ _ _ b) => b) alts ++ maybe [] pure mDef)
     go (RAppName _ lazy g args) =
         if isJust lazy then (if any isP args then Nothing else Just []) else Just (positions g args)
-    go (RAppNameRep _ g _ _ pd args) = if any isP pd then Nothing else Just (positions g args)
+    go (RAppNameRep _ g _ _ pd args) = if any isP (map locOf pd) then Nothing else Just (positions g args)
     go e = if any isP (directReads e) then Nothing else concat <$> traverse go (children e)
 
 ||| The parameters no callee lets escape (a greatest fixed point: a parameter
@@ -106,7 +106,7 @@ kept params b = go
     go (RReuseOffer _ sc ds us k) = not (isB sc || any isB ds || any isB us) && go k
     go (RConCase _ _ alts mDef) = all go (map (\(MkRConAlt _ _ _ _ body) => body) alts ++ maybe [] pure mDef)
     go (RAppName _ lazy g args) = if any isB args then isNothing lazy && toParams g args else True
-    go (RAppNameRep _ g _ _ pd args) = not (any isB pd) && toParams g args
+    go (RAppNameRep _ g _ _ pd args) = not (any isB (map locOf pd)) && toParams g args
     go e = not (any isB (directReads e)) && all go (children e)
 
 ||| For the parameter `p`: the field positions whose binder, in a `case` on `p`, leaves the
@@ -200,7 +200,7 @@ rewriteUses ok v fs = go
 
     takesV : RCExp -> Bool
     takesV (RAppName _ _ _ args) = any isV args
-    takesV (RAppNameRep _ _ _ _ pd args) = any isV (pd ++ args)
+    takesV (RAppNameRep _ _ _ _ pd args) = any isV (map locOf pd ++ args)
     takesV _ = False
 
     okCall : RCExp -> Maybe ()
@@ -208,7 +208,7 @@ rewriteUses ok v fs = go
         i <- argIndex args
         guard (contains (g, i) ok.params)
     okCall (RAppNameRep _ g _ _ pd args) = do
-        guard (not (any isV pd))
+        guard (not (any isV (map locOf pd)))
         i <- argIndex args
         guard (contains (g, i) ok.params)
     okCall _ = Nothing
@@ -236,7 +236,7 @@ rewriteUses ok v fs = go
             (not (isY sc) || all unbound alts)
               && all keep (map (\(MkRConAlt _ _ _ _ b) => b) alts ++ maybe [] pure mDef)
         keep (RAppName _ _ g args) = not (any isY args) || toFields g args
-        keep (RAppNameRep _ g _ _ pd args) = not (any isY pd) && (not (any isY args) || toFields g args)
+        keep (RAppNameRep _ g _ _ pd args) = not (any isY (map locOf pd)) && (not (any isY args) || toFields g args)
         keep e = not (any isY (directReads e)) && all keep (children e)
 
     peelWrappers : RCExp -> Maybe (RCExp -> RCExp, RCExp)

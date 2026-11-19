@@ -66,7 +66,7 @@ genuinelyUsedR (RReleaseReuse _ _ body) = genuinelyUsedR body
 genuinelyUsedR (RReuseOffer _ sc dupOnShared dropOnUnique body) =
     union (insert sc (fromList dupOnShared `union` fromList dropOnUnique)) (genuinelyUsedR body)
 genuinelyUsedR (RLoop _ _ initial _ body) = union (fromList initial) (genuinelyUsedR body)
-genuinelyUsedR (RLoopContinue _ args postDrop) = union (fromList args) (fromList postDrop)
+genuinelyUsedR (RLoopContinue _ args postDrop) = union (fromList args) (fromList (map locOf postDrop))
 genuinelyUsedR _ = empty
 
 ||| Strips every occurrence of `var` from any `RDrop`'s own `vars` list
@@ -120,8 +120,8 @@ consumedOperands reps = go []
     -- self-contained, not something the branch we don't sink into owes a
     -- compensating drop for; `spend` cancels one `dup` per occurrence, so
     -- an operand read twice after one `dup` still owes one drop.
-    go dupped (ROp _ _ _ _ postDrop) = spend dupped postDrop
-    go dupped (RStructGet _ _ _ postDrop) = spend dupped postDrop
+    go dupped (ROp _ _ _ _ postDrop) = spend dupped (map locOf postDrop)
+    go dupped (RStructGet _ _ _ postDrop) = spend dupped (map locOf postDrop)
     -- The call spends one reference per Boxed operand; each one a leading
     -- `dup` already added (one per unit of its count) is self-contained,
     -- exactly like the RCon/ROp cases (doc/branch-sinking.md, "Sinking a

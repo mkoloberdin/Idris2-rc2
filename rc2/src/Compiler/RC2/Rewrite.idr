@@ -85,19 +85,19 @@ mutual
   mapLocalsRCExp f g (RRetPack fc n tag fields) = RRetPack fc n tag (map f fields)
   mapLocalsRCExp f g (RStackCon fc n ci tag args) = RStackCon fc n ci tag (map f args)
   mapLocalsRCExp f g (ROp fc lazy op args postDrop) =
-      ROp fc lazy op (map f args) (map f postDrop)
+      ROp fc lazy op (map f args) (mapIds f postDrop)
   mapLocalsRCExp f g (RExtPrim fc lazy p args postDrop) =
-      RExtPrim fc lazy p (map f args) (map f postDrop)
+      RExtPrim fc lazy p (map f args) (mapIds f postDrop)
   mapLocalsRCExp f g (RStructGet fc structVar sf postDrop) =
-      RStructGet fc (f structVar) sf (map f postDrop)
+      RStructGet fc (f structVar) sf (mapIds f postDrop)
   mapLocalsRCExp f g (RForce fc lr v postDrop) =
-      RForce fc lr (f v) (map f postDrop)
+      RForce fc lr (f v) (mapIds f postDrop)
   mapLocalsRCExp f g (RStructSet fc structVar sf value postDrop) =
-      RStructSet fc (f structVar) sf (f value) (map f postDrop)
+      RStructSet fc (f structVar) sf (f value) (mapIds f postDrop)
   mapLocalsRCExp f g (RFill fc cell k value postDrop) =
-      RFill fc (f cell) k (f value) (map f postDrop)
+      RFill fc (f cell) k (f value) (mapIds f postDrop)
   mapLocalsRCExp f g (RCmpCase fc op args postDrop whenTrue whenFalse) =
-      RCmpCase fc op (map f args) (map f postDrop) (mapLocalsRCExp f g whenTrue) (mapLocalsRCExp f g whenFalse)
+      RCmpCase fc op (map f args) (mapIds f postDrop) (mapLocalsRCExp f g whenTrue) (mapLocalsRCExp f g whenFalse)
   mapLocalsRCExp f g (RConCase fc sc alts mDef) =
       RConCase fc (f sc) (map (mapLocalsConAlt f g) alts) (map (mapLocalsRCExp f g) mDef)
   mapLocalsRCExp f g (RConstCase fc sc alts mDef) =
@@ -118,8 +118,8 @@ mutual
   -- pass-through) rather than assumed unreachable, same reasoning as
   -- RC.idr's own `annotate`.
   mapLocalsRCExp f g (RLoop {sameLen} fc loopParams initial prologueDrop body) =
-      mapLoop fc loopParams initial (\(i, r) => (g i, r)) f (map f prologueDrop) (mapLocalsRCExp f g body)
-  mapLocalsRCExp f g (RLoopContinue fc args postDrop) = RLoopContinue fc (map f args) (map f postDrop)
+      mapLoop fc loopParams initial (\(i, r) => (g i, r)) f (mapIds f prologueDrop) (mapLocalsRCExp f g body)
+  mapLocalsRCExp f g (RLoopContinue fc args postDrop) = RLoopContinue fc (map f args) (mapIds f postDrop)
   -- Never actually reached in practice -- Compiler.RC2.DualABI, the
   -- sole producer of RAppNameRep, runs strictly after both this
   -- module and Compiler.RC2.MutualLoop (the only two callers of
@@ -127,14 +127,14 @@ mutual
   -- pass-through) rather than assumed unreachable, same reasoning as
   -- this function's own RLoop case just above.
   mapLocalsRCExp f g (RAppNameRep {sameLen} fc n argReps retRep postDrop args) =
-      mapRepCallArgs fc n argReps retRep (map f postDrop) args f
+      mapRepCallArgs fc n argReps retRep (mapIds f postDrop) args f
   -- Never actually reached in practice, same reasoning as RAppNameRep
   -- just above -- Compiler.RC2.DualABI's own FFI-inline pass runs even
   -- later than RAppNameRep's own producer (Stage 4), strictly after
   -- both this module and Compiler.RC2.MutualLoop have already
   -- finished.
   mapLocalsRCExp f g (RAppFFIInline fc ccs fargs ret postDrop args) =
-      RAppFFIInline fc ccs fargs ret (map f postDrop) (map f args)
+      RAppFFIInline fc ccs fargs ret (mapIds f postDrop) (map f args)
   -- Never actually reached in practice -- RMemoize only ever wraps a
   -- 0-argument CAF's own whole body (doc/caf-memoization.md), and this
   -- module's own applyLoop only ever runs on a definition with real
@@ -163,6 +163,10 @@ keepUnlessOwned : SortedSet Int -> RCLocal -> Bool
 keepUnlessOwned ids (RCLoc i) = not (contains i ids)
 keepUnlessOwned _ _ = True
 
+||| `keepUnlessOwned` for the ids a `postDrop` or `prologueDrop` lists.
+keepIdUnlessOwned : SortedSet Int -> LocalId -> Bool
+keepIdUnlessOwned ids i = not (contains i.num ids)
+
 ||| Remove every `RDup`/`RDrop`/`RFree` target, and every `ROp`/`RCmpCase`
 ||| `postDrop` entry, naming one of `ids`. Precondition: every value-reading
 ||| occurrence of each id is already native. `RCon` fields, case scrutinees and
@@ -183,9 +187,9 @@ stripOwnership ids (RFree fc v body) =
 stripOwnership ids (RLet fc var rep value body) =
     RLet fc var rep (stripOwnership ids value) (stripOwnership ids body)
 stripOwnership ids (ROp fc lazy op args postDrop) =
-    ROp fc lazy op args (filter (keepUnlessOwned ids) postDrop)
+    ROp fc lazy op args (filter (keepIdUnlessOwned ids) postDrop)
 stripOwnership ids (RCmpCase fc op args postDrop t f) =
-    RCmpCase fc op args (filter (keepUnlessOwned ids) postDrop)
+    RCmpCase fc op args (filter (keepIdUnlessOwned ids) postDrop)
       (stripOwnership ids t) (stripOwnership ids f)
 stripOwnership ids (RConCase fc sc alts mDef) =
     RConCase fc sc (map (\(MkRConAlt n ci tag as body) => MkRConAlt n ci tag as (stripOwnership ids body)) alts)
@@ -196,7 +200,7 @@ stripOwnership ids (RConstCase fc sc alts mDef) =
 stripOwnership ids (RReleaseReuse fc v body) = RReleaseReuse fc v (stripOwnership ids body)
 stripOwnership ids (RReuseOffer fc sc dupOnShared dropOnUnique body) = RReuseOffer fc sc dupOnShared dropOnUnique (stripOwnership ids body)
 stripOwnership ids (RLoopContinue fc args postDrop) =
-    RLoopContinue fc args (filter (keepUnlessOwned ids) postDrop)
+    RLoopContinue fc args (filter (keepIdUnlessOwned ids) postDrop)
 -- Unlike every other case in this module, `RLoop` genuinely does show up
 -- here: `Compiler.RC2.DualABI`'s own `synthesizeWorker` calls this
 -- function over a whole worker body that may already be `RLoop`-wrapped
@@ -210,22 +214,22 @@ stripOwnership ids (RLoopContinue fc args postDrop) =
 -- worker's own rendering at all.
 stripOwnership ids (RLoop {sameLen} fc loopParams initial prologueDrop body) =
     RLoop fc loopParams initial
-      (filter (keepUnlessOwned ids) prologueDrop)
+      (filter (keepIdUnlessOwned ids) prologueDrop)
       (stripOwnership ids body)
 stripOwnership ids (RStructGet fc structVar sf postDrop) =
-    RStructGet fc structVar sf (filter (keepUnlessOwned ids) postDrop)
+    RStructGet fc structVar sf (filter (keepIdUnlessOwned ids) postDrop)
 stripOwnership ids (RForce fc lr v postDrop) =
-    RForce fc lr v (filter (keepUnlessOwned ids) postDrop)
+    RForce fc lr v (filter (keepIdUnlessOwned ids) postDrop)
 stripOwnership ids (RStructSet fc structVar sf value postDrop) =
-    RStructSet fc structVar sf value (filter (keepUnlessOwned ids) postDrop)
+    RStructSet fc structVar sf value (filter (keepIdUnlessOwned ids) postDrop)
 stripOwnership ids (RFill fc cell k value postDrop) =
-    RFill fc cell k value (filter (keepUnlessOwned ids) postDrop)
+    RFill fc cell k value (filter (keepIdUnlessOwned ids) postDrop)
 -- A worker call made before the promotion (struct return, doc/struct-return.md)
 -- already lists its Boxed arguments in `postDrop`.
 stripOwnership ids (RAppNameRep {sameLen} fc n argReps retRep postDrop args) =
-    RAppNameRep fc n argReps retRep (filter (keepUnlessOwned ids) postDrop) args
+    RAppNameRep fc n argReps retRep (filter (keepIdUnlessOwned ids) postDrop) args
 stripOwnership ids (RExtPrim fc lazy p args postDrop) =
-    RExtPrim fc lazy p args (filter (keepUnlessOwned ids) postDrop)
+    RExtPrim fc lazy p args (filter (keepIdUnlessOwned ids) postDrop)
 -- RV, RAppName, RUnderApp, RApp, RCon, RPrimVal, RErased, RCrash: no
 -- ownership-tracking positions of their own.
 stripOwnership _ e = e

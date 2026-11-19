@@ -274,7 +274,7 @@ hasNonNativeUse ty loopSlots target (RLet _ _ _ value body) =
     hasNonNativeUse ty loopSlots target value || hasNonNativeUse ty loopSlots target body
 hasNonNativeUse ty loopSlots target (RCon _ _ _ _ args reuseFrom) = elem (RCLoc target) args || reuseFrom == Just (RCLoc target)
 hasNonNativeUse ty loopSlots target (ROp {}) = False -- postDrop-only; stale, stripOwnership handles it
-hasNonNativeUse ty loopSlots target (RExtPrim _ _ _ args postDrop) = elem (RCLoc target) args || elem (RCLoc target) postDrop
+hasNonNativeUse ty loopSlots target (RExtPrim _ _ _ args postDrop) = elem (RCLoc target) args || elem (MkLocalId target) postDrop
 -- Unlike ROp/RCmpCase/..., stripOwnership never touches RExtPrim's own postDrop -- a genuine use here.
 hasNonNativeUse ty loopSlots target (RStructGet _ structVar _ _) = structVar == RCLoc target
 hasNonNativeUse ty loopSlots target (RDelay _ _ _ caps) = elem (RCLoc target) caps
