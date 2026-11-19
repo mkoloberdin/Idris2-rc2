@@ -584,6 +584,7 @@ void idris2rc2_poolFree(void *c) {
     IDRIS2RC2_VERIFY(!(hd->rc == 0xDEAD && hd->reserved == 0xDE), "cell pool: double release of %p", c);
     IDRIS2RC2_VERIFY(((char *)c - pg->base) % pg->cellSize == 0, "cell pool: %p is not a cell boundary", c);
     hd->rc = 0xDEAD;
+    // Has IDRIS2RC2_HDR_POOLED, so a second release still comes here.
     hd->reserved = 0xDE;
     fillBody(c, pg->cellSize);
   }

@@ -54,8 +54,15 @@ typedef struct {
     uint16_t rc;
   };
   uint8_t tag;
-  uint8_t reserved;
+  uint8_t reserved; // IDRIS2RC2_HDR_* bits
 } IDRIS2RC2_Header;
+
+// `header.reserved` (rc2/doc/constructor-layout.md, "The reserved byte").
+// FLAG means what its tag says: a String's bytes share its allocation, a
+// lazy value is evaluated. POOLED: the cell came from the pool, so its
+// release goes back there instead of to free().
+#define IDRIS2RC2_HDR_FLAG 0x01
+#define IDRIS2RC2_HDR_POOLED 0x80
 
 #define IDRIS2RC2_STOCKVAL(t) \
   { {IDRIS2RC2_REFCOUNT_MAX}, (t), 0 }
@@ -338,8 +345,8 @@ IDRIS2RC2_DEFINE_CONST_CLOSURE_ARGS(20)
 // A lazy value (rc2/doc/lazy-memoization.md) is this struct too, tagged
 // IDRIS2RC2_TAG_LAZY, and uses only `av`: a saturated closure until the
 // first force stores the value, which is written once and then only read,
-// so a forced cell is read without the lock. `header.reserved` is 1 once
-// the value is stored. An IORef uses only `v`; no object mixes the two.
+// so a forced cell is read without the lock. `header.reserved` has
+// IDRIS2RC2_HDR_FLAG once the value is stored. An IORef uses only `v`; no object mixes the two.
 typedef struct {
   IDRIS2RC2_Header header;
   atomic_flag lock;

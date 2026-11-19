@@ -41,7 +41,7 @@ IDRIS2RC2_Value *idris2rc2_cellAlloc(size_t size) {
   IDRIS2RC2_Value *v = (IDRIS2RC2_Value *)idris2rc2_poolAlloc(k);
   v->header.rc = 1;
   v->header.tag = IDRIS2RC2_TAG_NONE;
-  v->header.reserved = 0;
+  v->header.reserved = IDRIS2RC2_HDR_POOLED;
   return v;
 }
 
@@ -134,7 +134,7 @@ static IDRIS2RC2_String *idris2rc2_allocString(size_t len) {
   uint32_t const checked = idris2rc2_checkedStrLen(len);
   IDRIS2RC2_String *v = (IDRIS2RC2_String *)idris2rc2_alloc(sizeof(IDRIS2RC2_String) + len + 1);
   v->header.tag = IDRIS2RC2_TAG_STRING;
-  v->header.reserved = 1;
+  v->header.reserved = IDRIS2RC2_HDR_FLAG;
   v->len = checked;
   v->str = (char *)(v + 1);
   return v;
@@ -212,9 +212,11 @@ IDRIS2RC2_Array *idris2rc2_mkArray(int length) {
 // Not a general worklist: that cost 5-7% more instructions on a
 // free-heavy benchmark, since every teardown paid to set it up; this
 // loop costs 1.4% (`perf stat`, 2026-09-26).
+#define IDRIS2RC2_TAGS_WITH_CHILDREN \
+  ((1ull << IDRIS2RC2_TAG_CONSTRUCTOR) | (1ull << IDRIS2RC2_TAG_CLOSURE) | (1ull << IDRIS2RC2_TAG_LAZY))
+_Static_assert(IDRIS2RC2_TAG_LAZY < 64, "every tag is a bit of a 64-bit mask");
 static inline int idris2rc2_hasChildren(IDRIS2RC2_Value *v) {
-  return v->header.tag == IDRIS2RC2_TAG_CONSTRUCTOR || v->header.tag == IDRIS2RC2_TAG_CLOSURE ||
-         v->header.tag == IDRIS2RC2_TAG_LAZY;
+  return (IDRIS2RC2_TAGS_WITH_CHILDREN >> v->header.tag) & 1;
 }
 
 // Whether dropping `v` released its last reference, like idris2rc2_drop
@@ -231,8 +233,20 @@ static inline int idris2rc2_releaseLast(IDRIS2RC2_Value *v) {
 // a value the caller has *statically* proven has no other references.
 void idris2rc2_teardown(IDRIS2RC2_Value *v) {
   IDRIS2RC2_Value *next;
+  IDRIS2RC2_Value **args;
+  int n;
 again:
   next = NULL;
+  // The commonest tag by far, tested before the switch's indirect jump.
+  // Constructors and closures share the one loop over the fields below. No
+  // __builtin_expect: with it gcc took the other tags for cold and stopped
+  // inlining idris2rc2_releaseLast and idris2rc2_drop (5-6% more cycles on
+  // the list benchmarks, 2026-11-19).
+  if (v->header.tag == IDRIS2RC2_TAG_CONSTRUCTOR) {
+    args = ((IDRIS2RC2_Constructor *)v)->args;
+    n = ((IDRIS2RC2_Constructor *)v)->arity;
+    goto fields;
+  }
   switch (v->header.tag) {
   case IDRIS2RC2_TAG_BITS32:
   case IDRIS2RC2_TAG_BITS64:
@@ -244,31 +258,21 @@ again:
     mpz_clear(((IDRIS2RC2_Integer *)v)->v);
     break;
   case IDRIS2RC2_TAG_STRING:
-    if (!v->header.reserved)
+    if (!(v->header.reserved & IDRIS2RC2_HDR_FLAG))
       free(((IDRIS2RC2_String *)v)->str);
     break;
-  case IDRIS2RC2_TAG_CLOSURE: {
-    IDRIS2RC2_Closure *c = (IDRIS2RC2_Closure *)v;
-    for (int i = 0; i < c->filled; ++i)
-      if (idris2rc2_releaseLast(c->args[i])) {
-        if (!next && idris2rc2_hasChildren(c->args[i]))
-          next = c->args[i];
+  case IDRIS2RC2_TAG_CLOSURE:
+    args = ((IDRIS2RC2_Closure *)v)->args;
+    n = ((IDRIS2RC2_Closure *)v)->filled;
+  fields:
+    for (int i = 0; i < n; ++i)
+      if (idris2rc2_releaseLast(args[i])) {
+        if (!next && idris2rc2_hasChildren(args[i]))
+          next = args[i];
         else
-          idris2rc2_teardown(c->args[i]);
+          idris2rc2_teardown(args[i]);
       }
     break;
-  }
-  case IDRIS2RC2_TAG_CONSTRUCTOR: {
-    IDRIS2RC2_Constructor *c = (IDRIS2RC2_Constructor *)v;
-    for (int i = 0; i < c->arity; ++i)
-      if (idris2rc2_releaseLast(c->args[i])) {
-        if (!next && idris2rc2_hasChildren(c->args[i]))
-          next = c->args[i];
-        else
-          idris2rc2_teardown(c->args[i]);
-      }
-    break;
-  }
   case IDRIS2RC2_TAG_IOREF:
     idris2rc2_drop(((IDRIS2RC2_IORef *)v)->v);
     break;

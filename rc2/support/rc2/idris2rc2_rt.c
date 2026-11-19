@@ -554,7 +554,6 @@ char const idris2rc2_constr__percentWorld[] = "%World";
 IDRIS2RC2_Value *idris2rc2_mkLazy(IDRIS2RC2_Value *thunk) {
   IDRIS2RC2_IORef *c = IDRIS2RC2_NEW_CELL(IDRIS2RC2_IORef);
   c->header.tag = IDRIS2RC2_TAG_LAZY;
-  c->header.reserved = 0;
   atomic_flag_clear(&c->lock);
   atomic_init(&c->av, thunk);
   return (IDRIS2RC2_Value *)c;
@@ -610,7 +609,7 @@ IDRIS2RC2_Value *idris2rc2_force(IDRIS2RC2_Value *v) {
   // Evaluated: the value is written once and stays while the cell lives.
   // Decided by the cell's own flag, never by looking at `v`: an
   // unevaluated `v` is a closure another thread may free at any moment.
-  if (__atomic_load_n(&c->header.reserved, __ATOMIC_ACQUIRE))
+  if (__atomic_load_n(&c->header.reserved, __ATOMIC_ACQUIRE) & IDRIS2RC2_HDR_FLAG)
     return idris2rc2_dup(atomic_load_explicit(&c->av, memory_order_relaxed));
 
   if (forcingHere(c)) {
@@ -623,7 +622,7 @@ IDRIS2RC2_Value *idris2rc2_force(IDRIS2RC2_Value *v) {
   // released another thread may store a result and drop the cell's.
   idris2rc2_spin_lock(&c->lock);
   IDRIS2RC2_Value *x = atomic_load_explicit(&c->av, memory_order_relaxed);
-  if (c->header.reserved) {
+  if (c->header.reserved & IDRIS2RC2_HDR_FLAG) {
     IDRIS2RC2_Value *r = idris2rc2_dup(x);
     idris2rc2_spin_unlock(&c->lock);
     return r;
@@ -639,9 +638,9 @@ IDRIS2RC2_Value *idris2rc2_force(IDRIS2RC2_Value *v) {
   popForcing();
 
   idris2rc2_spin_lock(&c->lock);
-  if (!c->header.reserved) {
+  if (!(c->header.reserved & IDRIS2RC2_HDR_FLAG)) {
     atomic_store_explicit(&c->av, idris2rc2_dup(r), memory_order_relaxed);
-    __atomic_store_n(&c->header.reserved, 1, __ATOMIC_RELEASE);
+    __atomic_fetch_or(&c->header.reserved, IDRIS2RC2_HDR_FLAG, __ATOMIC_RELEASE);
     idris2rc2_spin_unlock(&c->lock);
     idris2rc2_drop(x); // the cell's reference
   } else {

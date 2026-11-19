@@ -7,46 +7,27 @@
 IDRIS2RC2_Value *idris2rc2_alloc(size_t size);
 #define IDRIS2RC2_NEW(t) ((t *)idris2rc2_alloc(sizeof(t)))
 
-// The allocation entry of the cell types, which are the tags idris2rc2_cellPooled
-// (below) lists and must be kept in step with; every other type uses
-// idris2rc2_alloc. The two are split so that a cell allocator can take over the
+// The allocation entry of the cell types (the tags idris2rc2_cellBytes below
+// lists, for the check mode); every other type uses idris2rc2_alloc. The two are split so that a cell allocator can take over the
 // cells alone: rc2/doc/small-object-allocator.md. A cell is released with
 // idris2rc2_cellFree (NULL allowed), never with a bare free().
 IDRIS2RC2_Value *idris2rc2_cellAlloc(size_t size);
 #define IDRIS2RC2_NEW_CELL(t) ((t *)idris2rc2_cellAlloc(sizeof(t)))
 void idris2rc2_cellFree(void *cell);
 
-// The sizes of the two cells that vary, and what ties the allocation to the
-// release: both decide pool or malloc from these (idris2rc2_poolClass of the size).
+// The sizes of the two cells that vary: the allocation decides pool or malloc
+// from these (idris2rc2_poolClass of the size).
 #define IDRIS2RC2_CON_BYTES(arity, tag) \
   (sizeof(IDRIS2RC2_Constructor) + sizeof(IDRIS2RC2_Value *) * ((arity) + ((tag) < 0 ? 1 : 0)))
 #define IDRIS2RC2_CLOSURE_BYTES(arity) (sizeof(IDRIS2RC2_Closure) + sizeof(IDRIS2RC2_Value *) * (arity))
 _Static_assert(sizeof(IDRIS2RC2_IORef) <= IDRIS2RC2_POOL_MAX_CELL && sizeof(IDRIS2RC2_Int64) <= IDRIS2RC2_POOL_MAX_CELL &&
                    sizeof(IDRIS2RC2_Bits64) <= IDRIS2RC2_POOL_MAX_CELL && sizeof(IDRIS2RC2_Double) <= IDRIS2RC2_POOL_MAX_CELL &&
                    sizeof(IDRIS2RC2_GCPointer) <= IDRIS2RC2_POOL_MAX_CELL,
-               "the fixed-size cells are in the pool (idris2rc2_cellPooled)");
+               "the fixed-size cells fit in the pool");
 
-// Whether a cell was taken from the pool: idris2rc2_cellAlloc's decision again,
-// from the tag and the arity (a size of at most 128 bytes, and the pool on).
+// Whether a cell was taken from the pool, as its allocation recorded it.
 static inline bool idris2rc2_cellPooled(IDRIS2RC2_Value *v) {
-  if (__builtin_expect(!idris2rc2_poolOn, 0)) return false;
-  switch (v->header.tag) {
-  case IDRIS2RC2_TAG_CONSTRUCTOR: {
-    IDRIS2RC2_Constructor *c = (IDRIS2RC2_Constructor *)v;
-    return idris2rc2_poolClass(IDRIS2RC2_CON_BYTES(c->arity, c->tag)) >= 0;
-  }
-  case IDRIS2RC2_TAG_CLOSURE:
-    return idris2rc2_poolClass(IDRIS2RC2_CLOSURE_BYTES(((IDRIS2RC2_Closure *)v)->arity)) >= 0;
-  case IDRIS2RC2_TAG_IOREF:
-  case IDRIS2RC2_TAG_LAZY:
-  case IDRIS2RC2_TAG_INT64:
-  case IDRIS2RC2_TAG_BITS64:
-  case IDRIS2RC2_TAG_DOUBLE:
-  case IDRIS2RC2_TAG_GCPOINTER:
-    return true;
-  default:
-    return false;
-  }
+  return v->header.reserved & IDRIS2RC2_HDR_POOLED;
 }
 
 #ifdef IDRIS2RC2_POOL_CHECK
@@ -208,15 +189,17 @@ void idris2rc2_free(IDRIS2RC2_Value *v);
 
 // A cell whose size is known where it is made: the pool class is a constant
 // there, and the allocation is the pop of a free list, inline in the generated C
-// (rc2/doc/small-object-allocator.md, stage 2). With the pool off, the slow
-// path hands out a malloc'd cell.
+// (rc2/doc/small-object-allocator.md, stage 2). An empty free list, and the
+// pool off, go to idris2rc2_cellAlloc, which writes the header of what it
+// hands out itself: a malloc'd cell must not be marked pooled.
 static inline IDRIS2RC2_Value *idris2rc2_cellAllocInline(size_t size) {
   int k = idris2rc2_poolClass(size);
   if (__builtin_expect(k < 0, 0)) return idris2rc2_cellAlloc(size);
-  IDRIS2RC2_Value *v = (IDRIS2RC2_Value *)idris2rc2_poolAlloc(k);
+  IDRIS2RC2_Value *v = (IDRIS2RC2_Value *)idris2rc2_poolTryAlloc(k);
+  if (__builtin_expect(v == NULL, 0)) return idris2rc2_cellAlloc(size);
   v->header.rc = 1;
   v->header.tag = IDRIS2RC2_TAG_NONE;
-  v->header.reserved = 0;
+  v->header.reserved = IDRIS2RC2_HDR_POOLED;
   return v;
 }
 

@@ -115,7 +115,9 @@ static inline void idris2rc2_poolFreeInline(void *cell) {
     idris2rc2_poolAfter(h, pg);
 }
 
-static inline void *idris2rc2_poolAlloc(int klass) {
+// The pop of the free list of the page being allocated from, or NULL when it
+// is empty. With the pool off it is always NULL: no page has a free list.
+static inline void *idris2rc2_poolTryAlloc(int klass) {
   idris2rc2_Page *pg = idris2rc2_tlHeap->direct[klass];
   void *c = pg->free;
   if (__builtin_expect(c != NULL, 1)) {
@@ -124,7 +126,13 @@ static inline void *idris2rc2_poolAlloc(int klass) {
 #ifdef IDRIS2RC2_POOL_CHECK
     idris2rc2_poolCheckAlloc(c, klass);
 #endif
-    return c;
   }
+  return c;
+}
+
+static inline void *idris2rc2_poolAlloc(int klass) {
+  void *c = idris2rc2_poolTryAlloc(klass);
+  if (__builtin_expect(c != NULL, 1))
+    return c;
   return idris2rc2_poolAllocSlow(klass);
 }
