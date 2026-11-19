@@ -184,11 +184,11 @@ record RepFwd where
 repForwarders : List (Name, RCDef) -> SortedMap Name RepFwd
 repForwarders defs = SortedMap.fromList (mapMaybe target defs)
   where
-    okAt : List (Int, Rep) -> (Slot, Rep) -> Bool
+    okAt : List (LocalId, Rep) -> (Slot, Rep) -> Bool
     okAt args (Param j, r) = maybe False (\pr => sameRep (snd pr) r) (getAt j args)
     okAt _ (Fixed _, _) = True
 
-    paramRepsOk : List (Int, Rep) -> List Slot -> List Rep -> Bool
+    paramRepsOk : List (LocalId, Rep) -> List Slot -> List Rep -> Bool
     paramRepsOk args ss reps = all (okAt args) (zip ss reps)
 
     target : (Name, RCDef) -> Maybe (Name, RepFwd)

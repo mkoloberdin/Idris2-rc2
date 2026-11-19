@@ -52,15 +52,15 @@ takeDropInRun v (RDrop fc vs body) =
 takeDropInRun _ _ = Nothing
 
 ||| Where `nativeBound` lists a `let` bound to a `NULL` value.
-nullBoundKey : Int -> Int
-nullBoundKey i = negate i - 1
+nullBoundKey : LocalId -> LocalId
+nullBoundKey i = MkLocalId (negate i.num - 1)
 
 ||| The locals bound with a native `Rep` (a parameter, a `let`, a loop
 ||| parameter): no reference count, never named by a `postDrop`. A `let`
 ||| bound to an erased value or the world token (C `NULL`) is the same for
 ||| `readsOnly`, but it is still a boxed local, so it is listed apart, as
 ||| `nullBoundKey`: `renameAliasDrop` must tell the two apart.
-nativeBound : List (Int, Rep) -> RCExp -> SortedSet Int
+nativeBound : List (LocalId, Rep) -> RCExp -> SortedSet LocalId
 nativeBound args body = union (fromList (mapMaybe nativeParam args)) (go body)
   where
     nullValued : RCExp -> Bool
@@ -70,11 +70,11 @@ nativeBound args body = union (fromList (mapMaybe nativeParam args)) (go body)
     nullValued (RPrimVal _ WorldVal) = True
     nullValued _ = False
 
-    nativeParam : (Int, Rep) -> Maybe Int
+    nativeParam : (LocalId, Rep) -> Maybe LocalId
     nativeParam (_, RBoxed) = Nothing
     nativeParam (i, _) = Just i
 
-    go : RCExp -> SortedSet Int
+    go : RCExp -> SortedSet LocalId
     go e = let here = case e of
                            RLet _ x rep v _ => if nullValued v then singleton (nullBoundKey x) else maybe empty singleton (nativeParam (x, rep))
                            RLoop _ ps _ _ _ => fromList (mapMaybe nativeParam ps)
@@ -87,14 +87,14 @@ nativeBound args body = union (fromList (mapMaybe nativeParam args)) (go body)
 ||| in `postDrop`, and then the callee may free it -- and a field of it
 ||| -- while still reading `v`, which is exactly what a `dup v` in front
 ||| guards against.
-readsOnly : SortedSet Int -> List RCLocal -> List LocalId -> Bool
+readsOnly : SortedSet LocalId -> List RCLocal -> List LocalId -> Bool
 readsOnly ns args pd = all ok args
   where
     occurrences : Eq a => a -> List a -> Nat
     occurrences x xs = length (filter (== x) xs)
 
     ok : RCLocal -> Bool
-    ok x@(RCLoc i) = contains i ns || contains (nullBoundKey i) ns || occurrences x args <= occurrences (MkLocalId i) pd
+    ok x@(RCLoc i) = contains i ns || contains (nullBoundKey i) ns || occurrences x args <= occurrences i pd
     ok _ = True
 
 ||| The `postDrop` list of the first node after a run of `RDup`s, with
@@ -109,7 +109,7 @@ readsOnly ns args pd = all ok args
 ||| the node may be the value of a `let` whose own `RDup`s lead it,
 ||| unless that `let` is `RInlineNative` (its node is spliced at the one
 ||| use site, possibly past another consumer of the local).
-findPostDrop : SortedSet Int -> RCExp -> Maybe (List LocalId, List LocalId -> RCExp)
+findPostDrop : SortedSet LocalId -> RCExp -> Maybe (List LocalId, List LocalId -> RCExp)
 findPostDrop ns (RDup fc w extra body) =
     (\(pd, set) => (pd, \pd' => RDup fc w extra (set pd'))) <$> findPostDrop ns body
 findPostDrop ns (RLet fc x rep value body) =
@@ -148,7 +148,7 @@ dropN (S k) v pd = dropN k v (delete v pd)
 ||| consumes any operand, which a list already shortened by an earlier
 ||| cancellation would answer wrongly. See `rc2/doc/reading-the-ir.md`
 ||| section 6.
-cancelRun : SortedSet Int -> RCExp -> Maybe RCExp
+cancelRun : SortedSet LocalId -> RCExp -> Maybe RCExp
 cancelRun ns e =
     let (dups, rest) = spanDups e
     in case findPostDrop ns rest of
@@ -194,7 +194,7 @@ renameAliasDrop _ _ _ = Nothing
 ||| `let` only names the same object again, and a `dup w` that led it
 ||| then cancels against that drop. `ns` (`nativeBound`) keeps this off a
 ||| native `w`, which the boxed `let` would box into a new object.
-cancelDupDrop : SortedSet Int -> RCExp -> RCExp
+cancelDupDrop : SortedSet LocalId -> RCExp -> RCExp
 cancelDupDrop ns e@(RDup fc v extra body) =
     case cancelRun ns e of
          Just e' => cancelDupDrop ns e'
@@ -211,7 +211,7 @@ cancelDupDrop ns e@(RLet fc var rep value body) =
     case (rep, value) of
          (RBoxed, RV _ (RCLoc j)) =>
              if contains j ns then plain
-             else case renameAliasDrop (MkLocalId var) (MkLocalId j) body of
+             else case renameAliasDrop var j body of
                        Just body' => cancelDupDrop ns body'
                        Nothing => plain
          _ => plain
@@ -260,7 +260,7 @@ mutual
   ||| own `extra` up to `pred total` (so its own actual increment count,
   ||| `S (pred total)`, equals the region's full total for this local),
   ||| record the local in `done`, and continue.
-  rewriteRegion : (ns : SortedSet Int) -> (counts : SortedMap LocalId Nat) -> (done : SortedSet LocalId)
+  rewriteRegion : (ns : SortedSet LocalId) -> (counts : SortedMap LocalId Nat) -> (done : SortedSet LocalId)
                -> RCExp -> (SortedSet LocalId, RCExp)
   rewriteRegion ns counts done (RLet fc var rep value body) =
       let (done1, value') = rewriteRegion ns counts done  value
@@ -310,7 +310,7 @@ mutual
   ||| as an entirely independent region (see `rewriteRegion`'s own
   ||| handling of those four constructors).
   export
-  mergeDupsExp : SortedSet Int -> RCExp -> RCExp
+  mergeDupsExp : SortedSet LocalId -> RCExp -> RCExp
   mergeDupsExp ns e = let e' = cancelDupDrop ns e
                        in snd (rewriteRegion ns (collectDupCounts e') empty e')
 

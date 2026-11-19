@@ -258,19 +258,19 @@ mkCand n d = MkCand n d (refNames d) 0 False noKey
 ||| other (`bwd`), and the two names that stand for "the function itself".
 record Env where
   constructor MkEnv
-  fwd : SortedMap Int Int
-  bwd : SortedMap Int Int
+  fwd : SortedMap LocalId LocalId
+  bwd : SortedMap LocalId LocalId
   selfA : Name
   selfB : Name
 
-bind : Int -> Int -> Env -> Maybe Env
+bind : LocalId -> LocalId -> Env -> Maybe Env
 bind a b env =
     case (lookup a env.fwd, lookup b env.bwd) of
          (Nothing, Nothing) => Just ({ fwd $= insert a b, bwd $= insert b a } env)
          (Just b', Just a') => if b' == b && a' == a then Just env else Nothing
          _ => Nothing
 
-bindAll : Env -> List Int -> List Int -> Maybe Env
+bindAll : Env -> List LocalId -> List LocalId -> Maybe Env
 bindAll env [] [] = Just env
 bindAll env (a :: as) (b :: bs) = bind a b env >>= \env' => bindAll env' as bs
 bindAll _ _ _ = Nothing
@@ -294,7 +294,7 @@ eqLs env (x :: xs) (y :: ys) = eqL env x y && eqLs env xs ys
 eqLs _ _ _ = False
 
 eqId : Env -> LocalId -> LocalId -> Bool
-eqId env x y = eqL env (locOf x) (locOf y)
+eqId env x y = eqL env (RCLoc x) (RCLoc y)
 
 eqIds : Env -> List LocalId -> List LocalId -> Bool
 eqIds env [] [] = True

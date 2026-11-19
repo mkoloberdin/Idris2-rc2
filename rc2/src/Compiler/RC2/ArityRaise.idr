@@ -38,7 +38,7 @@ data ClosureTail = TPartial Name (List RCLocal) | TCall Name | TCrash | TOther
 ||| because functions that are rightly raised do it all the time: a `case` on
 ||| it, a constructor, an arithmetic operation, a partial application that takes
 ||| it (so a world held in a closure that the prefix then applies is not seen).
-worldInPrefix : Int -> RCExp -> Bool
+worldInPrefix : LocalId -> RCExp -> Bool
 worldInPrefix w e = direct e || any (worldInPrefix w) (children e)
   where
     direct : RCExp -> Bool
@@ -51,7 +51,7 @@ worldInPrefix w e = direct e || any (worldInPrefix w) (children e)
 ||| Every tail of a pre-RC body, through `let` bodies and every branch,
 ||| and whether the last parameter (`w`) is used by a `let` value on the path
 ||| to that tail (`worldInPrefix`).
-closureTailsWithPrefixCheck : Int -> RCExp -> List (ClosureTail, Bool)
+closureTailsWithPrefixCheck : LocalId -> RCExp -> List (ClosureTail, Bool)
 closureTailsWithPrefixCheck w (RLet _ _ _ value body) =
     let worldInValue = worldInPrefix w value
         tails = closureTailsWithPrefixCheck w body
@@ -109,14 +109,14 @@ raisePlan defs =
 
 ||| `f`'s body is exactly `partial g missing= 1 [its parameters]`: its
 ||| callers can call `g` directly, no raised version needed.
-bareWrapperOf : List (Int, Rep) -> RCExp -> Maybe Name
+bareWrapperOf : List (LocalId, Rep) -> RCExp -> Maybe Name
 bareWrapperOf args (RUnderApp _ g 1 xs) = if xs == map (RCLoc . fst) args then Just g else Nothing
 bareWrapperOf _ _ = Nothing
 
 ||| `body`'s tails handed the extra argument `w`: a closure becomes the
 ||| saturated call, a tail call to a raised function calls what it was
 ||| raised to (`targets`), a crash stays.
-raiseTails : SortedMap Name Name -> Int -> RCExp -> RCExp
+raiseTails : SortedMap Name Name -> LocalId -> RCExp -> RCExp
 raiseTails ts w (RLet fc x rep value body) = RLet fc x rep value (raiseTails ts w body)
 raiseTails ts w (RCmpCase fc op args pd t f) = RCmpCase fc op args pd (raiseTails ts w t) (raiseTails ts w f)
 raiseTails ts w (RConCase fc sc alts mDef) =
@@ -147,7 +147,7 @@ rewriteSites ts e = here (mapChildren (rewriteSites ts) e)
     finalCall (RAppName fc Nothing f xs) = Just (fc, f, xs, id)
     finalCall _ = Nothing
 
-    raisedCall : Int -> RCExp -> RCExp -> Maybe RCExp
+    raisedCall : LocalId -> RCExp -> RCExp -> Maybe RCExp
     raisedCall c value (RApp _ Nothing (RCLoc c') (w ::: [])) =
         if c' /= c || w == RCLoc c then Nothing
         else do
@@ -223,9 +223,9 @@ mentions : RCLocal -> RCExp -> Nat
 mentions l e = length (filter (== l) (directReads e ++ releases e)) + sum (map (mentions l) (children e))
   where
     releases : RCExp -> List RCLocal
-    releases (RDrop _ vs _) = map locOf vs
-    releases (RReuseOffer _ sc _ _ _) = [locOf sc]
-    releases (RReleaseReuse _ x _) = [locOf x]
+    releases (RDrop _ vs _) = map RCLoc vs
+    releases (RReuseOffer _ sc _ _ _) = [RCLoc sc]
+    releases (RReleaseReuse _ x _) = [RCLoc x]
     releases (RCon _ _ _ _ _ reuseFrom) = toList reuseFrom
     releases _ = []
 
@@ -233,15 +233,15 @@ mentions l e = length (filter (== l) (directReads e ++ releases e)) + sum (map (
 ||| native Rep, as a parameter or `let` or loop parameter. The second
 ||| set holds the `RInlineNative` ones, spliced where they are read, so
 ||| their read must not move.
-nativeLocals : List (Int, Rep) -> RCExp -> (SortedSet Int, SortedSet Int)
+nativeLocals : List (LocalId, Rep) -> RCExp -> (SortedSet LocalId, SortedSet LocalId)
 nativeLocals args body =
     let (ns, inl) = go body
     in (union ns (fromList (mapMaybe (\(i, r) => if isNativeRep r then Just i else Nothing) args)), inl)
   where
-    both : List (SortedSet Int, SortedSet Int) -> (SortedSet Int, SortedSet Int)
+    both : List (SortedSet LocalId, SortedSet LocalId) -> (SortedSet LocalId, SortedSet LocalId)
     both = foldl (\(a, b), (c, d) => (union a c, union b d)) (empty, empty)
 
-    go : RCExp -> (SortedSet Int, SortedSet Int)
+    go : RCExp -> (SortedSet LocalId, SortedSet LocalId)
     go e@(RLet _ x rep _ _) =
         let (ns, inl) = both (map go (children e))
         in case rep of
@@ -281,10 +281,10 @@ dropMentions c e = sum (map (dropMentions c) (children e))
 ||| `e` with its one `apply c ys` built by `mk` instead, and each
 ||| `drop` of `c` dropping `owned` (what the closure held) instead;
 ||| `Nothing` when `c` sits inside a loop, or `mk` declines.
-replaceApply : Int -> List LocalId -> (FC -> List RCLocal -> Maybe RCExp) -> RCExp -> Maybe RCExp
+replaceApply : LocalId -> List LocalId -> (FC -> List RCLocal -> Maybe RCExp) -> RCExp -> Maybe RCExp
 replaceApply c _ mk e@(RApp fc Nothing (RCLoc c') ys) = if c' == c then mk fc (forget ys) else Just e
 replaceApply c owned mk (RDrop fc vs k) =
-    let vs' = concatMap (\v => if v == MkLocalId c then owned else [v]) vs
+    let vs' = concatMap (\v => if v == c then owned else [v]) vs
     in (\k' => if null vs' then k' else RDrop fc vs' k') <$> replaceApply c owned mk k
 replaceApply c _ _ e@(RLoop _ _ _ _ _) = if mentions (RCLoc c) e > 0 then Nothing else Just e
 replaceApply c owned mk e = if mentions (RCLoc c) e == 0 then Just e else traverseChildren (replaceApply c owned mk) e
@@ -297,7 +297,7 @@ replaceApply c owned mk e = if mentions (RCLoc c) e == 0 then Just e else traver
 ||| An `apply` of the constant closure of a bare wrapper (`f params = partial g
 ||| m params`, zero-filled, so it misses `k` = the number of `params`), given
 ||| all `k + m` arguments at once, is the call `g` with them.
-foldAppliedExp : SortedMap Name (Name, Nat) -> (SortedSet Int, SortedSet Int) -> RCExp -> RCExp
+foldAppliedExp : SortedMap Name (Name, Nat) -> (SortedSet LocalId, SortedSet LocalId) -> RCExp -> RCExp
 foldAppliedExp ws nat e = here (mapChildren (foldAppliedExp ws nat) e)
   where
     target : Name -> Nat -> List RCLocal -> FC -> List RCLocal -> Maybe RCExp
@@ -309,7 +309,7 @@ foldAppliedExp ws nat e = here (mapChildren (foldAppliedExp ws nat) e)
                           _ => Nothing
                 else Nothing
 
-    isLoc : (Int -> Bool) -> RCLocal -> Bool
+    isLoc : (LocalId -> Bool) -> RCLocal -> Bool
     isLoc p (RCLoc i) = p i
     isLoc _ _ = False
 
@@ -320,9 +320,9 @@ foldAppliedExp ws nat e = here (mapChildren (foldAppliedExp ws nat) e)
         pure (RAppName fc Nothing g (forget ys))
     here e@(RLet _ c RBoxed value body) = fromMaybe e $ do
         (lead, g, m, xs) <- closureValue ws value
-        let owned = filter (\i => not (contains i.num (fst nat))) (mapMaybe idOf xs)
+        let owned = filter (\i => not (contains i (fst nat))) (mapMaybe idOf xs)
             n = mentions (RCLoc c) body
-        guard (not (any (isLoc (\i => contains i (snd nat))) xs || n /= S (dropMentions (MkLocalId c) body)))
+        guard (not (any (isLoc (\i => contains i (snd nat))) xs || n /= S (dropMentions c body)))
         body' <- replaceApply c owned (target g m xs) body
         guard (mentions (RCLoc c) body' == 0)
         pure (lead body')

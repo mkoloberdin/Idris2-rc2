@@ -20,7 +20,7 @@ import Data.SortedMap
 %default covering
 
 Known : Type
-Known = SortedMap Int (Name, Nat, List RCLocal)
+Known = SortedMap LocalId (Name, Nat, List RCLocal)
 
 ||| Before Phase 2 annotation. `let x = (let y = P in y)` becomes `let x = P`
 ||| for a partial `P`, and `apply x args` of a known partial with more

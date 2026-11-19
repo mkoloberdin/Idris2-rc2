@@ -57,7 +57,7 @@ mutual
   prettyExp d (RApp _ lazy c args) =
       indent d ++ lazyPrefix lazy ++ "apply " ++ show c ++ " " ++ show (forget args) ++ "\n"
   prettyExp d (RLet _ var rep value body) =
-      indent d ++ "let " ++ show (RCLoc var) ++ " : " ++ prettyRep rep ++ " =\n"
+      indent d ++ "let " ++ show var ++ " : " ++ prettyRep rep ++ " =\n"
       ++ prettyExp (d + 1) value
       ++ prettyExp d body
   prettyExp d (RCon _ n ci tag args reuseFrom) =
@@ -108,7 +108,7 @@ mutual
       indent d ++ "reuseOffer " ++ show sc ++ " dupOnShared= " ++ show dupOnShared
         ++ (if dropOnUnique == [] then "" else " dropOnUnique= " ++ show dropOnUnique) ++ "\n" ++ prettyExp d body
   prettyExp d (RLoop _ loopParams initial prologueDrop body) =
-      indent d ++ "loop " ++ show (map (\(i, r) => "\{show (RCLoc i)}:\{prettyRep r}") loopParams)
+      indent d ++ "loop " ++ show (map (\(i, r) => "\{show i}:\{prettyRep r}") loopParams)
         ++ " initial= " ++ show initial
         ++ (if prologueDrop == [] then "" else " prologueDrop= " ++ show prologueDrop) ++ "\n"
       ++ prettyExp d body
@@ -124,8 +124,8 @@ mutual
         ++ postDropNote postDrop ++ "\n"
 
   ||| A dead field (`deadId`) as `_`.
-  showFields : List Int -> String
-  showFields args = "[" ++ joinBy ", " (map (\i => if isDeadId i then "_" else show (RCLoc i)) args) ++ "]"
+  showFields : List LocalId -> String
+  showFields args = "[" ++ joinBy ", " (map (\i => if isDeadId i then "_" else show i) args) ++ "]"
 
   prettyConAlt : Nat -> RConAlt -> String
   prettyConAlt d (MkRConAlt n ci tag args body) =
@@ -154,7 +154,7 @@ mutual
 ||| "this was a `delay` CAF" can still be printed at all.
 prettyDef : SortedSet Name -> Name -> RCDef -> String
 prettyDef lazyCAFs n (MkRCFun args retRep isWorker body) =
-    "def " ++ dumpName n ++ "  (fun args= " ++ show (map (\(i, r) => "\{show (RCLoc i)}:\{prettyRep r}") args)
+    "def " ++ dumpName n ++ "  (fun args= " ++ show (map (\(i, r) => "\{show i}:\{prettyRep r}") args)
       ++ " ret= " ++ prettyRep retRep
       ++ (if isWorker then " worker=True" else "")
       ++ (if contains n lazyCAFs then " lazyCAF=True" else "") ++ ")\n"

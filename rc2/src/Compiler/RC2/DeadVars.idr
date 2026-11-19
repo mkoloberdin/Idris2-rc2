@@ -62,7 +62,7 @@ import Data.SortedSet
 ||| doc comment), and erasing a field only ever rewrites a *binder*,
 ||| never a use, so no erasure this pass performs can invalidate the
 ||| set it started from.
-eraseDeadConAltFields : SortedSet RCLocal -> List Int -> List Int
+eraseDeadConAltFields : SortedSet RCLocal -> List LocalId -> List LocalId
 eraseDeadConAltFields used args =
     map (\i => if contains (RCLoc i) used then i else deadId) args
 
@@ -132,15 +132,15 @@ needsVariable (RStructSet _ sv _ _ _) = [sv]
 needsVariable (RFill _ cell _ _ _) = [cell]
 needsVariable (RForce _ _ v _) = [v]
 needsVariable (RApp _ _ c _) = [c]
-needsVariable (RReuseOffer _ sc ds us _) = locOf sc :: map locOf (ds ++ us)
-needsVariable (RReleaseReuse _ v _) = [locOf v]
+needsVariable (RReuseOffer _ sc ds us _) = RCLoc sc :: map RCLoc (ds ++ us)
+needsVariable (RReleaseReuse _ v _) = [RCLoc v]
 needsVariable (RCon _ _ _ _ _ reuseFrom) = toList reuseFrom
 needsVariable (RLoop _ ps _ _ _) = map (RCLoc . fst) ps
 needsVariable _ = []
 
 ||| Every `let x = <safe constant>` of `e`, and every local read where a
 ||| variable is needed.
-collectAliases : RCExp -> (List (Int, RCLocal), List RCLocal)
+collectAliases : RCExp -> (List (LocalId, RCLocal), List RCLocal)
 collectAliases e =
     let (as, bs) = unzip (map collectAliases (children e))
         own = case e of
@@ -149,16 +149,16 @@ collectAliases e =
     in (own ++ concat as, needsVariable e ++ concat bs)
 
 ||| `e` without the aliases `ren` names, their `let`s removed.
-dropAliasLets : SortedMap Int RCLocal -> RCExp -> RCExp
+dropAliasLets : SortedMap LocalId RCLocal -> RCExp -> RCExp
 dropAliasLets ren e =
     case mapChildren (dropAliasLets ren) e of
          e'@(RLet _ x _ (RV _ _) body) => if isJust (lookup x ren) then body else e'
          e' => e'
 
 ||| The ids that occur more than once in `ids`.
-duplicateIds : List Int -> SortedSet Int
+duplicateIds : List LocalId -> SortedSet LocalId
 duplicateIds ids = snd (foldl (\(seen, dups), x => if contains x seen then (seen, insert x dups) else (insert x seen, dups))
-                             (the (SortedSet Int) empty, the (SortedSet Int) empty) ids)
+                             (the (SortedSet LocalId) empty, the (SortedSet LocalId) empty) ids)
 
 ||| Replaces each variable bound to a safe constant by the constant, removes
 ||| its `let` and its `dup`s and `drop`s. A variable read where one is needed

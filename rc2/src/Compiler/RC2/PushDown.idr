@@ -130,7 +130,7 @@ tryPush ops e = do
     (scruts, arms, put) <- caseParts e
     let (_, run) = normalize ops
     -- A `drop` of what the dispatch reads is never moved past it.
-    guard (not (any (\s => any (\i => locOf i == s) (dropsOf run)) scruts))
+    guard (not (any (\s => any (\i => RCLoc i == s) (dropsOf run)) scruts))
     let parts = map (\b => let (q, rest) = spanRun b in (snd (normalize q), rest)) arms
     let results = map (\(q, _) => normalize (run ++ q)) parts
     let cancelled = the Nat (sum (map fst results))

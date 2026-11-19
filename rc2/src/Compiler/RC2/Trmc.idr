@@ -27,7 +27,7 @@ import Data.SortedSet
 ||| A site's result local, mapped to the callee, the call's arguments and
 ||| the hole's field index.
 Sites : Type
-Sites = SortedMap Int (Name, List RCLocal, Nat)
+Sites = SortedMap LocalId (Name, List RCLocal, Nat)
 
 finalOf : RCExp -> RCExp
 finalOf (RLet _ _ _ _ body) = finalOf body
@@ -57,7 +57,7 @@ reorderable _ = False
 findSites : SortedMap Name Nat -> SortedSet Name -> RCExp -> Sites
 findSites arity newtypes body = go empty 0 Nothing body
   where
-    candidate : SortedMap Int (Int, RCExp) -> Maybe Int -> RCLocal -> Maybe (Int, Int, Name, List RCLocal)
+    candidate : SortedMap LocalId (Int, RCExp) -> Maybe Int -> RCLocal -> Maybe (LocalId, Int, Name, List RCLocal)
     candidate env barrier (RCLoc v) = case lookup v env of
         Just (pos, RAppName _ Nothing g as') =>
             if lookup g arity == Just (length as') && maybe True (pos >=) barrier && countUsesR (RCLoc v) body == 1
@@ -66,13 +66,13 @@ findSites arity newtypes body = go empty 0 Nothing body
         _ => Nothing
     candidate _ _ _ = Nothing
 
-    latest : List (Int, Int, Name, List RCLocal, Nat) -> Maybe (Int, Name, List RCLocal, Nat)
+    latest : List (LocalId, Int, Name, List RCLocal, Nat) -> Maybe (LocalId, Name, List RCLocal, Nat)
     latest [] = Nothing
     latest (c :: cs) =
         let (v, _, g, as', k) = foldl (\a@(_, pa, _, _, _), b@(_, pb, _, _, _) => if pb > pa then b else a) c cs
         in Just (v, g, as', k)
 
-    go : SortedMap Int (Int, RCExp) -> Int -> Maybe Int -> RCExp -> Sites
+    go : SortedMap LocalId (Int, RCExp) -> Int -> Maybe Int -> RCExp -> Sites
     go env pos barrier (RLet _ var _ value rest) =
         let barrier' = if reorderable value then barrier else Just pos
         in go (insert var (pos, finalOf value) env) (pos + 1) barrier' rest
@@ -106,7 +106,7 @@ trmcTailCallees _ _ = []
 ||| of its accumulating twin, whose `res` is the chain's first cell and
 ||| `last` the cell whose hole is open. `hk` holds that hole's field
 ||| index when the group's sites use more than one.
-data Mode = Entry | Acc Int Int (Maybe Int)
+data Mode = Entry | Acc LocalId LocalId (Maybe LocalId)
 
 ||| `value` without its final expression (the call), its leading lets
 ||| kept in front of `rest`.
@@ -121,14 +121,14 @@ withoutFinal _ rest = rest
 rewriteBody : {auto v : Ref VarId Int} -> SortedMap Name Name -> List Nat -> Sites -> Mode -> RCExp -> Core RCExp
 rewriteBody acc ks sites mode = go
   where
-    fillAt : FC -> Int -> RCLocal -> RCExp -> Nat -> Core RCExp
+    fillAt : FC -> LocalId -> RCLocal -> RCExp -> Nat -> Core RCExp
     fillAt fc last value rest k = do
         u <- freshVarId
         pure $ RLet fc u RBoxed (RFill fc (RCLoc last) k value []) rest
 
     -- `rest` is let-free (a result or a tail call), so each branch can
     -- carry its own copy.
-    fill : FC -> Int -> Maybe Int -> RCLocal -> RCExp -> Core RCExp
+    fill : FC -> LocalId -> Maybe LocalId -> RCLocal -> RCExp -> Core RCExp
     fill fc last Nothing value rest = fillAt fc last value rest (fromMaybe 0 (head' ks))
     fill fc last (Just hk) value rest = do
         branches <- traverse (\k => (k,) <$> fillAt fc last value rest k) ks
@@ -147,7 +147,7 @@ rewriteBody acc ks sites mode = go
                        [site] => Just site
                        _ => Nothing
 
-    finish : Int -> Int -> Maybe Int -> RCExp -> Core RCExp
+    finish : LocalId -> LocalId -> Maybe LocalId -> RCExp -> Core RCExp
     finish res last hk e = do
         r <- freshVarId
         RLet emptyFC r RBoxed e <$> fill emptyFC last hk (RCLoc r) (RV emptyFC (RCLoc res))

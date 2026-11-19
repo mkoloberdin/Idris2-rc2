@@ -27,18 +27,18 @@ import Data.Vect
 ||| multi-id merge point below (see "Batched, multi-id native-type
 ||| analysis" further down for why these exist).
 export
-unionMaps : Ord ty => SortedMap Int (SortedSet ty) -> SortedMap Int (SortedSet ty) -> SortedMap Int (SortedSet ty)
+unionMaps : Ord ty => SortedMap LocalId (SortedSet ty) -> SortedMap LocalId (SortedSet ty) -> SortedMap LocalId (SortedSet ty)
 unionMaps = SortedMap.mergeWith union
 
 export
-concatMaps : Ord ty => List (SortedMap Int (SortedSet ty)) -> SortedMap Int (SortedSet ty)
+concatMaps : Ord ty => List (SortedMap LocalId (SortedSet ty)) -> SortedMap LocalId (SortedSet ty)
 concatMaps = foldl unionMaps empty
 
 ||| If `a` is one of `tracked`'s own ids, record that it was read at
 ||| native type `ty` here (unioned with whatever's already on file for
 ||| it); otherwise leave `acc` unchanged.
 export
-addTracked : Ord ty => SortedSet Int -> RCLocal -> ty -> SortedMap Int (SortedSet ty) -> SortedMap Int (SortedSet ty)
+addTracked : Ord ty => SortedSet LocalId -> RCLocal -> ty -> SortedMap LocalId (SortedSet ty) -> SortedMap LocalId (SortedSet ty)
 addTracked tracked (RCLoc i) ty acc = if contains i tracked then SortedMap.insertWith union i (SortedSet.singleton ty) acc else acc
 addTracked _ _ _ acc = acc
 
@@ -81,7 +81,7 @@ constAltsNativeType (MkRConstAlt c _ :: rest) =
 ||| rule those two already applied, just factored out so the batched
 ||| entry points below (and their singleton-callers) share it.
 export
-singleTypeFrom : SortedMap Int (SortedSet PrimType) -> Int -> Maybe PrimType
+singleTypeFrom : SortedMap LocalId (SortedSet PrimType) -> LocalId -> Maybe PrimType
 singleTypeFrom m p = case lookup p m of
                            Nothing => Nothing
                            Just tys => case Prelude.toList tys of
@@ -91,14 +91,14 @@ singleTypeFrom m p = case lookup p m of
 ||| The C expression type a specific operand position of `op` needs,
 ||| given the enclosing `RLet`'s own native `ty` -- `p`'s contribution
 ||| to `nativeArgTypes` at every position it fills.
-opNativeUses : (p : Int) -> PrimType -> PrimFn arity -> Vect arity RCLocal -> SortedSet PrimType
+opNativeUses : (p : LocalId) -> PrimType -> PrimFn arity -> Vect arity RCLocal -> SortedSet PrimType
 opNativeUses p ty op args =
     fromList $ mapMaybe (\a => if a == RCLoc p then Just (opArgTyFor ty op) else Nothing) (toList args)
 
 ||| Multi-id version of `opNativeUses`: every one of `tracked`'s own
 ||| contribution to the native-operand-type map, from this one `op`'s
 ||| own argument positions, in one pass instead of one call per id.
-opNativeUsesAll : SortedSet Int -> PrimType -> PrimFn arity -> Vect arity RCLocal -> SortedMap Int (SortedSet PrimType)
+opNativeUsesAll : SortedSet LocalId -> PrimType -> PrimFn arity -> Vect arity RCLocal -> SortedMap LocalId (SortedSet PrimType)
 opNativeUsesAll tracked ty op args = foldr (\a, acc => addTracked tracked a (opArgTyFor ty op) acc) empty (toList args)
 
 ||| `p`'s native-operand contribution at native type `ty` (an `RLet`'s decided
@@ -107,7 +107,7 @@ opNativeUsesAll tracked ty op args = foldr (\a, acc => addTracked tracked a (opA
 ||| with no enclosing native `RLet` is deliberately not counted: it may still
 ||| render Boxed (leak in Test110Loop/SelfTailLoop.idr).
 ||| See `rc2/doc/loop-conversion.md`'s "Known limitation".
-opNativeUsesThrough : (p : Int) -> PrimType -> RCExp -> SortedSet PrimType
+opNativeUsesThrough : (p : LocalId) -> PrimType -> RCExp -> SortedSet PrimType
 opNativeUsesThrough p ty (ROp _ _ op args _) = opNativeUses p ty op args
 opNativeUsesThrough p ty (RDup _ _ _ cont) = opNativeUsesThrough p ty cont
 opNativeUsesThrough p ty (RDrop _ _ cont) = opNativeUsesThrough p ty cont
@@ -117,7 +117,7 @@ opNativeUsesThrough p ty (RLet _ _ _ _ body) = opNativeUsesThrough p ty body
 opNativeUsesThrough _ _ _ = empty
 
 ||| Multi-id version of `opNativeUsesThrough`.
-opNativeUsesThroughAll : SortedSet Int -> PrimType -> RCExp -> SortedMap Int (SortedSet PrimType)
+opNativeUsesThroughAll : SortedSet LocalId -> PrimType -> RCExp -> SortedMap LocalId (SortedSet PrimType)
 opNativeUsesThroughAll tracked ty (ROp _ _ op args _) = opNativeUsesAll tracked ty op args
 opNativeUsesThroughAll tracked ty (RDup _ _ _ cont) = opNativeUsesThroughAll tracked ty cont
 opNativeUsesThroughAll tracked ty (RDrop _ _ cont) = opNativeUsesThroughAll tracked ty cont
@@ -131,7 +131,7 @@ opNativeUsesThroughAll _ _ _ = empty
 ||| natively. Walks the whole tree. A bare `ROp` is not counted (see
 ||| `opNativeUsesThrough`). See `rc2/doc/loop-conversion.md`'s "Native-shadow promotion".
 export
-nativeArgTypes : (p : Int) -> RCExp -> SortedSet PrimType
+nativeArgTypes : (p : LocalId) -> RCExp -> SortedSet PrimType
 nativeArgTypes p (RLet _ _ rep value body) =
     let fromOp = case rep of
              RNative (TPrim ty) => opNativeUsesThrough p ty value
@@ -204,7 +204,7 @@ nativeArgTypes _ _ = empty
 ||| instead of one full walk per id. See "Batched, multi-id native-type
 ||| analysis" below for why this exists.
 export
-nativeArgTypesFor : SortedSet Int -> RCExp -> SortedMap Int (SortedSet PrimType)
+nativeArgTypesFor : SortedSet LocalId -> RCExp -> SortedMap LocalId (SortedSet PrimType)
 nativeArgTypesFor tracked (RLet _ _ rep value body) =
     let fromOp = case rep of
              RNative (TPrim ty) => opNativeUsesThroughAll tracked ty value
@@ -237,10 +237,10 @@ nativeArgTypesFor tracked (RConstCase _ sc alts mDef) =
 -- See `nativeArgTypes`'s own `RLoop` case just above for why `initial`
 -- counts as a native read of an already-`RNative` slot.
 nativeArgTypesFor tracked (RLoop _ loopParams initial _ body) =
-    let fromInitial : SortedMap Int (SortedSet PrimType) =
+    let fromInitial : SortedMap LocalId (SortedSet PrimType) =
             foldr (\((_, slotRep), a), acc =>
                        maybe acc (\ty => addTracked tracked a ty acc) (nativeSlotTy slotRep))
-                  (the (SortedMap Int (SortedSet PrimType)) SortedMap.empty)
+                  (the (SortedMap LocalId (SortedSet PrimType)) SortedMap.empty)
                   (zip loopParams initial)
     in fromInitial `unionMaps` nativeArgTypesFor tracked body
 nativeArgTypesFor _ _ = empty
@@ -250,7 +250,7 @@ nativeArgTypesFor _ _ = empty
 public export
 record Strict where
   constructor MkStrict
-  params : SortedMap Int (List NativeTy)
+  params : SortedMap LocalId (List NativeTy)
   returns : SortedMap Name (List NativeTy)
   cons : SortedMap Name (List (List NativeTy))
 
@@ -261,7 +261,7 @@ returnShown strict n ty = maybe True (\s => maybe False (elem ty) (lookup n s.re
 
 ||| `strict` narrowed to the fields `args` of the constructor `con`.
 export
-fieldStrict : Maybe Strict -> Name -> List Int -> Maybe Strict
+fieldStrict : Maybe Strict -> Name -> List LocalId -> Maybe Strict
 fieldStrict strict con args =
     map (\s => MkStrict (SortedMap.fromList (zip args (fromMaybe [] (lookup con s.cons)))) empty empty) strict
 
@@ -304,7 +304,7 @@ opOperandTypes op args = maybe [] (\ty => map (, ty) (toList args)) (ownType op)
 ||| operand of a primitive op or a fused comparison, or the scrutinee of a constant `case` (the type of its
 ||| literals). Unlike `nativeArgTypes`, which counts only the reads Emit renders natively, this counts every
 ||| typed read, so a conflict between branches is visible.
-primReadTypesFor : SortedSet Int -> RCExp -> SortedMap Int (SortedSet PrimType)
+primReadTypesFor : SortedSet LocalId -> RCExp -> SortedMap LocalId (SortedSet PrimType)
 primReadTypesFor tracked e = foldr (\(a, ty), acc => addTracked tracked a ty acc) (concatMaps (map (primReadTypesFor tracked) (children e))) (here e)
   where
     constTy : Constant -> Maybe PrimType
@@ -322,17 +322,17 @@ primReadTypesFor tracked e = foldr (\(a, ty), acc => addTracked tracked a ty acc
 ||| even if another branch reads it as one (a parameter of type `Dom o r`: a `Bool` for one `o`, a
 ||| `Maybe (List r)` for another). An enumeration's case (every alternative field-less, as `Bool`'s) does not
 ||| count.
-takenApartFor : SortedSet Int -> RCExp -> SortedSet Int
+takenApartFor : SortedSet LocalId -> RCExp -> SortedSet LocalId
 takenApartFor tracked e = foldr union (here e) (map (takenApartFor tracked) (children e))
   where
     binds : RConAlt -> Bool
     binds (MkRConAlt _ _ _ args _) = not (null args)
-    here : RCExp -> SortedSet Int
+    here : RCExp -> SortedSet LocalId
     here (RConCase _ (RCLoc i) alts _) = if contains i tracked && any binds alts then singleton i else empty
     here _ = empty
 
 ||| Whether `ty`, chosen for `p` from some of its reads, is consistent with the typed reads and the cases.
-fits : Maybe Strict -> SortedMap Int (SortedSet PrimType) -> SortedSet Int -> Int -> NativeTy -> Bool
+fits : Maybe Strict -> SortedMap LocalId (SortedSet PrimType) -> SortedSet LocalId -> LocalId -> NativeTy -> Bool
 fits strict reads apart p ty =
     maybe True (\s => maybe False (elem ty) (lookup p s.params)) strict &&
     not (contains p apart) &&
@@ -347,7 +347,7 @@ fits strict reads apart p ty =
 ||| another argument (`Value (vt k)`, `Dom o r`) fails one or the other when its branches disagree.
 ||| See rc2/doc/native-type-inference.md's "Types that depend on a value".
 export
-consistentNatives : Maybe Strict -> RCExp -> SortedMap Int NativeTy -> SortedMap Int NativeTy
+consistentNatives : Maybe Strict -> RCExp -> SortedMap LocalId NativeTy -> SortedMap LocalId NativeTy
 consistentNatives strict body chosen =
     let ids = SortedSet.fromList (keys chosen)
         reads = primReadTypesFor ids body
@@ -356,7 +356,7 @@ consistentNatives strict body chosen =
 
 ||| `consistentNatives` for the one id `p`.
 export
-consistentNative : Maybe Strict -> (p : Int) -> RCExp -> NativeTy -> Bool
+consistentNative : Maybe Strict -> (p : LocalId) -> RCExp -> NativeTy -> Bool
 consistentNative strict p body ty = isJust (lookup p (consistentNatives strict body (SortedMap.singleton p ty)))
 
 ||| The single native `PrimType` top-level parameter `p` should be
@@ -370,7 +370,7 @@ consistentNative strict p body ty = isJust (lookup p (consistentNatives strict b
 ||| the ones an enclosing `RLoop` carries) -- one definition of this
 ||| analysis, not two kept in sync by hand.
 export
-nativeArgType : Maybe Strict -> Int -> RCExp -> Maybe PrimType
+nativeArgType : Maybe Strict -> LocalId -> RCExp -> Maybe PrimType
 nativeArgType strict p body =
     case Prelude.toList (nativeArgTypes p body) of
          [ty] => if consistentNative strict p body (TPrim ty) then Just ty else Nothing
@@ -385,7 +385,7 @@ nativeArgType strict p body =
 ||| `nativeArgType` were called once per parameter; this is the same answer
 ||| in a single O(body size) pass.
 export
-nativeArgTypeBatch : Maybe Strict -> List Int -> RCExp -> SortedMap Int PrimType
+nativeArgTypeBatch : Maybe Strict -> List LocalId -> RCExp -> SortedMap LocalId PrimType
 nativeArgTypeBatch strict ps body =
     let found = nativeArgTypesFor (SortedSet.fromList ps) body
         chosen = SortedMap.fromList (mapMaybe (\p => map (\ty => (p, TPrim ty)) (singleTypeFrom found p)) ps)

@@ -32,7 +32,7 @@ rewrapDrop locs cont = RDrop emptyFC locs cont
 tryClaim : Name -> LocalId -> RCExp -> Maybe RCExp
 tryClaim target sc (RDup fc v extra inner) = RDup fc v extra <$> tryClaim target sc inner
 tryClaim target sc (RCon fc n ci tag args Nothing) =
-    if n == target then Just (RCon fc n ci tag args (Just (locOf sc))) else Nothing
+    if n == target then Just (RCon fc n ci tag args (Just (RCLoc sc))) else Nothing
 tryClaim target sc _ = Nothing
 
 ||| Search `e` for the first reachable, unclaimed `RCon` of `target`'s
@@ -152,17 +152,17 @@ resolveReuse nested imm (RConCase fc sc alts mDef) =
                        dropped' = dropped \\ [scId]
                        -- An always-unboxed field (`typedConstScrutinees`) needs no
                        -- dup/drop on either path: left out of the three lists below.
-                       conArgsRC = filter (\i => not (contains (locOf i) imm)) (map MkLocalId args)
+                       conArgsRC = filter (\i => not (contains (RCLoc i) imm)) args
                        -- See rc2/doc/reuse-analysis.md, "dropOnUnique".
                        dupOnShared = conArgsRC \\ dropped'
-                       outerDrop = dropped' \\ map MkLocalId args
+                       outerDrop = dropped' \\ args
                        dropOnUnique = conArgsRC \\ dupOnShared
                    in MkRConAlt name ci tag args
                         (rewrapDrop outerDrop (RReuseOffer emptyFC scId dupOnShared dropOnUnique inner'))
               Nothing => let
-                       conArgsRC = filter (\i => not (contains (locOf i) imm)) (map MkLocalId args)
+                       conArgsRC = filter (\i => not (contains (RCLoc i) imm)) args
                        dupOnSurvive = conArgsRC \\ dropped
-                       outerDrop = dropped \\ map MkLocalId args
+                       outerDrop = dropped \\ args
                    in MkRConAlt name ci tag args
                         (foldr (\v, acc => RDup emptyFC v 0 acc) (rewrapDrop outerDrop inner) dupOnSurvive)
 resolveReuse nested imm (RConstCase fc sc alts mDef) =

@@ -56,7 +56,7 @@ import Data.Vect
 ||| `nativeArgTypeBatch` covers that shape instead.
 ||| `Nothing` if no `RLoop` is reachable at all (the common, non-looping
 ||| case).
-findLoopThroughLets : SortedMap Int Rep -> RCExp -> Maybe (SortedMap Int Rep, List (Int, Rep))
+findLoopThroughLets : SortedMap LocalId Rep -> RCExp -> Maybe (SortedMap LocalId Rep, List (LocalId, Rep))
 findLoopThroughLets acc (RLet _ var rep _ body) = findLoopThroughLets (insert var rep acc) body
 findLoopThroughLets acc (RLoop _ loopParams _ _ body) =
     case findLoopThroughLets acc body of
@@ -77,7 +77,7 @@ findLoopThroughLets _ _ = Nothing
 ||| `Compiler.RC2.CalleeTable.callArgOrOpNativeTy`'s own "Batched, multi-id
 ||| native-type analysis" section.
 export
-paramEligibility : Maybe Strict -> List Int -> RCExp -> List (Int, Maybe PrimType)
+paramEligibility : Maybe Strict -> List LocalId -> RCExp -> List (LocalId, Maybe PrimType)
 paramEligibility strict argIds body =
     case findLoopThroughLets empty body of
          -- The loop slots' types may come from a loop spliced in after `Loop` ran, so they are checked
@@ -102,7 +102,7 @@ paramEligibility strict argIds body =
 ||| `RLet`/`RLoop` bindings). The walk `tailValueReps` and
 ||| `boolReturnPlan` share.
 export
-tailLeaves : (SortedMap Int Rep -> RCExp -> a) -> SortedMap Int Rep -> RCExp -> List a
+tailLeaves : (SortedMap LocalId Rep -> RCExp -> a) -> SortedMap LocalId Rep -> RCExp -> List a
 tailLeaves leaf reps (RLet _ var rep _ body) = tailLeaves leaf (insert var rep reps) body
 tailLeaves leaf reps (RDup _ _ _ cont) = tailLeaves leaf reps cont
 tailLeaves leaf reps (RDrop _ _ cont) = tailLeaves leaf reps cont
@@ -128,10 +128,10 @@ tailLeaves leaf reps e = [leaf reps e]
 ||| return (`applyCallSiteRewriteBody`'s tail-position clause), so a function
 ||| ending in one can return natively (`doc/native-pointer.md`).
 export
-tailValueRepsWith : SortedMap Name (NativeTy, Nat) -> SortedMap Int Rep -> RCExp -> List (Maybe NativeTy)
+tailValueRepsWith : SortedMap Name (NativeTy, Nat) -> SortedMap LocalId Rep -> RCExp -> List (Maybe NativeTy)
 tailValueRepsWith ffiRets = tailLeaves leafRep
   where
-    leafRep : SortedMap Int Rep -> RCExp -> Maybe NativeTy
+    leafRep : SortedMap LocalId Rep -> RCExp -> Maybe NativeTy
     leafRep reps (RV _ (RCLoc i)) =
         case lookup i reps of
              Just (RNative ty) => Just ty
@@ -170,7 +170,7 @@ tailValueRepsWith ffiRets = tailLeaves leafRep
 ||| instead of a whole function's own return) -- one definition of
 ||| this analysis, not two kept in sync by hand.
 export
-tailValueReps : SortedMap Int Rep -> RCExp -> List (Maybe PrimType)
+tailValueReps : SortedMap LocalId Rep -> RCExp -> List (Maybe PrimType)
 tailValueReps reps e = map (\case
                                  Just (TPrim ty) => Just ty
                                  _ => Nothing) (tailValueRepsWith empty reps e)
@@ -188,7 +188,7 @@ allJustSame (Nothing :: _) = Nothing
 ||| already-decided `params` (so a bare tail return of an eligible
 ||| parameter counts as native too, not just a locally-computed one).
 export
-returnEligibility : SortedMap Name (NativeTy, Nat) -> List (Int, Maybe PrimType) -> RCExp -> Maybe NativeTy
+returnEligibility : SortedMap Name (NativeTy, Nat) -> List (LocalId, Maybe PrimType) -> RCExp -> Maybe NativeTy
 returnEligibility ffiRets params body =
     let seeded = fromList $ mapMaybe (\(p, mty) => map (\ty => (p, RNative (TPrim ty))) mty) params
     in allJustSame (tailValueRepsWith ffiRets seeded body)
@@ -205,7 +205,7 @@ describeEligibility n (MkRCFun args _ _ body) =
         params = paramEligibility Nothing argIds body
         ret = returnEligibility empty params body
     in Just $ show n ++ ": params=" ++
-         show (map (\(p, mty) => "\{show p}:\{maybe "Boxed" show mty}") params) ++
+         show (map (\(p, mty) => "\{show p.num}:\{maybe "Boxed" show mty}") params) ++
          " ret=" ++ maybe "Boxed" show ret
 describeEligibility _ _ = Nothing
 
@@ -432,7 +432,7 @@ structReturnPlan mergedToo defs =
 ||| of `arities`; `TailOther` for everything else, including an `Int`
 ||| literal, a crash, a Boxed local, and any call this table cannot
 ||| see saturated. Nothing is ever inferred from a consumer.
-boolTail : SortedMap Name Nat -> SortedMap Int Rep -> RCExp -> RetTail
+boolTail : SortedMap Name Nat -> SortedMap LocalId Rep -> RCExp -> RetTail
 boolTail _ reps (RV _ (RCLoc i)) = case lookup i reps of
     Just (RNative (TPrim Bits8Type)) => TailProducer
     Just (RInlineNative (TPrim Bits8Type)) => TailProducer
@@ -483,7 +483,7 @@ boolReturnPlan strict defs =
     funTails arities (n, MkRCFun args _ _ body) =
         if isMutualLoopMerged n then Nothing
         else let params = paramEligibility strict (map fst args) body
-                 seeded : SortedMap Int Rep := fromList (mapMaybe (\(p, mty) => map (\ty => (p, RNative (TPrim ty))) mty) params)
+                 seeded : SortedMap LocalId Rep := fromList (mapMaybe (\(p, mty) => map (\ty => (p, RNative (TPrim ty))) mty) params)
              in Just (n, tailLeaves (boolTail arities) seeded body)
     funTails _ _ = Nothing
 
@@ -504,7 +504,7 @@ retCarries ty = case ty of
 ||| Every constructor tail of a body with fields, by tag, with how each
 ||| field arrives: the native type of a native local or literal, or
 ||| `Nothing` for a Boxed value.
-tailFields : SortedMap Int Rep -> RCExp -> List (Int, List (Maybe PrimType))
+tailFields : SortedMap LocalId Rep -> RCExp -> List (Int, List (Maybe PrimType))
 tailFields reps (RLet _ x rep _ body) = tailFields (insert x rep reps) body
 tailFields reps (RDup _ _ _ k) = tailFields reps k
 tailFields reps (RDrop _ _ k) = tailFields reps k
@@ -519,7 +519,7 @@ tailFields reps (RConstCase _ _ alts mDef) =
 tailFields reps (RLoop _ ps _ _ body) = tailFields (foldl (\m, (i, r) => insert i r m) reps ps) body
 tailFields reps (RCon _ _ _ (Just t) args@(_ :: _) _) = [(t, map (fieldKind reps) args)]
   where
-    fieldKind : SortedMap Int Rep -> RCLocal -> Maybe PrimType
+    fieldKind : SortedMap LocalId Rep -> RCLocal -> Maybe PrimType
     fieldKind reps (RCLoc i) = case lookup i reps of
         Just (RNative (TPrim ty)) => if retCarries ty then Just ty else Nothing
         Just (RInlineNative (TPrim ty)) => if retCarries ty then Just ty else Nothing
@@ -625,7 +625,7 @@ freshName pfx existing original = do
 ||| A parameter made `NULL`-typed (`Compiler.RC2.NullParams`) that an `RLoop`
 ||| carries under the same id: the loop parameter takes the same native
 ||| type, or one C variable would hold both a `Boxed` and a native value.
-retypeNullLoopParams : SortedMap Int NativeTy -> RCExp -> RCExp
+retypeNullLoopParams : SortedMap LocalId NativeTy -> RCExp -> RCExp
 retypeNullLoopParams m (RLoop {sameLen} fc loopParams initial prologueDrop body) =
     mapLoop fc loopParams initial (\case (i, RBoxed) => (i, maybe RBoxed RNative (lookup i m))
                                          p => p)
@@ -634,7 +634,7 @@ retypeNullLoopParams m e = mapChildren (retypeNullLoopParams m) e
 
 ||| `known` and every `let` below that only renames one of its locals (the
 ||| alias is `NULL` too), leaving out the `banned` ids.
-nullAliasTypes : SortedSet Int -> SortedMap Int NativeTy -> RCExp -> SortedMap Int NativeTy
+nullAliasTypes : SortedSet LocalId -> SortedMap LocalId NativeTy -> RCExp -> SortedMap LocalId NativeTy
 nullAliasTypes banned known (RLet _ var _ (RV _ (RCLoc p)) body) =
     nullAliasTypes banned (if contains var banned then known else maybe known (\ty => insert var ty known) (lookup p known)) body
 nullAliasTypes banned known e = foldl (nullAliasTypes banned) known (children e)
@@ -650,9 +650,9 @@ loopContinues e = concatMap loopContinues (children e)
 ||| something else (a loop `MutualLoop` merged and `LateInline` inlined reuses
 ||| one slot for different values in different states): such a slot cannot be
 ||| `NULL`-typed.
-mixedSlots : SortedMap Int NativeTy -> RCExp -> SortedSet Int
+mixedSlots : SortedMap LocalId NativeTy -> RCExp -> SortedSet LocalId
 mixedSlots m e =
-    let own : SortedSet Int := case e of
+    let own : SortedSet LocalId := case e of
             RLoop _ loopParams initial _ body =>
                 let feeds := initial :: loopContinues body
                 in SortedSet.fromList (mapMaybe (\(k, (i, _)) => if isJust (lookup i m) && not (all (nullAt k) feeds) then Just i else Nothing)
@@ -670,10 +670,10 @@ mixedSlots m e =
 
 ||| The `NULL`-typed locals of a worker body: its `seeds` (the parameters) and
 ||| their aliases, less every slot of a loop that is not `NULL` throughout.
-safeNullTypes : SortedMap Int NativeTy -> RCExp -> SortedMap Int NativeTy
+safeNullTypes : SortedMap LocalId NativeTy -> RCExp -> SortedMap LocalId NativeTy
 safeNullTypes seeds body = go empty
   where
-    go : SortedSet Int -> SortedMap Int NativeTy
+    go : SortedSet LocalId -> SortedMap LocalId NativeTy
     go banned =
         let m = nullAliasTypes banned (fromList (filter (\(i, _) => not (contains i banned)) (SortedMap.toList seeds))) body
             bad = mixedSlots m body
@@ -682,7 +682,7 @@ safeNullTypes seeds body = go empty
 ||| Each of those aliases becomes a native local of its own type, read from
 ||| the native parameter, instead of a `Boxed` one that would be dup'd and
 ||| dropped.
-nativeAliasLets : SortedMap Int NativeTy -> RCExp -> RCExp
+nativeAliasLets : SortedMap LocalId NativeTy -> RCExp -> RCExp
 nativeAliasLets m e@(RLet fc var RBoxed value@(RV _ (RCLoc _)) body) =
     case lookup var m of
          Just ty => RLet fc var (RNative ty) value (nativeAliasLets m body)
@@ -690,7 +690,7 @@ nativeAliasLets m e@(RLet fc var RBoxed value@(RV _ (RCLoc _)) body) =
 nativeAliasLets m e = mapChildren (nativeAliasLets m) e
 
 ||| Reads of the `NULL`-typed locals in `m` as the constants they are.
-nullReads : SortedMap Int NativeTy -> RCExp -> RCExp
+nullReads : SortedMap LocalId NativeTy -> RCExp -> RCExp
 nullReads m = flip mapLocalsRCExp id $ \case
     RCLoc i => case lookup i m of
                     Just TErased => RCErased
@@ -700,7 +700,7 @@ nullReads m = flip mapLocalsRCExp id $ \case
 
 ||| A worker body with its `NULL`-typed locals (`m`: the parameters and their
 ||| aliases) made native and read as constants.
-nullLocals : SortedMap Int NativeTy -> RCExp -> RCExp
+nullLocals : SortedMap LocalId NativeTy -> RCExp -> RCExp
 nullLocals m e = if null m then e else nullReads m (nativeAliasLets m (retypeNullLoopParams m e))
 
 ||| Synthesise `original`'s own worker (each parameter promoted to
@@ -716,30 +716,30 @@ nullLocals m e = if null m then e else nullReads m (nativeAliasLets m (retypeNul
 ||| `doc/dual-abi.md`'s "Stage 3a" for the full six-step design this
 ||| implements.
 synthesizeWorker : {auto r : Ref FreshId Int}
-                 -> SortedSet Name -> Name -> List (Int, NativeTy) -> Maybe NativeTy -> List (Int, Rep) -> Rep -> RCExp
+                 -> SortedSet Name -> Name -> List (LocalId, NativeTy) -> Maybe NativeTy -> List (LocalId, Rep) -> Rep -> RCExp
                  -> Core (Name, RCDef, RCDef)
 synthesizeWorker existingNames original eligible0 retEligible args wrapperRetRep body = do
     workerName <- freshName workerPrefix existingNames original
-    let nullSeeds : SortedMap Int NativeTy := fromList (filter (\(_, ty) => nullTy ty) eligible0)
-        aliasTypes : SortedMap Int NativeTy := if null nullSeeds then empty else safeNullTypes nullSeeds body
-        eligible : List (Int, NativeTy) := filter (\(p, ty) => not (nullTy ty) || isJust (lookup p aliasTypes)) eligible0
-        eligibleOf : Int -> Maybe NativeTy
+    let nullSeeds : SortedMap LocalId NativeTy := fromList (filter (\(_, ty) => nullTy ty) eligible0)
+        aliasTypes : SortedMap LocalId NativeTy := if null nullSeeds then empty else safeNullTypes nullSeeds body
+        eligible : List (LocalId, NativeTy) := filter (\(p, ty) => not (nullTy ty) || isJust (lookup p aliasTypes)) eligible0
+        eligibleOf : LocalId -> Maybe NativeTy
         eligibleOf p = Data.SortedMap.lookup p (Data.SortedMap.fromList eligible)
-        workerArgs : List (Int, Rep)
+        workerArgs : List (LocalId, Rep)
         workerArgs = map (\(p, _) => case eligibleOf p of
                                            Just ty => (p, RNative ty)
                                            Nothing => (p, RBoxed)) args
-        promotedIds : SortedSet Int := fromList (map fst eligible ++ map fst (SortedMap.toList aliasTypes))
+        promotedIds : SortedSet LocalId := fromList (map fst eligible ++ map fst (SortedMap.toList aliasTypes))
         workerBody : RCExp
         workerBody = nullLocals aliasTypes (stripOwnership promotedIds body)
         workerRetRep : Rep
         workerRetRep = maybe wrapperRetRep RNative retEligible
         workerDef : RCDef
         workerDef = MkRCFun workerArgs workerRetRep True workerBody
-        wrapperArgIds : List Int
+        wrapperArgIds : List LocalId
         wrapperArgIds = map fst args
         wrapperPostDrop : List LocalId
-        wrapperPostDrop = map MkLocalId (mapMaybe (\(p, ty) => if tyAlwaysUnboxed ty then Nothing else Just p) eligible)
+        wrapperPostDrop = (mapMaybe (\(p, ty) => if tyAlwaysUnboxed ty then Nothing else Just p) eligible)
         wrapperBody : RCExp
         wrapperBody = RAppNameRep emptyFC workerName (map snd workerArgs) workerRetRep wrapperPostDrop (map RCLoc wrapperArgIds)
                       {sameLen = trans (lengthMap workerArgs) (trans (lengthMap args) (trans (sym (lengthMap args)) (sym (lengthMap wrapperArgIds))))}
@@ -795,7 +795,7 @@ WorkerTable = SortedMap Name WorkerInfo
 ||| same "reboxed on demand" reasoning `nativePromotionFor` relies on. See
 ||| `doc/dual-abi.md`'s "Extending the promotion to call-argument chains".
 covering
-callArgNativeReads : WorkerTable -> Int -> RCExp -> SortedSet NativeTy
+callArgNativeReads : WorkerTable -> LocalId -> RCExp -> SortedSet NativeTy
 callArgNativeReads workers var e =
     fromMaybe empty (lookup var (callArgNativeReadsFor workerPositions (SortedSet.singleton var) e))
   where
@@ -832,7 +832,7 @@ ffiReturns defs = fromList (mapMaybe entry defs)
 ||| exemption was carried (closure-dispatch typedefs to arity 20, the
 ||| FFI worker path too).
 export
-applyDualABI : Maybe Strict -> (boolReturn : Bool) -> (nullTable : SortedMap Name (SortedMap Int NativeTy)) -> List (Name, RCDef) -> Core (List (Name, RCDef))
+applyDualABI : Maybe Strict -> (boolReturn : Bool) -> (nullTable : SortedMap Name (SortedMap LocalId NativeTy)) -> List (Name, RCDef) -> Core (List (Name, RCDef))
 applyDualABI strict boolReturn nullTable defs = do
     _ <- newRef FreshId 0
     let boolPlan : SortedSet Name := if boolReturn then boolReturnPlan strict defs else empty
@@ -846,7 +846,7 @@ applyDualABI strict boolReturn nullTable defs = do
     -- whole-program def list. See `code-style-Idris2.md`.
     foldr (++) [] <$> traverse (synthesizeIfEligible ffiRets ptrTable nullTable boolPlan existingNames) defs
   where
-    synthesizeIfEligible : {auto r : Ref FreshId Int} -> SortedMap Name (NativeTy, Nat) -> CalleeTable -> SortedMap Name (SortedMap Int NativeTy) -> SortedSet Name -> SortedSet Name -> (Name, RCDef) -> Core (List (Name, RCDef))
+    synthesizeIfEligible : {auto r : Ref FreshId Int} -> SortedMap Name (NativeTy, Nat) -> CalleeTable -> SortedMap Name (SortedMap LocalId NativeTy) -> SortedSet Name -> SortedSet Name -> (Name, RCDef) -> Core (List (Name, RCDef))
     synthesizeIfEligible ffiRets ptrTable nullTable boolPlan existingNames (n, d@(MkRCFun args retRep _ body)) =
         if isMutualLoopMerged n
            then pure [(n, d)]
@@ -951,7 +951,7 @@ workerTable defs = fromList (mapMaybe workerEntry defs)
 ||| Boxed argument -- reading it natively and dropping it here instead
 ||| pays the exact same net cost. Only a variable (`RCLoc`) is counted: a constant
 ||| has nothing to drop.
-postDropFor : SortedMap Int Rep -> List Rep -> List RCLocal -> List LocalId
+postDropFor : SortedMap LocalId Rep -> List Rep -> List RCLocal -> List LocalId
 postDropFor reps argReps args = mapMaybe dropOf (zip argReps args)
   where
     -- a variable still Boxed here; a constant (`NULL` for a `NULL`-typed
@@ -992,7 +992,7 @@ ultimateTail e = e
 ||| when that pass runs), but not true by Stage 4's own point in
 ||| the pipeline. See `doc/dual-abi.md`'s "Bugs found and fixed" #5 for
 ||| the `fib`-worker `v3 + v5` case this exists to catch.
-bareTailNativeReads : Int -> RCExp -> SortedSet PrimType
+bareTailNativeReads : LocalId -> RCExp -> SortedSet PrimType
 bareTailNativeReads var e =
     case ultimateTail e of
          ROp _ _ op args _ =>
@@ -1008,7 +1008,7 @@ bareTailNativeReads var e =
     -- Nat}` erased implicit `ROp` carries its `Vect` length in blocks
     -- the usual `Foldable (Vect n)` search) when actually imported
     -- here.
-    vectElemRCLoc : Int -> Vect n RCLocal -> Bool
+    vectElemRCLoc : LocalId -> Vect n RCLocal -> Bool
     vectElemRCLoc _ [] = False
     vectElemRCLoc i (x :: xs) = x == RCLoc i || vectElemRCLoc i xs
 
@@ -1027,7 +1027,7 @@ bareTailNativeReads var e =
 ||| `value`) -- an `RLoopContinue` can only ever sit there. No `RLoop`
 ||| case: a nested `RLoop`'s continues belong to that inner loop, not to the
 ||| one `loopParams` describes, so it contributes nothing.
-loopContinueNativeReads : List (Int, Rep) -> Int -> RCExp -> SortedSet NativeTy
+loopContinueNativeReads : List (LocalId, Rep) -> LocalId -> RCExp -> SortedSet NativeTy
 loopContinueNativeReads loopParams var (RLet _ _ _ _ body) = loopContinueNativeReads loopParams var body
 loopContinueNativeReads loopParams var (RCmpCase _ _ _ _ t f) =
     loopContinueNativeReads loopParams var t `union` loopContinueNativeReads loopParams var f
@@ -1066,7 +1066,7 @@ loopContinueNativeReads _ _ _ = empty
 ||| Stage 4 has rewritten this value's own calls, so an arm ending in a
 ||| worker call reads as native via `tailValueReps`'s own
 ||| `RAppNameRep` case.
-branchValueNativeType : SortedMap Int Rep -> RCExp -> Maybe NativeTy
+branchValueNativeType : SortedMap LocalId Rep -> RCExp -> Maybe NativeTy
 branchValueNativeType reps e@(RCmpCase {}) = allJustSame (tailValueRepsWith empty reps e)
 branchValueNativeType reps e@(RConCase {}) = allJustSame (tailValueRepsWith empty reps e)
 branchValueNativeType reps e@(RConstCase {}) = allJustSame (tailValueRepsWith empty reps e)
@@ -1086,7 +1086,7 @@ branchValueNativeType _ _ = Nothing
 ||| keeps working via `rcVarToBoxedC`'s own on-demand reboxing (a scalar
 ||| has no observable identity, see `stripOwnership`'s own doc comment).
 ||| See `doc/dual-abi.md`'s "The promotion: `nativePromotionFor`".
-nativePromotionFor : WorkerTable -> Maybe (List (Int, Rep)) -> Int -> NativeTy -> RCExp -> Maybe NativeTy
+nativePromotionFor : WorkerTable -> Maybe (List (LocalId, Rep)) -> LocalId -> NativeTy -> RCExp -> Maybe NativeTy
 nativePromotionFor workers mLoopParams var ty body =
     let fromLoop = maybe empty (\loopParams => loopContinueNativeReads loopParams var body) mLoopParams
         primReads = nativeArgTypes var body `union` bareTailNativeReads var body
@@ -1115,8 +1115,8 @@ nativePromotionFor workers mLoopParams var ty body =
 ||| `applyCallSiteRewriteBody`" for the full `let v3 = (let v4 = n - 1
 ||| in fib v4) in ...` worked example.
 applyCallSiteRewriteBody : WorkerTable
-                        -> SortedMap Int Rep
-                        -> Maybe (List (Int, Rep))
+                        -> SortedMap LocalId Rep
+                        -> Maybe (List (LocalId, Rep))
                         -> Bool -> RCExp -> RCExp
 applyCallSiteRewriteBody workers reps mLoopParams inTail (RLet fc var rep value body) =
     let value1 = applyCallSiteRewriteBody workers reps mLoopParams False value
@@ -1154,7 +1154,7 @@ applyCallSiteRewriteBody workers reps mLoopParams inTail (RConCase fc sc alts mD
     -- its alt, owning nothing: without it in `reps`, `postDropFor`
     -- would take it for a Boxed argument and drop it after the call
     -- (doc/struct-return.md, "Native fields").
-    fieldReps : Maybe Int -> List Int -> SortedMap Int Rep
+    fieldReps : Maybe Int -> List LocalId -> SortedMap LocalId Rep
     fieldReps tag args = case (localRepIn reps sc, tag) of
         (RRet _ l, Just t) =>
             foldl (\m, (k, a) => maybe m (\ty => insert a (RNative (TPrim ty)) m) (retFieldType l t k))
@@ -1295,7 +1295,7 @@ StructWorker = (Name, List Rep, Rep)
 ||| struct worker. `reps` holds each local's Rep so a native argument
 ||| read from a Boxed local gets its `postDrop`, as in
 ||| `applyCallSiteRewriteBody`.
-packTails : SortedMap Name StructWorker -> SortedSet Name -> SortedMap Int Rep -> RCExp -> RCExp
+packTails : SortedMap Name StructWorker -> SortedSet Name -> SortedMap LocalId Rep -> RCExp -> RCExp
 packTails ws wNames reps (RLet fc v rep value body) = RLet fc v rep value (packTails ws wNames (insert v rep reps) body)
 packTails ws wNames reps (RDup fc v extra cont) = RDup fc v extra (packTails ws wNames reps cont)
 packTails ws wNames reps (RDrop fc vs cont) = RDrop fc vs (packTails ws wNames reps cont)
@@ -1333,7 +1333,7 @@ packTails _ _ _ e = e
 
 ||| The cell a struct `r` stands for: one alt per tag, each rebuilding
 ||| the constructor from the struct's fields.
-cellOf : {auto v : Ref VarId Int} -> Int -> SortedMap Int ConShape -> Core RCExp
+cellOf : {auto v : Ref VarId Int} -> LocalId -> SortedMap Int ConShape -> Core RCExp
 cellOf r shapes = do
     alts <- traverse alt (SortedMap.toList shapes)
     pure (RConCase emptyFC (RCLoc r) alts Nothing)
@@ -1360,16 +1360,16 @@ materialize w argReps rep postDrop args shapes = do
 ||| (doc/struct-return.md's "RC at a struct scrutinee"), `fld` being the
 ||| alt's own Boxed fields: the struct owns them, and there is no cell to release
 ||| or reuse. `Nothing` when `v` is read any other way.
-structRC : Int -> List LocalId -> RCExp -> Maybe RCExp
+structRC : LocalId -> List LocalId -> RCExp -> Maybe RCExp
 structRC v fld (RDrop fc vs k) =
-    let vs' = if MkLocalId v `elem` vs then filter (/= MkLocalId v) vs ++ fld else vs
+    let vs' = if v `elem` vs then filter (/= v) vs ++ fld else vs
     in (\k' => if null vs' then k' else RDrop fc vs' k') <$> structRC v fld k
 structRC v fld (RFree fc x k) =
-    if x == MkLocalId v then structRC v fld k else RFree fc x <$> structRC v fld k
+    if x == v then structRC v fld k else RFree fc x <$> structRC v fld k
 structRC v fld (RReleaseReuse fc x k) =
-    if x == MkLocalId v then structRC v fld k else RReleaseReuse fc x <$> structRC v fld k
+    if x == v then structRC v fld k else RReleaseReuse fc x <$> structRC v fld k
 structRC v fld (RReuseOffer fc sc ds us k) =
-    if sc == MkLocalId v
+    if sc == v
        then (\k' => if null us then k' else RDrop fc us k') <$> structRC v fld k
        else RReuseOffer fc sc ds us <$> structRC v fld k
 structRC v _ e@(RCon fc n ci tag args reuseFrom) =
@@ -1380,12 +1380,12 @@ structRC v fld e =
 
 ||| `body` down to the `case` on `v` it starts with, through RC wrappers
 ||| that don't touch `v`: the wrappers as a rebuild function, and the case.
-caseOn : Int -> RCExp -> Maybe (RCExp -> RCExp, FC, List RConAlt, Maybe RCExp)
+caseOn : LocalId -> RCExp -> Maybe (RCExp -> RCExp, FC, List RConAlt, Maybe RCExp)
 caseOn v (RDup fc x n k) =
-    if x == MkLocalId v then Nothing
+    if x == v then Nothing
     else map (\(w, c) => (RDup fc x n . w, c)) (caseOn v k)
 caseOn v (RDrop fc vs k) =
-    if MkLocalId v `elem` vs then Nothing
+    if v `elem` vs then Nothing
     else map (\(w, c) => (RDrop fc vs . w, c)) (caseOn v k)
 caseOn v (RLet fc y rep value k) =
     if contains (RCLoc v) (mentionedLocals value) then Nothing
@@ -1397,7 +1397,7 @@ caseOn _ _ = Nothing
 ||| The same value with its final call to a struct-returning function `g`
 ||| sent to `g`'s struct worker instead; `Nothing` when it ends in
 ||| anything else.
-retargetCall : SortedMap Name StructWorker -> SortedMap Int Rep -> RCExp -> Maybe (Name, Rep, RCExp)
+retargetCall : SortedMap Name StructWorker -> SortedMap LocalId Rep -> RCExp -> Maybe (Name, Rep, RCExp)
 retargetCall ws reps (RLet fc x rep value body) =
     map (\(g, l, b) => (g, l, RLet fc x rep value b)) (retargetCall ws (insert x rep reps) body)
 retargetCall ws reps (RDup fc x n k) = map (\(g, l, b) => (g, l, RDup fc x n b)) (retargetCall ws reps k)
@@ -1411,26 +1411,26 @@ retargetCall _ _ _ = Nothing
 ||| `e` with every ownership operation on `f` gone: a field the struct
 ||| carries natively has no reference count. A Boxed use of it is boxed
 ||| afresh at that point by Emit, which is what the removed `dup` paid for.
-dropOwnership : Int -> RCExp -> RCExp
-dropOwnership f (RDup fc x n k) = if x == MkLocalId f then dropOwnership f k else RDup fc x n (dropOwnership f k)
+dropOwnership : LocalId -> RCExp -> RCExp
+dropOwnership f (RDup fc x n k) = if x == f then dropOwnership f k else RDup fc x n (dropOwnership f k)
 dropOwnership f (RDrop fc vs k) =
-    let vs' = filter (/= MkLocalId f) vs
+    let vs' = filter (/= f) vs
     in (if null vs' then id else RDrop fc vs') (dropOwnership f k)
-dropOwnership f (RFree fc x k) = if x == MkLocalId f then dropOwnership f k else RFree fc x (dropOwnership f k)
-dropOwnership f (ROp fc lazy op args pd) = ROp fc lazy op args (filter (/= MkLocalId f) pd)
-dropOwnership f (RExtPrim fc lazy p args pd) = RExtPrim fc lazy p args (filter (/= MkLocalId f) pd)
-dropOwnership f (RAppNameRep {sameLen} fc n argReps retRep pd args) = RAppNameRep fc n argReps retRep (filter (/= MkLocalId f) pd) args
-dropOwnership f (RAppFFIInline fc ccs fargs ret pd args) = RAppFFIInline fc ccs fargs ret (filter (/= MkLocalId f) pd) args
-dropOwnership f (RStructGet fc sv sf pd) = RStructGet fc sv sf (filter (/= MkLocalId f) pd)
-dropOwnership f (RForce fc lr v pd) = RForce fc lr v (filter (/= MkLocalId f) pd)
-dropOwnership f (RStructSet fc sv sf val pd) = RStructSet fc sv sf val (filter (/= MkLocalId f) pd)
-dropOwnership f (RFill fc cell k val pd) = RFill fc cell k val (filter (/= MkLocalId f) pd)
+dropOwnership f (RFree fc x k) = if x == f then dropOwnership f k else RFree fc x (dropOwnership f k)
+dropOwnership f (ROp fc lazy op args pd) = ROp fc lazy op args (filter (/= f) pd)
+dropOwnership f (RExtPrim fc lazy p args pd) = RExtPrim fc lazy p args (filter (/= f) pd)
+dropOwnership f (RAppNameRep {sameLen} fc n argReps retRep pd args) = RAppNameRep fc n argReps retRep (filter (/= f) pd) args
+dropOwnership f (RAppFFIInline fc ccs fargs ret pd args) = RAppFFIInline fc ccs fargs ret (filter (/= f) pd) args
+dropOwnership f (RStructGet fc sv sf pd) = RStructGet fc sv sf (filter (/= f) pd)
+dropOwnership f (RForce fc lr v pd) = RForce fc lr v (filter (/= f) pd)
+dropOwnership f (RStructSet fc sv sf val pd) = RStructSet fc sv sf val (filter (/= f) pd)
+dropOwnership f (RFill fc cell k val pd) = RFill fc cell k val (filter (/= f) pd)
 dropOwnership f (RCmpCase fc op args pd t e) =
-    RCmpCase fc op args (filter (/= MkLocalId f) pd) (dropOwnership f t) (dropOwnership f e)
-dropOwnership f (RLoopContinue fc args pd) = RLoopContinue fc args (filter (/= MkLocalId f) pd)
-dropOwnership f (RLoop {sameLen} fc ps initial pd k) = RLoop fc ps initial (filter (/= MkLocalId f) pd) (dropOwnership f k)
+    RCmpCase fc op args (filter (/= f) pd) (dropOwnership f t) (dropOwnership f e)
+dropOwnership f (RLoopContinue fc args pd) = RLoopContinue fc args (filter (/= f) pd)
+dropOwnership f (RLoop {sameLen} fc ps initial pd k) = RLoop fc ps initial (filter (/= f) pd) (dropOwnership f k)
 dropOwnership f (RReuseOffer fc sc ds us k) =
-    RReuseOffer fc sc (filter (/= MkLocalId f) ds) (filter (/= MkLocalId f) us) (dropOwnership f k)
+    RReuseOffer fc sc (filter (/= f) ds) (filter (/= f) us) (dropOwnership f k)
 dropOwnership f e = mapChildren (dropOwnership f) e
 
 ||| One alt, rewritten for a struct scrutinee: a known tag and at most
@@ -1438,12 +1438,12 @@ dropOwnership f e = mapChildren (dropOwnership f) e
 ||| has. The struct owns each Boxed field; one `fieldType` says it carries
 ||| natively owns nothing (`dropOwnership`). A field blanked to `0` has
 ||| no local left to drop, so that alt is not rewritten.
-structAlt : (Int -> Nat -> Maybe PrimType) -> Int -> RConAlt -> Maybe RConAlt
+structAlt : (Int -> Nat -> Maybe PrimType) -> LocalId -> RConAlt -> Maybe RConAlt
 structAlt fieldType v (MkRConAlt n ci (Just tag) as b) =
-    if length as > maxRetFields || elem 0 as then Nothing
-    else let indexed : List (Nat, Int) := zip [0 .. length as] as
-             natives : List Int := map snd (filter (\kf => isJust (fieldType tag (fst kf))) indexed)
-             boxed : List LocalId := map (MkLocalId . snd) (filter (\kf => isNothing (fieldType tag (fst kf))) indexed)
+    if length as > maxRetFields || elem deadId as then Nothing
+    else let indexed : List (Nat, LocalId) := zip [0 .. length as] as
+             natives : List LocalId := map snd (filter (\kf => isJust (fieldType tag (fst kf))) indexed)
+             boxed : List LocalId := map snd (filter (\kf => isNothing (fieldType tag (fst kf))) indexed)
          in MkRConAlt n ci (Just tag) as . (\b' => foldr dropOwnership b' natives) <$> structRC v boxed b
 structAlt _ _ _ = Nothing
 
@@ -1518,7 +1518,7 @@ prunePlan defs plan =
 ||| (Stage 4 no longer finds such a wrapper, see `applyStructReturn`).
 structSites : {auto v : Ref VarId Int}
            -> SortedMap Name StructWorker -> SortedMap Name (SortedMap Int ConShape)
-           -> SortedMap Int Rep -> RCExp -> Core RCExp
+           -> SortedMap LocalId Rep -> RCExp -> Core RCExp
 structSites ws plan reps (RLet fc x RBoxed value body) = do
     value' <- structSites ws plan reps value
     body' <- structSites ws plan (insert x RBoxed reps) body
@@ -1609,7 +1609,7 @@ applyStructReturn mergedToo defs = do
                       pure ((n, d), Just (w, map snd args, True))
     workerFor _ _ nd = pure (nd, Nothing)
 
-    seed : List (Int, Rep) -> SortedMap Int Rep
+    seed : List (LocalId, Rep) -> SortedMap LocalId Rep
     seed = fromList
 
     rewrite' : SortedMap Name StructWorker -> SortedSet Name -> SortedMap Name (SortedMap Int ConShape)

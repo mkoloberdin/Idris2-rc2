@@ -166,14 +166,14 @@ pushOk consumer landings =
 -- The rewrite
 
 ||| `copy` with every id it binds freshened, and `v` renamed to `v'`.
-freshCopy : {auto vid : Ref VarId Int} -> (v : Int) -> (v' : Int) -> RCExp -> Core RCExp
+freshCopy : {auto vid : Ref VarId Int} -> (v : LocalId) -> (v' : LocalId) -> RCExp -> Core RCExp
 freshCopy v v' e = do
     ren <- freshenBoundIds (collectBoundIds e)
     pure (renameRCExp (insert v v' ren) e)
 
 ||| One tail, with the consumer (or just the part it lands on) moved
 ||| into it as a `case` on a fresh local bound to the tail.
-pushInto : {auto vid : Ref VarId Int} -> Int -> Rep -> Consumer -> RCExp -> Core RCExp
+pushInto : {auto vid : Ref VarId Int} -> LocalId -> Rep -> Consumer -> RCExp -> Core RCExp
 pushInto v rep consumer t =
     case landingOf consumer t of
          Nothing => pure t
@@ -186,7 +186,7 @@ pushInto v rep consumer t =
     fcOf (ConC fc _ _) = fc
     fcOf (ConstC fc _ _) = fc
 
-    consumerFor : Int -> Landing -> RCExp
+    consumerFor : LocalId -> Landing -> RCExp
     consumerFor v Whole = case consumer of
         ConC fc alts mDef => RConCase fc (RCLoc v) alts mDef
         ConstC fc alts mDef => RConstCase fc (RCLoc v) alts mDef
@@ -205,7 +205,7 @@ pushInto v rep consumer t =
         partIndex _ = Nothing
 
 ||| `v` is read nowhere in the consumer's own parts.
-consumerAvoids : Int -> Consumer -> Bool
+consumerAvoids : LocalId -> Consumer -> Bool
 consumerAvoids v consumer = null (ownedUsedIn (singleton (RCLoc v)) (asExp consumer))
   where
     asExp : Consumer -> RCExp
@@ -230,7 +230,7 @@ pushExp (RLet fc v rep value body) = do
                                    pure (value'', True)
                            else unchanged
   where
-    consumerOf : Int -> RCExp -> Maybe Consumer
+    consumerOf : LocalId -> RCExp -> Maybe Consumer
     consumerOf v (RConCase cfc (RCLoc s) alts mDef) = if s == v then Just (ConC cfc alts mDef) else Nothing
     consumerOf v (RConstCase cfc (RCLoc s) alts mDef) = if s == v then Just (ConstC cfc alts mDef) else Nothing
     consumerOf _ _ = Nothing
@@ -276,16 +276,16 @@ applyPushCon defs = Builtin.fst <$> applyPushConNames defs
 
 
 ||| `v`'s cell reservation handed to `w`, or dropped when there is no `w`.
-retargetReuse : Int -> Maybe RCLocal -> RCExp -> RCExp
+retargetReuse : LocalId -> Maybe RCLocal -> RCExp -> RCExp
 retargetReuse v w (RCon fc n ci tag args (Just (RCLoc r))) =
     if r == v then RCon fc n ci tag args w else RCon fc n ci tag args (Just (RCLoc r))
 retargetReuse v w (RReleaseReuse fc r k) =
-    if r.num == v then maybe (retargetReuse v w k) (\w' => RReleaseReuse fc w' (retargetReuse v w k)) (w >>= idOf)
+    if r == v then maybe (retargetReuse v w k) (\w' => RReleaseReuse fc w' (retargetReuse v w k)) (w >>= idOf)
               else RReleaseReuse fc r (retargetReuse v w k)
 retargetReuse v w e = mapChildren (retargetReuse v w) e
 
 ||| Removes one element equal to `x`, if any.
-removeOne : Int -> List Int -> (Bool, List Int)
+removeOne : LocalId -> List LocalId -> (Bool, List LocalId)
 removeOne x [] = (False, [])
 removeOne x (y :: ys) = if x == y then (True, ys) else let (b, ys') = removeOne x ys in (b, y :: ys')
 
@@ -293,33 +293,33 @@ removeOne x (y :: ys) = if x == y then (True, ys) else let (b, ys') = removeOne 
 ||| renamed into `p`) with cell `reuseFrom`, without that constructor or
 ||| the scrutinee `v`: `Nothing` when `v`'s release isn't in `p`'s
 ||| straight-line prologue in a shape this handles.
-foldAlt : FC -> Int -> List Int -> Maybe RCLocal -> RCExp -> Maybe RCExp
+foldAlt : FC -> LocalId -> List LocalId -> Maybe RCLocal -> RCExp -> Maybe RCExp
 foldAlt fc v pending reuseFrom p = go pending p
   where
-    drops : List Int -> RCExp -> RCExp
+    drops : List LocalId -> RCExp -> RCExp
     drops [] k = k
-    drops is k = RDrop fc (map MkLocalId is) k
+    drops is k = RDrop fc is k
 
     releaseTail : RCExp -> RCExp
     releaseTail k = maybe k (\w => RReleaseReuse fc w k) (reuseFrom >>= idOf)
 
-    go : List Int -> RCExp -> Maybe RCExp
+    go : List LocalId -> RCExp -> Maybe RCExp
     -- A field `dup`'d before `v` goes was taking its own reference; the
     -- constructor's is handed over instead.
     go pend (RDup dfc x n k) =
-        let (hit, pend') = removeOne x.num pend
+        let (hit, pend') = removeOne x pend
         in if not hit then RDup dfc x n <$> go pend k
            else case n of
                      Z => go pend' k
                      S m => RDup dfc x m <$> go pend' k
     go pend (RDrop dfc vs k) =
-        if elem (MkLocalId v) vs
-           then let rest = filter (/= MkLocalId v) vs
+        if elem v vs
+           then let rest = filter (/= v) vs
                 in Just $ (if null rest then id else RDrop dfc rest) (drops pend (releaseTail k))
            else RDrop dfc vs <$> go pend k
     go pend (RReuseOffer rfc s ds us k) =
-        if s.num == v && pend == pending
-           then Just $ drops (map (.num) us) (retargetReuse v reuseFrom k)
+        if s == v && pend == pending
+           then Just $ drops us (retargetReuse v reuseFrom k)
            else RReuseOffer rfc s ds us <$> go pend k
     go pend (RFree ffc x k) = RFree ffc x <$> go pend k
     go pend (RReleaseReuse rfc x k) = RReleaseReuse rfc x <$> go pend k
@@ -328,7 +328,7 @@ foldAlt fc v pending reuseFrom p = go pending p
 ||| One tail, post-RC. A constructor tail whose fields are all Boxed
 ||| locals is folded against its alt (`foldAlt`); anything else gets the
 ||| part of the consumer it lands on, on a fresh local, as `pushInto`.
-pushIntoRC : {auto vid : Ref VarId Int} -> SortedMap Int Rep -> Int -> Rep -> Consumer -> RCExp -> Core RCExp
+pushIntoRC : {auto vid : Ref VarId Int} -> SortedMap LocalId Rep -> LocalId -> Rep -> Consumer -> RCExp -> Core RCExp
 pushIntoRC reps v rep consumer t =
     case (consumer, landingOf consumer t, t) of
          (ConC fc alts _, Just (Part i), RCon tfc _ _ _ args reuseFrom) =>
@@ -345,13 +345,13 @@ pushIntoRC reps v rep consumer t =
                   _ => pushInto v rep consumer t
          _ => pushInto v rep consumer t
   where
-    boxedLoc : RCLocal -> Maybe Int
+    boxedLoc : RCLocal -> Maybe LocalId
     boxedLoc (RCLoc j) = if maybe False isNativeRep (lookup j reps) then Nothing else Just j
     boxedLoc _ = Nothing
 
 ||| Every `Rep` bound by an `RLet` or a loop anywhere in `e`: a tail's own
 ||| fields can be locals bound inside the value it ends.
-letReps : SortedMap Int Rep -> RCExp -> SortedMap Int Rep
+letReps : SortedMap LocalId Rep -> RCExp -> SortedMap LocalId Rep
 letReps acc (RLet _ v r value body) = letReps (letReps (insert v r acc) value) body
 letReps acc (RLoop _ ps _ _ k) = letReps (foldl (\m, (i, r) => insert i r m) acc ps) k
 letReps acc e = foldl letReps acc (children e)
@@ -359,7 +359,7 @@ letReps acc e = foldl letReps acc (children e)
 ||| As `pushExp`, post-RC: `v` may only be released or reused by the
 ||| consumer (`onlyReleased`), and a single tail is enough (shape A is
 ||| a one-tail value). `reps` tracks each local's `Rep` on the way down.
-pushExpRC : {auto vid : Ref VarId Int} -> SortedMap Int Rep -> RCExp -> Core (RCExp, Bool)
+pushExpRC : {auto vid : Ref VarId Int} -> SortedMap LocalId Rep -> RCExp -> Core (RCExp, Bool)
 pushExpRC reps (RLet fc v rep value body) = do
     let reps' = insert v rep reps
     (value', c1) <- pushExpRC reps value

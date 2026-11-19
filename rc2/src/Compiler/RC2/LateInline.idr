@@ -72,7 +72,7 @@ tinyAlwaysSize = 2
 
 ||| What is left of `budget` after the nodes of `e`, or `Nothing` once `e` has
 ||| more nodes than that: a size test that stops counting at the limit.
-fits : SortedSet Int -> Nat -> RCExp -> Maybe Nat
+fits : SortedSet LocalId -> Nat -> RCExp -> Maybe Nat
 fits ps n e = case e of
     -- A `dup` or `drop` of a parameter costs nothing here: the caller owns those, and `PushDown`
     -- and `DupMerge`, much later, cancel most of them against its own. One of a local the body
@@ -82,7 +82,7 @@ fits ps n e = case e of
     _ => count
   where
     isParam : LocalId -> Bool
-    isParam i = contains i.num ps
+    isParam i = contains i ps
 
     count : Maybe Nat
     count = case n of
@@ -95,7 +95,7 @@ fits ps n e = case e of
                              _ => foldlM (fits ps) m (children e)
 
 ||| The parameters of a function, for `fits`.
-paramSet : List (Int, Rep) -> SortedSet Int
+paramSet : List (LocalId, Rep) -> SortedSet LocalId
 paramSet args = SortedSet.fromList (map fst args)
 
 ||| `let y = e; y` of a boxed `y` is `e`: what is left of a spliced wrapper that only
@@ -249,7 +249,7 @@ callsBack defOf caller callee =
 ||| the callee's own body binds *besides* its top-level params, which
 ||| `spliceCall` renames separately.
 export
-collectBoundIds : RCExp -> List Int
+collectBoundIds : RCExp -> List LocalId
 collectBoundIds (RLet _ var _ value body) = var :: (collectBoundIds value ++ collectBoundIds body)
 collectBoundIds (RConCase _ _ alts mDef) =
     concatMap (\(MkRConAlt _ _ _ as body) => as ++ collectBoundIds body) alts ++ maybe [] collectBoundIds mDef
@@ -264,7 +264,7 @@ collectBoundIds e = concatMap collectBoundIds (children e)
 ||| nearest enclosing `RLoop`'s params; an `RLoopContinue` entry into a
 ||| slot already `RNative ty` is safe too, since `Emit` renders it by the
 ||| slot's `Rep`. See `rc2/doc/inlining.md`, "Criterion B, revisited".
-hasNonNativeUse : (ty : PrimType) -> (loopSlots : List (Int, Rep)) -> Int -> RCExp -> Bool
+hasNonNativeUse : (ty : PrimType) -> (loopSlots : List (LocalId, Rep)) -> LocalId -> RCExp -> Bool
 hasNonNativeUse ty loopSlots target (RV _ v) = v == RCLoc target
 hasNonNativeUse ty loopSlots target (RAppName _ _ _ args) = elem (RCLoc target) args
 hasNonNativeUse ty loopSlots target (RUnderApp _ _ _ args) = elem (RCLoc target) args
@@ -273,7 +273,7 @@ hasNonNativeUse ty loopSlots target (RLet _ _ _ value body) =
     hasNonNativeUse ty loopSlots target value || hasNonNativeUse ty loopSlots target body
 hasNonNativeUse ty loopSlots target (RCon _ _ _ _ args reuseFrom) = elem (RCLoc target) args || reuseFrom == Just (RCLoc target)
 hasNonNativeUse ty loopSlots target (ROp {}) = False -- postDrop-only; stale, stripOwnership handles it
-hasNonNativeUse ty loopSlots target (RExtPrim _ _ _ args postDrop) = elem (RCLoc target) args || elem (MkLocalId target) postDrop
+hasNonNativeUse ty loopSlots target (RExtPrim _ _ _ args postDrop) = elem (RCLoc target) args || elem target postDrop
 -- Unlike ROp/RCmpCase/..., stripOwnership never touches RExtPrim's own postDrop -- a genuine use here.
 hasNonNativeUse ty loopSlots target (RStructGet _ structVar _ _) = structVar == RCLoc target
 hasNonNativeUse ty loopSlots target (RDelay _ _ _ caps) = elem (RCLoc target) caps
@@ -291,11 +291,11 @@ hasNonNativeUse ty loopSlots target (RConstCase _ sc alts mDef) =
     (sc == RCLoc target && constAltsNativeType alts /= Just ty)
       || any (\(MkRConstAlt _ body) => hasNonNativeUse ty loopSlots target body) alts
       || maybe False (hasNonNativeUse ty loopSlots target) mDef
-hasNonNativeUse ty loopSlots target (RReleaseReuse _ v body) = v == MkLocalId target || hasNonNativeUse ty loopSlots target body
+hasNonNativeUse ty loopSlots target (RReleaseReuse _ v body) = v == target || hasNonNativeUse ty loopSlots target body
 -- RReuseOffer's sc/dupOnShared/dropOnUnique are genuine uses, as is RReleaseReuse's v
 -- above: stripOwnership deliberately never touches an already-decided reuse.
 hasNonNativeUse ty loopSlots target (RReuseOffer _ sc dupOnShared dropOnUnique body) =
-    sc == MkLocalId target || elem (MkLocalId target) dupOnShared || elem (MkLocalId target) dropOnUnique
+    sc == target || elem target dupOnShared || elem target dropOnUnique
       || hasNonNativeUse ty loopSlots target body
 -- The body is checked against THIS loop's slots. `initial` is treated like
 -- `RLoopContinue` below: `Emit` renders each entry by the slot's `Rep`, so
@@ -326,7 +326,7 @@ hasNonNativeUse ty loopSlots target e = any (hasNonNativeUse ty loopSlots target
 ||| `Just ty` iff `paramId`'s occurrences in `calleeBody` are all
 ||| `ty`-typed native-operand reads (`hasNonNativeUse`); `ty` comes from
 ||| `nativeArgType` first.
-loopParamNativeType : Maybe Strict -> (paramId : Int) -> (calleeBody : RCExp) -> Maybe PrimType
+loopParamNativeType : Maybe Strict -> (paramId : LocalId) -> (calleeBody : RCExp) -> Maybe PrimType
 loopParamNativeType strict paramId calleeBody =
     case nativeArgType strict paramId calleeBody of
          Nothing => Nothing
@@ -335,7 +335,7 @@ loopParamNativeType strict paramId calleeBody =
 ||| Whether `target` is one of an `RLoop`'s loop-carried slot ids in `e`,
 ||| i.e. aliasing the caller's local onto it would let the loop reassign
 ||| that local. See `buildSplice`.
-isLoopCarried : Int -> RCExp -> Bool
+isLoopCarried : LocalId -> RCExp -> Bool
 isLoopCarried target (RLoop _ loopParams _ _ body) = elem target (map fst loopParams) || isLoopCarried target body
 isLoopCarried target e = any (isLoopCarried target) (children e)
 
@@ -344,7 +344,7 @@ isLoopCarried target e = any (isLoopCarried target) (children e)
 ||| for a zero-capture closure, then `missing` is that callee's whole arity; the
 ||| constants of an `RCConstPartial` otherwise).
 ConstClosureArgs : Type
-ConstClosureArgs = SortedMap Int (Name, Nat, List RCLocal)
+ConstClosureArgs = SortedMap LocalId (Name, Nat, List RCLocal)
 
 ||| Rewrite a saturated application of one of `ccs`'s ids into a direct
 ||| call. `ConstFold` does this too, but runs before `buildSplice` mints
@@ -386,7 +386,7 @@ resolveConstClosureApps ccs e = mapChildren (resolveConstClosureApps ccs) e
 ||| boxing decision (`RNative ty` only if `loopParamNativeType` agrees at the
 ||| same type). See `rc2/doc/inlining.md`, "Criterion B, revisited", for
 ||| why.
-buildSplice : {auto v : Ref VarId Int} -> Maybe Strict -> FC -> SortedMap Int Rep -> RCExp -> List (Int, RCLocal) -> Core (Renaming, RCExp -> RCExp, SortedSet Int, ConstClosureArgs)
+buildSplice : {auto v : Ref VarId Int} -> Maybe Strict -> FC -> SortedMap LocalId Rep -> RCExp -> List (LocalId, RCLocal) -> Core (Renaming, RCExp -> RCExp, SortedSet LocalId, ConstClosureArgs)
 buildSplice strict fc reps calleeBody [] = pure (empty, id, empty, empty)
 buildSplice strict fc reps calleeBody ((paramId, actual@(RCLoc actualId)) :: rest) = do
     (ren, wrap, promoted, ccs) <- buildSplice strict fc reps calleeBody rest
@@ -405,7 +405,7 @@ buildSplice strict fc reps calleeBody ((paramId, actual@(RCLoc actualId)) :: res
                      pure (insert paramId f ren, wrap . RLet fc f RBoxed (RV fc actual), promoted, ccs)
                  else pure (insert paramId actualId ren, wrap, promoted, ccs)
   where
-    argRep : SortedMap Int Rep -> RCLocal -> Rep
+    argRep : SortedMap LocalId Rep -> RCLocal -> Rep
     argRep reps (RCLoc j) = case lookup j reps of
                                  Just (RInlineNative (TPrim ty)) => RNative (TPrim ty)
                                  Just r => r
@@ -444,7 +444,7 @@ buildSplice strict fc reps calleeBody ((paramId, actual) :: rest) = do
 ||| splicing two clones into one caller would redefine them
 ||| (`rc2/doc/inlining.md`, "Criterion B, revisited", `var_301`).
 export
-freshenBoundIds : {auto v : Ref VarId Int} -> List Int -> Core Renaming
+freshenBoundIds : {auto v : Ref VarId Int} -> List LocalId -> Core Renaming
 freshenBoundIds [] = pure empty
 freshenBoundIds (i :: is) = do
     ren <- freshenBoundIds is
@@ -481,7 +481,7 @@ uniformTailType e = case tailValueReps empty e of
 ||| `hasNonNativeUse`. See `rc2/doc/inlining.md`, "Criterion B, revisited",
 ||| Layers 2/3.
 export
-promotableNativeLetRep : (loopSlots : List (Int, Rep)) -> (var : Int) -> (value : RCExp) -> (body : RCExp) -> Maybe PrimType
+promotableNativeLetRep : (loopSlots : List (LocalId, Rep)) -> (var : LocalId) -> (value : RCExp) -> (body : RCExp) -> Maybe PrimType
 promotableNativeLetRep loopSlots var value body =
     case uniformTailType value of
          Just ty => if emitNativeValueCompatible value && not (hasNonNativeUse ty loopSlots var body) then Just ty else Nothing
@@ -495,7 +495,7 @@ data SpliceCount : Type where
 ||| (renamed) body. `reps`: the caller's own current `Rep` environment
 ||| at this exact call site (`inlineInto`'s own walk), consulted by
 ||| `buildSplice` above -- never the callee's own declared param `Rep`.
-spliceCall : {auto v : Ref VarId Int} -> Maybe Strict -> FC -> SortedMap Int Rep -> RCDef -> List RCLocal -> Core RCExp
+spliceCall : {auto v : Ref VarId Int} -> Maybe Strict -> FC -> SortedMap LocalId Rep -> RCDef -> List RCLocal -> Core RCExp
 spliceCall strict fc reps (MkRCFun calleeArgs _ _ calleeBody) actualArgs = do
     (paramRen, wrap, promoted, ccs) <- buildSplice strict fc reps calleeBody (zip (map fst calleeArgs) actualArgs)
     let paramIds = SortedSet.fromList (map fst calleeArgs)
@@ -531,19 +531,19 @@ inlineInto strict tiny defOf eligible tinyOnly self = go empty empty []
     -- A call is spliced when its callee is `eligible`, or `tinyOnly` and either
     -- of at most `tinyAlwaysSize` nodes, or of at most `tiny` given a closure the
     -- caller built (`closures`: the locals bound to a `partial`) or a constant closure.
-    splices : SortedSet Int -> Name -> List RCLocal -> Bool
+    splices : SortedSet LocalId -> Name -> List RCLocal -> Bool
     splices closures n args =
         not (callsBack defOf self n)
           && (contains n eligible || (contains n tinyOnly && (fitsNow tinyAlwaysSize n || (any (isClosure closures) args && fitsNow tiny n))))
       where
-        isClosure : SortedSet Int -> RCLocal -> Bool
+        isClosure : SortedSet LocalId -> RCLocal -> Bool
         isClosure cl (RCLoc i) = contains i cl
         isClosure _ (RCConstPartial {}) = True
         isClosure _ _ = False
 
     -- Whether the value of an `RLet` is such a closure: a `partial`, possibly
     -- behind a `let` that only returns it, or another such local.
-    isPartialValue : SortedSet Int -> RCExp -> Bool
+    isPartialValue : SortedSet LocalId -> RCExp -> Bool
     isPartialValue _ (RUnderApp {}) = True
     isPartialValue cl (RLet _ _ _ _ body) = isPartialValue cl body
     isPartialValue cl (RV _ (RCLoc i)) = contains i cl
@@ -552,7 +552,7 @@ inlineInto strict tiny defOf eligible tinyOnly self = go empty empty []
     -- `loopSlots`: the nearest enclosing `RLoop`'s params (`[]` outside a
     -- loop), kept apart from `reps` because it must reflect the loop already
     -- walked through ("Criterion B, revisited", Layer 3).
-    go : SortedSet Int -> SortedMap Int Rep -> List (Int, Rep) -> RCExp -> Core RCExp
+    go : SortedSet LocalId -> SortedMap LocalId Rep -> List (LocalId, Rep) -> RCExp -> Core RCExp
     go cl reps loopSlots (RAppName fc lazy n args) =
         if splices cl n args
            then case lookup n defOf of

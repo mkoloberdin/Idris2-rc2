@@ -307,7 +307,7 @@ idName i = "var_" ++ show i.num
 
 export
 varName : RCLocal -> String
-varName (RCLoc i) = idName (MkLocalId i)
+varName (RCLoc i) = idName i
 varName (RCNull)  = "NULL"
 varName RCErased = "NULL"
 varName RCWorld = "NULL"
@@ -784,7 +784,7 @@ removeReuseConstructors : {auto oft : Ref OutfileText Output}
 removeReuseConstructors = applyFunctionToVars "idris2rc2_releaseReuse"
 
 export
-repOfLocal : {auto r : Ref RepMap (SortedMap Int Rep)} -> RCLocal -> Core Rep
+repOfLocal : {auto r : Ref RepMap (SortedMap LocalId Rep)} -> RCLocal -> Core Rep
 repOfLocal l = (\reps => localRepIn reps l) <$> get RepMap
 
 ||| Dedup key for `ConstDef`'s own map: `I`/`I64` stage to the exact
@@ -999,7 +999,7 @@ export
 inlineExprFor : {auto a : Ref ArgCounter Nat}
              -> {auto _ : Ref ConstDef (SortedMap Constant ConstDef)}
              -> {auto cc : Ref ConstConDef (SortedMap RCLocal String, List String)}
-             -> {auto lm : Ref InlineMap (SortedMap Int (String, List String))}
+             -> {auto lm : Ref InlineMap (SortedMap LocalId (String, List String))}
              -> RCLocal -> Core (Maybe (String, List String))
 inlineExprFor RCNull = pure Nothing
 inlineExprFor RCErased = pure Nothing
@@ -1034,8 +1034,8 @@ export
 rcVarToBoxedC : {auto a : Ref ArgCounter Nat}
              -> {auto _ : Ref ConstDef (SortedMap Constant ConstDef)}
              -> {auto cc : Ref ConstConDef (SortedMap RCLocal String, List String)}
-             -> {auto r : Ref RepMap (SortedMap Int Rep)}
-             -> {auto lm : Ref InlineMap (SortedMap Int (String, List String))}
+             -> {auto r : Ref RepMap (SortedMap LocalId Rep)}
+             -> {auto lm : Ref InlineMap (SortedMap LocalId (String, List String))}
              -> RCLocal -> Core (String, List String)
 rcVarToBoxedC l = do
     rep <- repOfLocal l
@@ -1063,8 +1063,8 @@ export
 boxOpArgParts : {auto a : Ref ArgCounter Nat}
              -> {auto _ : Ref ConstDef (SortedMap Constant ConstDef)}
              -> {auto cc : Ref ConstConDef (SortedMap RCLocal String, List String)}
-             -> {auto r : Ref RepMap (SortedMap Int Rep)}
-             -> {auto lm : Ref InlineMap (SortedMap Int (String, List String))}
+             -> {auto r : Ref RepMap (SortedMap LocalId Rep)}
+             -> {auto lm : Ref InlineMap (SortedMap LocalId (String, List String))}
              -> {auto oft : Ref OutfileText Output}
              -> {auto il : Ref IndentLevel Nat}
              -> FC -> RCLocal -> Core (String, Maybe String, List String)
@@ -1100,8 +1100,8 @@ export
 boxOpArg : {auto a : Ref ArgCounter Nat}
         -> {auto _ : Ref ConstDef (SortedMap Constant ConstDef)}
         -> {auto cc : Ref ConstConDef (SortedMap RCLocal String, List String)}
-        -> {auto r : Ref RepMap (SortedMap Int Rep)}
-        -> {auto lm : Ref InlineMap (SortedMap Int (String, List String))}
+        -> {auto r : Ref RepMap (SortedMap LocalId Rep)}
+        -> {auto lm : Ref InlineMap (SortedMap LocalId (String, List String))}
         -> {auto oft : Ref OutfileText Output}
         -> {auto il : Ref IndentLevel Nat}
         -> FC -> RCLocal -> Core (String, List String)
@@ -1121,8 +1121,8 @@ export
 rcVarToNativeC : {auto a : Ref ArgCounter Nat}
               -> {auto _ : Ref ConstDef (SortedMap Constant ConstDef)}
               -> {auto cc : Ref ConstConDef (SortedMap RCLocal String, List String)}
-              -> {auto r : Ref RepMap (SortedMap Int Rep)}
-              -> {auto lm : Ref InlineMap (SortedMap Int (String, List String))}
+              -> {auto r : Ref RepMap (SortedMap LocalId Rep)}
+              -> {auto lm : Ref InlineMap (SortedMap LocalId (String, List String))}
               -> NativeTy -> RCLocal -> Core (String, List String)
 -- `RCNull` here is never a real value to unbox -- it only ever reaches
 -- this function as one of Compiler.RC2.MutualLoop's own `RCNull`
@@ -1189,7 +1189,7 @@ emitReuseOffer : {auto oft : Ref OutfileText Output}
                -> LocalId -> (dupOnShared : List LocalId) -> (dropOnUnique : List LocalId) -> Core ()
 emitReuseOffer sc dupOnShared dropOnUnique = do
     let sc' = idName sc
-    let reuseVar = reuseVarName (locOf sc)
+    let reuseVar = reuseVarName (RCLoc sc)
     emit EmptyFC $ "IDRIS2RC2_Constructor* " ++ reuseVar ++ " = NULL;"
     emit EmptyFC $ "if (idris2rc2_isUnique(" ++ sc' ++ ")) {"
     increaseIndentation
@@ -1392,8 +1392,8 @@ staticClosure : {auto a : Ref ArgCounter Nat}
              -> {auto il : Ref IndentLevel Nat}
              -> {auto _ : Ref ConstDef (SortedMap Constant ConstDef)}
              -> {auto cc : Ref ConstConDef (SortedMap RCLocal String, List String)}
-             -> {auto r : Ref RepMap (SortedMap Int Rep)}
-             -> {auto lm : Ref InlineMap (SortedMap Int (String, List String))}
+             -> {auto r : Ref RepMap (SortedMap LocalId Rep)}
+             -> {auto lm : Ref InlineMap (SortedMap LocalId (String, List String))}
              -> Name -> List RCLocal -> Nat -> Core (Maybe String)
 staticClosure n args missing =
     let nargs : Nat := length args in
@@ -1440,8 +1440,8 @@ makeClosureInto : {auto a : Ref ArgCounter Nat}
                 -> {auto il : Ref IndentLevel Nat}
                 -> {auto _ : Ref ConstDef (SortedMap Constant ConstDef)}
                 -> {auto cc : Ref ConstConDef (SortedMap RCLocal String, List String)}
-                -> {auto r : Ref RepMap (SortedMap Int Rep)}
-                -> {auto lm : Ref InlineMap (SortedMap Int (String, List String))}
+                -> {auto r : Ref RepMap (SortedMap LocalId Rep)}
+                -> {auto lm : Ref InlineMap (SortedMap LocalId (String, List String))}
                 -> FC
                 -> (declare : Bool)
                 -> (target : String)
@@ -1473,8 +1473,8 @@ makeClosure : {auto a : Ref ArgCounter Nat}
             -> {auto il : Ref IndentLevel Nat}
             -> {auto _ : Ref ConstDef (SortedMap Constant ConstDef)}
             -> {auto cc : Ref ConstConDef (SortedMap RCLocal String, List String)}
-            -> {auto r : Ref RepMap (SortedMap Int Rep)}
-            -> {auto lm : Ref InlineMap (SortedMap Int (String, List String))}
+            -> {auto r : Ref RepMap (SortedMap LocalId Rep)}
+            -> {auto lm : Ref InlineMap (SortedMap LocalId (String, List String))}
             -> FC
             -> Name
             -> List RCLocal
@@ -1499,8 +1499,8 @@ buildClosureIntoSink : {auto a : Ref ArgCounter Nat}
                      -> {auto il : Ref IndentLevel Nat}
                      -> {auto _ : Ref ConstDef (SortedMap Constant ConstDef)}
                      -> {auto cc : Ref ConstConDef (SortedMap RCLocal String, List String)}
-                     -> {auto r : Ref RepMap (SortedMap Int Rep)}
-                     -> {auto lm : Ref InlineMap (SortedMap Int (String, List String))}
+                     -> {auto r : Ref RepMap (SortedMap LocalId Rep)}
+                     -> {auto lm : Ref InlineMap (SortedMap LocalId (String, List String))}
                      -> FC -> Sink -> Name -> List RCLocal -> Nat -> Core ()
 buildClosureIntoSink fc (SinkVar declare target _) n args missing =
     makeClosureInto fc declare target n args missing
@@ -1542,14 +1542,14 @@ splitLast xs = case reverse xs of
     [] => Nothing
     (l :: ls) => Just (reverse ls, l)
 
-renameLoc : (from : Int) -> (to : Int) -> LocalId -> LocalId
-renameLoc from to x = if x.num == from then MkLocalId to else x
+renameLoc : (from : LocalId) -> (to : LocalId) -> LocalId -> LocalId
+renameLoc from to x = if x == from then to else x
 
 ||| When `chain` is nothing but `RDup`/`RDrop` wrappers around a final
 ||| `RV` of a `RCLoc`: that local, and `chain` with every mention of it
 ||| renamed to `to`.
 export
-projectChain : (to : Int) -> RCExp -> Maybe (Int, RCExp)
+projectChain : (to : LocalId) -> RCExp -> Maybe (LocalId, RCExp)
 projectChain to (RV fc (RCLoc x)) = Just (x, RV fc (RCLoc to))
 projectChain to (RDup fc v extra cont) = do
     (f, cont') <- projectChain to cont

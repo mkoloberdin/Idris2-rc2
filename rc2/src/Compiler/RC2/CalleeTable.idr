@@ -55,10 +55,10 @@ tableLookup table n = lookup n table
 ||| `ConAltNative` and `DualABI` reuse that and must not gain this implicitly.
 ||| `Compiler.RC2.DualABI` asks the same question of its worker table.
 export covering
-callArgNativeReadsFor : (Name -> Maybe (List (Maybe NativeTy))) -> SortedSet Int -> RCExp -> SortedMap Int (SortedSet NativeTy)
+callArgNativeReadsFor : (Name -> Maybe (List (Maybe NativeTy))) -> SortedSet LocalId -> RCExp -> SortedMap LocalId (SortedSet NativeTy)
 callArgNativeReadsFor callee tracked e = go e
   where
-    go : RCExp -> SortedMap Int (SortedSet NativeTy)
+    go : RCExp -> SortedMap LocalId (SortedSet NativeTy)
     go (RLet _ _ _ value body) = go value `unionMaps` go body
     go (RCmpCase _ _ _ _ t f) = go t `unionMaps` go f
     go (RConCase _ _ alts mDef) =
@@ -82,7 +82,7 @@ callArgNativeReadsFor callee tracked e = go e
 ||| The native type of each parameter among `argIds` that `body` reads at one
 ||| type only, as call arguments at the positions of `table`.
 export covering
-callNativeParams : Maybe Strict -> CalleeTable -> List Int -> RCExp -> SortedMap Int NativeTy
+callNativeParams : Maybe Strict -> CalleeTable -> List LocalId -> RCExp -> SortedMap LocalId NativeTy
 callNativeParams strict table argIds body =
     let found = callArgNativeReadsFor (tableLookup table) (SortedSet.fromList argIds) body
     in consistentNatives strict body $
@@ -93,7 +93,7 @@ callNativeParams strict table argIds body =
 ||| The parameters among `argIds` that `body` reads only as a raw pointer:
 ||| every use is a call argument at a `TPtr` position of `table`.
 export covering
-ptrParams : Maybe Strict -> CalleeTable -> List Int -> RCExp -> SortedSet Int
+ptrParams : Maybe Strict -> CalleeTable -> List LocalId -> RCExp -> SortedSet LocalId
 ptrParams strict table argIds body =
     SortedSet.fromList (map fst (filter (\(_, ty) => ty == TPtr) (SortedMap.toList (callNativeParams strict table argIds body))))
 
@@ -138,7 +138,7 @@ buildCalleeTable strict defs =
 ||| `MutualLoop` shares slots by, so it must be the very question `applyLoop`
 ||| asks of each member.
 export covering
-callArgOrOpNativeTy : Maybe Strict -> CalleeTable -> Int -> RCExp -> Maybe NativeTy
+callArgOrOpNativeTy : Maybe Strict -> CalleeTable -> LocalId -> RCExp -> Maybe NativeTy
 callArgOrOpNativeTy strict table p body =
     let calls = maybe empty id (lookup p (callArgNativeReadsFor (tableLookup table) (SortedSet.singleton p) body))
         ops = SortedSet.fromList (map TPrim (Prelude.toList (nativeArgTypes p body)))

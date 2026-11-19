@@ -32,9 +32,9 @@ peelDrop e = ([], e)
 ||| `(p, ty)` pair -- pairing each original id with its own shadow id
 ||| and the native type it was found eligible at.
 export
-assignShadowIds : (nextId : Int) -> List (Int, ty) -> List (Int, Int, ty)
+assignShadowIds : (nextId : Int) -> List (LocalId, ty) -> List (LocalId, LocalId, ty)
 assignShadowIds _ [] = []
-assignShadowIds nextId ((p, ty) :: rest) = (p, nextId, ty) :: assignShadowIds (nextId + 1) rest
+assignShadowIds nextId ((p, ty) :: rest) = (p, MkLocalId nextId, ty) :: assignShadowIds (nextId + 1) rest
 
 ||| `RCLocal`'s own representation, given `reps` -- the "missing id
 ||| defaults to `RBoxed`" convention every caller relies on (a
@@ -46,7 +46,7 @@ assignShadowIds nextId ((p, ty) :: rest) = (p, nextId, ty) :: assignShadowIds (n
 ||| function here for passes that have no `Core` context of their own
 ||| to thread a ref through.
 export
-localRepIn : SortedMap Int Rep -> RCLocal -> Rep
+localRepIn : SortedMap LocalId Rep -> RCLocal -> Rep
 localRepIn _ RCNull = RBoxed
 localRepIn _ RCErased = RBoxed
 localRepIn _ RCWorld = RBoxed
@@ -77,8 +77,8 @@ export
 data VarId : Type where
 
 export
-freshVarId : {auto v : Ref VarId Int} -> Core Int
-freshVarId = do i <- get VarId; put VarId (i + 1); pure i
+freshVarId : {auto v : Ref VarId Int} -> Core LocalId
+freshVarId = do i <- get VarId; put VarId (i + 1); pure (MkLocalId i)
 
 ||| Plain text (no comment-syntax wrapper of its own -- every call site
 ||| embeds this in whatever comment marker its own output format

@@ -224,7 +224,7 @@ strictOf decl defs =
                 (SortedMap.fromList (mapMaybe (\(n, _, d) => map (n,) d.ret) matched))
                 decl.cons
   where
-    match : (Name, RCDef) -> Maybe (Name, List Int, Declared)
+    match : (Name, RCDef) -> Maybe (Name, List LocalId, Declared)
     match (n, MkRCFun args _ _ _) = do
         d <- lookup n decl.funs
         guard (length d.args == length args)

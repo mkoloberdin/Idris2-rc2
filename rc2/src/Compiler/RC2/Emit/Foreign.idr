@@ -100,8 +100,8 @@ ffiRawCall : {auto a : Ref ArgCounter Nat}
           -> {auto il : Ref IndentLevel Nat}
           -> {auto _ : Ref ConstDef (SortedMap Constant ConstDef)}
           -> {auto cc : Ref ConstConDef (SortedMap RCLocal String, List String)}
-          -> {auto r : Ref RepMap (SortedMap Int Rep)}
-          -> {auto lm : Ref InlineMap (SortedMap Int (String, List String))}
+          -> {auto r : Ref RepMap (SortedMap LocalId Rep)}
+          -> {auto lm : Ref InlineMap (SortedMap LocalId (String, List String))}
           -> CLang -> ForeignCall -> List CFType -> CFType -> List RCLocal -> Core (String, List String)
 ffiRawCall cLang target fargs ret args = do
     let paramsInfo = zip fargs args

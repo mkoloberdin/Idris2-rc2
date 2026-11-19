@@ -56,9 +56,9 @@ mapTailAppNames f e = let (MkTailSeen ns r, e') = go e in (ns, r, e')
 
 public export
 Renaming : Type
-Renaming = SortedMap Int Int
+Renaming = SortedMap LocalId LocalId
 
-renameId : Renaming -> Int -> Int
+renameId : Renaming -> LocalId -> LocalId
 renameId ren i = fromMaybe i (lookup i ren)
 
 renameLocal : Renaming -> RCLocal -> RCLocal
@@ -73,12 +73,12 @@ renameMaybeLocal ren = map (renameLocal ren)
 -- change: a `dup`, `drop` or `free` of a variable that `f` turns into a constant goes.
 mutual
   export
-  mapLocalsRCExp : (RCLocal -> RCLocal) -> (Int -> Int) -> RCExp -> RCExp
+  mapLocalsRCExp : (RCLocal -> RCLocal) -> (LocalId -> LocalId) -> RCExp -> RCExp
   mapLocalsRCExp f g (RV fc v) = RV fc (f v)
   mapLocalsRCExp f g (RAppName fc lazy n args) = RAppName fc lazy n (map f args)
   mapLocalsRCExp f g (RUnderApp fc n missing args) = RUnderApp fc n missing (map f args)
   mapLocalsRCExp f g (RDelay fc lr n caps) = RDelay fc lr n (map f caps)
-  mapLocalsRCExp f g (RApp fc lazy c args) = RApp fc lazy (f c) (map (f) args)
+  mapLocalsRCExp f g (RApp fc lazy c args) = RApp fc lazy (f c) (map f args)
   mapLocalsRCExp f g (RLet fc var rep value body) =
       RLet fc (g var) rep (mapLocalsRCExp f g value) (mapLocalsRCExp f g body)
   mapLocalsRCExp f g (RCon fc n ci tag args reuseFrom) =
@@ -154,11 +154,11 @@ mutual
   -- reasoning as RAppNameRep/RAppFFIInline just above.
   mapLocalsRCExp f g (RMemoize fc n rep body) = RMemoize fc n rep (mapLocalsRCExp f g body)
 
-  mapLocalsConAlt : (RCLocal -> RCLocal) -> (Int -> Int) -> RConAlt -> RConAlt
+  mapLocalsConAlt : (RCLocal -> RCLocal) -> (LocalId -> LocalId) -> RConAlt -> RConAlt
   mapLocalsConAlt f g (MkRConAlt name ci tag args body) =
       MkRConAlt name ci tag (map (g) args) (mapLocalsRCExp f g body)
 
-  mapLocalsConstAlt : (RCLocal -> RCLocal) -> (Int -> Int) -> RConstAlt -> RConstAlt
+  mapLocalsConstAlt : (RCLocal -> RCLocal) -> (LocalId -> LocalId) -> RConstAlt -> RConstAlt
   mapLocalsConstAlt f g (MkRConstAlt c body) = MkRConstAlt c (mapLocalsRCExp f g body)
 
 ||| `mapLocalsRCExp` for a renaming.
@@ -169,8 +169,8 @@ renameRCExp ren = mapLocalsRCExp (renameLocal ren) (renameId ren)
 
 ||| Whether the variable `i` survives `stripOwnership`'s own filtering: kept
 ||| unless it is one of `ids`.
-keepUnlessOwned : SortedSet Int -> LocalId -> Bool
-keepUnlessOwned ids i = not (contains i.num ids)
+keepUnlessOwned : SortedSet LocalId -> LocalId -> Bool
+keepUnlessOwned ids i = not (contains i ids)
 
 ||| Remove every `RDup`/`RDrop`/`RFree` target, and every `ROp`/`RCmpCase`
 ||| `postDrop` entry, naming one of `ids`. Precondition: every value-reading
@@ -178,7 +178,7 @@ keepUnlessOwned ids i = not (contains i.num ids)
 ||| `RReuseOffer` operands are deliberately left alone.
 ||| See `rc2/doc/loop-conversion.md`'s "`stripOwnership`".
 export
-stripOwnership : SortedSet Int -> RCExp -> RCExp
+stripOwnership : SortedSet LocalId -> RCExp -> RCExp
 stripOwnership ids (RDup fc v extra body) =
     let body' = stripOwnership ids body
     in if keepUnlessOwned ids v then RDup fc v extra body' else body'

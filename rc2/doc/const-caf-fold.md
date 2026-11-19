@@ -26,7 +26,7 @@ tests.
 ### CAF boundary crossing: a whole-program fixpoint
 
 `ConstFold.idr` gains a second, wider table alongside the existing
-per-definition `Env` (`SortedMap Int (Subset RCLocal
+per-definition `Env` (`SortedMap LocalId (Subset RCLocal
 IsAnyConstLocal)`, keyed by `RCLoc`'s own local id):
 
 ```idris2
@@ -161,7 +161,7 @@ findConAlt tag [] = Nothing
 findConAlt tag (alt@(MkRConAlt _ _ tag' _ _) :: rest) =
     if tag == tag' then Just alt else findConAlt tag rest
 
-insertConArgs : List Int -> List RCLocal -> Env -> Env
+insertConArgs : List LocalId -> List RCLocal -> Env -> Env
 insertConArgs (i :: is) (v :: vs) env =
     case isConstLocalProof v of
          Just prf => insertConArgs is vs (insert i (Element v prf) env)
