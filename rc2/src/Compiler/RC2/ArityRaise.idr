@@ -274,8 +274,8 @@ closureValue ws (RAppName _ Nothing f xs) = map (\(g, m) => (id, g, m, xs)) (loo
 closureValue _ _ = Nothing
 
 ||| How often `c` is named in a `drop` in `e`.
-dropMentions : RCLocal -> RCExp -> Nat
-dropMentions c (RDrop _ vs k) = length (filter (== c) (map locOf vs)) + dropMentions c k
+dropMentions : LocalId -> RCExp -> Nat
+dropMentions c (RDrop _ vs k) = length (filter (== c) vs) + dropMentions c k
 dropMentions c e = sum (map (dropMentions c) (children e))
 
 ||| `e` with its one `apply c ys` built by `mk` instead, and each
@@ -320,9 +320,9 @@ foldAppliedExp ws nat e = here (mapChildren (foldAppliedExp ws nat) e)
         pure (RAppName fc Nothing g (forget ys))
     here e@(RLet _ c RBoxed value body) = fromMaybe e $ do
         (lead, g, m, xs) <- closureValue ws value
-        let owned = mapMaybe (\x => idOf x >>= \i => toMaybe (not (contains i.num (fst nat))) i) xs
+        let owned = filter (\i => not (contains i.num (fst nat))) (mapMaybe idOf xs)
             n = mentions (RCLoc c) body
-        guard (not (any (isLoc (\i => contains i (snd nat))) xs || n /= S (dropMentions (RCLoc c) body)))
+        guard (not (any (isLoc (\i => contains i (snd nat))) xs || n /= S (dropMentions (MkLocalId c) body)))
         body' <- replaceApply c owned (target g m xs) body
         guard (mentions (RCLoc c) body' == 0)
         pure (lead body')

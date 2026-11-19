@@ -78,8 +78,8 @@ to produce.
 ## IR shape: `RLoop` / `RLoopContinue`
 
 ```idris
-RLoop         : FC -> (loopParams : List (Int, Rep)) -> (initial : List RCLocal) -> (prologueDrop : List RCLocal) -> RCExp -> RCExp
-RLoopContinue : FC -> List RCLocal -> (postDrop : List RCLocal) -> RCExp
+RLoop         : FC -> (loopParams : List (Int, Rep)) -> (initial : List RCLocal) -> (prologueDrop : List LocalId) -> RCExp -> RCExp
+RLoopContinue : FC -> List RCLocal -> (postDrop : List LocalId) -> RCExp
 ```
 
 `RLoop` wraps a whole tail-recursive loop: `loopParams` are this loop's

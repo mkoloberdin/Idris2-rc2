@@ -52,7 +52,7 @@ is no "offer, then later claim" shape to search for at all; the offer
 *is* the claim, at the same program point. Consequently, the entire
 feature needed **zero IR changes**:
 
-- `RCExp.idr`'s `ROp` node (including its `postDrop : List RCLocal`
+- `RCExp.idr`'s `ROp` node (including its `postDrop : List LocalId`
   field) is completely unchanged.
 - `Compiler.RC2.RC`'s `annotate` pass (Phase 2 ownership annotation) is
   completely unchanged. Its existing `ROp` case --

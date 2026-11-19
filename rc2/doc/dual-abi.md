@@ -1240,7 +1240,7 @@ the closest analogue to bug #2 above) passed without any fix needed.
    deliberately pushed outside the cache range): `31,999,984 bytes in
    1,999,999 blocks definitely lost` for 2,000,000 calls -- essentially
    one leaked allocation *per call*. Fixed by giving `RAppNameRep` its
-   own `postDrop : List RCLocal` field, mirroring `ROp`'s own exactly:
+   own `postDrop : List LocalId` field, mirroring `ROp`'s own exactly:
    `Compiler.RC2.DualABI`'s own `synthesizeWorker` populates it for
    free (it's exactly the wrapper's own promoted parameter ids, already
    computed as `eligible` for an unrelated purpose), and
@@ -1487,8 +1487,8 @@ the closest analogue to bug #2 above) passed without any fix needed.
     via the same bare `varName` every ordinary `postDrop` entry already
     uses safely. That assumption -- "every dropped argument is a named
     variable" -- doesn't hold for a raw FFI call argument specifically:
-    unlike an `RAppNameRep`'s own `postDrop` (always a genuine `RCLoc`
-    by construction, see its own doc comment), a `%foreign` call's own
+    unlike an `RAppNameRep`'s own `postDrop` (a list of `LocalId`s, always
+    variables by type, see its own doc comment), a `%foreign` call's own
     Boxed-typed argument can itself be a literal `RCConst` (e.g. a
     `String` literal passed with no enclosing `let`) -- `varName`'s own
     `RCConst` case is a deliberately-unreachable placeholder everywhere

@@ -293,8 +293,13 @@ eqLs env [] [] = True
 eqLs env (x :: xs) (y :: ys) = eqL env x y && eqLs env xs ys
 eqLs _ _ _ = False
 
+eqId : Env -> LocalId -> LocalId -> Bool
+eqId env x y = eqL env (locOf x) (locOf y)
+
 eqIds : Env -> List LocalId -> List LocalId -> Bool
-eqIds env xs ys = eqLs env (map locOf xs) (map locOf ys)
+eqIds env [] [] = True
+eqIds env (x :: xs) (y :: ys) = eqId env x y && eqIds env xs ys
+eqIds _ _ _ = False
 
 eqMaybeL : Env -> Maybe RCLocal -> Maybe RCLocal -> Bool
 eqMaybeL _ Nothing Nothing = True
@@ -358,12 +363,12 @@ mutual
   eqE env (RErased _) (RErased _) = Just env
   eqE env (RCrash _ m1) (RCrash _ m2) = if m1 == m2 then Just env else Nothing
   eqE env (RDup _ v1 x1 b1) (RDup _ v2 x2 b2) =
-      if x1 == x2 && eqIds env [v1] [v2] then eqE env b1 b2 else Nothing
+      if x1 == x2 && eqId env v1 v2 then eqE env b1 b2 else Nothing
   eqE env (RDrop _ vs1 b1) (RDrop _ vs2 b2) = if eqIds env vs1 vs2 then eqE env b1 b2 else Nothing
-  eqE env (RFree _ v1 b1) (RFree _ v2 b2) = if eqIds env [v1] [v2] then eqE env b1 b2 else Nothing
-  eqE env (RReleaseReuse _ v1 b1) (RReleaseReuse _ v2 b2) = if eqIds env [v1] [v2] then eqE env b1 b2 else Nothing
+  eqE env (RFree _ v1 b1) (RFree _ v2 b2) = if eqId env v1 v2 then eqE env b1 b2 else Nothing
+  eqE env (RReleaseReuse _ v1 b1) (RReleaseReuse _ v2 b2) = if eqId env v1 v2 then eqE env b1 b2 else Nothing
   eqE env (RReuseOffer _ s1 d1 u1 b1) (RReuseOffer _ s2 d2 u2 b2) =
-      if eqIds env [s1] [s2] && eqIds env d1 d2 && eqIds env u1 u2 then eqE env b1 b2 else Nothing
+      if eqId env s1 s2 && eqIds env d1 d2 && eqIds env u1 u2 then eqE env b1 b2 else Nothing
   eqE env (RLoop _ ps1 i1 pd1 b1) (RLoop _ ps2 i2 pd2 b2) =
       if eqLs env i1 i2 && eqIds env pd1 pd2 && eqReps (map snd ps1) (map snd ps2)
          then bindAll env (map fst ps1) (map fst ps2) >>= \env1 => eqE env1 b1 b2

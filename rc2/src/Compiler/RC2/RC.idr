@@ -393,8 +393,8 @@ Owned = SortedSet RCLocal
 
 ||| Wrap `e` in an RDup for each variable in `needed` (order doesn't
 ||| matter between independent increments).
-wrapDups : FC -> List RCLocal -> RCExp -> RCExp
-wrapDups fc needed e = foldr (\i, acc => RDup fc i 0 acc) e (mapMaybe idOf needed)
+wrapDups : FC -> List LocalId -> RCExp -> RCExp
+wrapDups fc needed e = foldr (\i, acc => RDup fc i 0 acc) e needed
 
 ||| Fold `f` over every RConAlt's own body and (if present) the default,
 ||| unioning the `SortedSet RCLocal` results -- the shared shape behind
@@ -513,20 +513,22 @@ alwaysUnboxedBoxedLocalsR _ = empty
 ||| before -- the *first* occurrence of an owned variable moves it (no dup
 ||| needed), any later occurrence (or one that was never owned to begin
 ||| with) needs a dup -- except a `natives`-listed local, which never needs
-||| a dup (or any refcount op at all) no matter how it's used. An
-||| A local that is not `isHeapLocal` is skipped the same way (a constant,
+||| a dup (or any refcount op at all) no matter how it's used.
+||| A local that is not a variable (`idOf` is `Nothing`) is skipped the same way (a constant,
 ||| `NULL` or an immortal static -- never a real refcounted heap value;
 ||| see RCExp.idr's module note on RCLocal).
-splitBorrows : (natives : SortedSet RCLocal) -> Owned -> List RCLocal -> List RCLocal
+splitBorrows : (natives : SortedSet RCLocal) -> Owned -> List RCLocal -> List LocalId
 splitBorrows _ _ [] = []
-splitBorrows natives owned (v :: vars) =
-    if not (isHeapLocal v) || contains v natives
-        then splitBorrows natives owned vars
-        else if contains v owned
-                then splitBorrows natives (delete v owned) vars
-                else v :: splitBorrows natives owned vars
+splitBorrows natives owned (v :: vars) = case idOf v of
+    Nothing => splitBorrows natives owned vars
+    Just i =>
+        if contains v natives
+            then splitBorrows natives owned vars
+            else if contains v owned
+                    then splitBorrows natives (delete v owned) vars
+                    else i :: splitBorrows natives owned vars
 
-splitBorrowsV : (natives : SortedSet RCLocal) -> Owned -> Vect n RCLocal -> List RCLocal
+splitBorrowsV : (natives : SortedSet RCLocal) -> Owned -> Vect n RCLocal -> List LocalId
 splitBorrowsV natives owned = splitBorrows natives owned . toList
 
 ||| Which of `vars` are their own last use here (still in `owned`, not
@@ -583,33 +585,10 @@ mutual
                     _  => RDrop emptyFC shouldDrop rest
 
     annotate : SortedSet RCLocal -> Owned -> RCExp -> Core RCExp
-    -- Immortal, same reasoning as splitBorrows/dropIfLastUse/
-    -- boxedOperands above -- never needs a dup, `owned`/`natives`
-    -- (variable sets) never contain it anyway.
-    annotate natives owned e@(RV _ (RCConstCon {})) = pure e
-    -- Same reasoning as the RCConstCon intercept just above -- an
-    -- immortal folded closure is never tracked in natives/owned either,
-    -- and would otherwise get a wasted (though harmless) RDup here.
-    annotate natives owned e@(RV _ (RCConstPartial {})) = pure e
-    -- `RCConst`/`RCEmptyCon`/`RCNull` need the exact same three
-    -- intercepts, for the exact same reason -- `Compiler.RC2.ConstFold`
-    -- can fold a whole `RConCase` (a destructured
-    -- field bound via `insertConArgs`, or a whole-program CAF's own
-    -- value via `RAppName`'s own fold arm) straight down to a BARE `RV`
-    -- of one of these forms, with no enclosing `RLet` left for `annotate`
-    -- to have already special-cased
-    -- (`splitBorrows`/`dropIfLastUse` above already exclude all five
-    -- forms uniformly). Without this, the generic `RV fc v` case below
-    -- wraps it in a real `RDup` (since neither set ever tracks a
-    -- constant-form value), and `Compiler.RC2.Emit.Util`'s own `varName`
-    -- has no real rendering for any of the five reaching it that way
-    -- (all five say so in their own doc comments) -- not just wasted, a
-    -- genuine C compile error.
-    annotate natives owned e@(RV _ (RCConst _)) = pure e
-    annotate natives owned e@(RV _ (RCEmptyCon {})) = pure e
-    annotate natives owned e@(RV _ RCNull) = pure e
-    annotate natives owned e@(RV _ RCErased) = pure e
-    annotate natives owned e@(RV _ RCWorld) = pure e
+    -- A constant (`RCConst`, `RCEmptyCon`, `RCNull`, `RCErased`, `RCWorld`, an immortal
+    -- `RCConstCon`/`RCConstPartial`) has no reference count, so it is read as it is:
+    -- `ConstFold` can fold a `case` down to a bare `RV` of one, and only a variable
+    -- can be dup'd (`idOf`).
     annotate natives owned (RV fc v) =
         pure $ if contains v natives || contains v owned then RV fc v
                  else maybe (RV fc v) (\i => RDup fc i 0 (RV fc v)) (idOf v)

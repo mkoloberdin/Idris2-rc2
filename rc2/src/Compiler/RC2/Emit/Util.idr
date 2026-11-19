@@ -300,9 +300,14 @@ isReuseConsumingOp StrAppend   = True
 isReuseConsumingOp StrSubstr   = True
 isReuseConsumingOp _ = False
 
+||| The C variable of the variable numbered `i`.
+export
+idName : LocalId -> String
+idName i = "var_" ++ show i.num
+
 export
 varName : RCLocal -> String
-varName (RCLoc i) = "var_" ++ (show i)
+varName (RCLoc i) = idName (MkLocalId i)
 varName (RCNull)  = "NULL"
 varName RCErased = "NULL"
 varName RCWorld = "NULL"
@@ -325,11 +330,6 @@ varName (RCConstCon {}) = "/* [rc2] unreachable RCConstCon varName */"
 -- Unreachable in practice, same reasoning as RCConstCon above:
 -- repOfLocal/inlineExprFor always intercept a RCConstPartial first.
 varName (RCConstPartial {}) = "/* [rc2] unreachable RCConstPartial varName */"
-
-||| The C variable of the variable numbered `i`: what `varName` gives its `RCLoc`.
-export
-idName : LocalId -> String
-idName i = "var_" ++ show i.num
 
 ------------------------------------------------------------------------
 -- Native (unboxed) codegen, driven by Compiler.RC2.Types' Rep inference.

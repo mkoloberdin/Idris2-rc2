@@ -361,8 +361,8 @@ record StructField where
   fieldType : CFType
   0 isField : Elem (fieldName, fieldType) fields
 
-RStructGet : FC -> (structVar : RCLocal) -> StructField -> (postDrop : List RCLocal) -> RCExp
-RStructSet : FC -> (structVar : RCLocal) -> StructField -> (value : RCLocal) -> (postDrop : List RCLocal) -> RCExp
+RStructGet : FC -> (structVar : RCLocal) -> StructField -> (postDrop : List LocalId) -> RCExp
+RStructSet : FC -> (structVar : RCLocal) -> StructField -> (value : RCLocal) -> (postDrop : List LocalId) -> RCExp
 ```
 
 A `StructField` is the struct's declared field list, the field's name and

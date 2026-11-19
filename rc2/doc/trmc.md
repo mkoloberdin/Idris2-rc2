@@ -120,7 +120,7 @@ in benchmarks.
 ## New IR node: `RFill`
 
 ```
-RFill : FC -> (cell : RCLocal) -> (field : Nat) -> (value : RCLocal) -> (postDrop : List RCLocal) -> RCExp
+RFill : FC -> (cell : RCLocal) -> (field : Nat) -> (value : RCLocal) -> (postDrop : List LocalId) -> RCExp
 ```
 
 It evaluates to Unit, like `RStructSet`, and is always `let`-bound:

@@ -935,11 +935,9 @@ emitAppFFIInlineInto sink tailPosition fc ccs fargs ret postDrop args = do
     -- without it this fails to compile (`-Wincompatible-pointer-
     -- types` as an error) for any such declaration.
     let valStr = "(IDRIS2RC2_Value*)" ++ packCFType (peelIORes ret) rawExpr
-    -- `postDrop` lists variables only (inherited verbatim
-    -- from the `RAppNameRep` this replaced, see RCExp.idr's own doc
-    -- comment), safe to render via a bare `varName`; `boxedArgDrop`
-    -- is already-rendered text (see `ffiRawCall`'s own `marshalArg`
-    -- doc comment for why it can't be a bare `varName` render).
+    -- `postDrop` is inherited verbatim from the `RAppNameRep` this replaced;
+    -- `boxedArgDrop` is already-rendered text (see `ffiRawCall`'s own `marshalArg`
+    -- doc comment for why it can't be a bare variable name).
     let allDrop = map idName postDrop ++ boxedArgDrop
     finalizeSinkWithDrop fc sink valStr allDrop
 

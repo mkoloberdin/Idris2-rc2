@@ -116,13 +116,6 @@ export
 maxConstConFields : Nat
 maxConstConFields = 20
 
-||| Whether a local can hold a refcounted heap value: only a variable can.
-||| Every other form is a constant, `NULL`, or an immortal static.
-export
-isHeapLocal : RCLocal -> Bool
-isHeapLocal (RCLoc _) = True
-isHeapLocal _ = False
-
 ||| Whether `rep` is a native representation (`RNative`/`RInlineNative`).
 export
 isNativeRep : Rep -> Bool

@@ -163,7 +163,8 @@ duplicateIds ids = snd (foldl (\(seen, dups), x => if contains x seen then (seen
 ||| Replaces each variable bound to a safe constant by the constant, removes
 ||| its `let` and its `dup`s and `drop`s. A variable read where one is needed
 ||| keeps its `let`. Repeated, since replacing one alias can make another
-||| `let` a constant. See `rc2/doc/dead-vars.md`, "Constant aliases".
+||| `let` a constant. The `dup`s, `drop`s and `free`s of a replaced variable go in
+||| `mapLocalsRCExp`. See `rc2/doc/dead-vars.md`, "Constant aliases".
 propagateConstAliases : RCExp -> RCExp
 propagateConstAliases = go (the Nat 3)
   where
