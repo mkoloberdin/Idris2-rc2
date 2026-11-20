@@ -48,21 +48,6 @@ CAFへの参照を含むフィールドも消せ、`DeadArgs`は外した引数�
 - 否定側(型が値で決まるものを探して拒否する)では塞げない。型変数も同じ現象で、多相なフィールドの
   型は分解される値の型引数が CExp に残らず、lambda の binder には型がない。
 
-## IR: `dup`・`drop`・`postDrop`の対象を変数IDだけにする(アイデア)
-
-`RDup`・`RDrop`・`postDrop`・`prologueDrop`・`RReuseOffer`の`dupOnShared`/`dropOnUnique`などは、
-今は`RCLocal`のリストで、定数(`RCNull`・`RCErased`・`RCWorld`・畳み込み済みの定数)も型の上では入れられる。
-しかし数えるのは変数だけで、定数への`dup`/`drop`は何もしない。実際に入り込んだ例が
-`DualABI.postDropFor`(定数の引数、`NULL`型のものを含めて`postDrop`に入れていた。直した)で、Emitが
-`idris2rc2_drop(NULL)`を出し、IRのダンプにも`postDrop= [[erased]]`と残っていた。
-
-案: これらのフィールドの型を`List Int`(変数ID)か、`RCLoc`だけを表す型にして、定数を入れられなく
-する。パスが定数を入れる間違いが型エラーになり、Emitの`varName`の定数の分岐(`RCConst`・`RCConstCon`・`RCConstPartial`は
-`/* [rc2] unreachable ... */`を返す)と、各パスの`RCLoc`の場合分けも要らなくなる。`RCExp`の
-構成子の型が変わるので、`postDrop`などを読み書きする全パス(`RC`・`DualABI`・`Loop`・`MutualLoop`・
-`DupMerge`・`PushDown`・`Reuse`・`DeadVars`・`FunDedup`・`Emit`)に影響する。`RCConstCon`の
-`argsConst`と同じ要領(消去される証明)でも書けるが、`List Int`のほうが単純。
-
 ## Performance: tail-position delegating calls stay boxed
 
 Native type inference (`Compiler.RC2.Types`) only applies to values
@@ -213,6 +198,17 @@ missing-containersで-16%、sortで-23%。残りの案は、逃げないと判�
 上限はmissing-containersで8ポイント。関数内で閉じた解析は、idris2-lspの297,911箇所中57箇所しか固定できず無意味。
 関数の引数を通して連鎖させる粗い全体解析(複製なし)も、missing-containersで-1.7%にとどまり打ち切った。
 やるなら、スレッドへ逃げうる値を追う全体解析と、引数がスレッドに閉じている呼び出し元向けの関数の複製が要る。
+
+## C の分割ビルドを rc2 自身が行う(2026-11-20)
+`tools/c-split`(README に設計と計測)は独立したツールで、今は手で
+`--directive writecc --directive nocc`、`c-split --commands`、`make -jN` の3段を踏む。
+rc2 が C を書いたあと自分で分割してパートを並列にコンパイルすれば、セルフホストのビルドで
+clang のピークが 2.2GB から約 0.95GB、時間が約 9 分から約 5 分になる。決めること:
+- 並列数の決め方(パート1つで数百 MB。コア数とメモリから)。
+- 分割する閾値(小さなプログラムは1パートのまま。パートをまたぐ呼び出しはインライン化されず、
+  ホットループと呼び先が別パートに入ると大きく遅くなる: BenchPtrFn が 2,000 バイト分割で 47 倍)。
+- `ld`/`objcopy`/`nm` が無い環境では分割しない。
+- 分割したときの呼び出し先の局所性(呼び出しグラフで近いものを同じパートに入れる)。
 
 ## 型が判っている値の専用drop: 生成コード側(2026-11-19)
 ランタイムの文字列プリミティブは、String引数を`idris2rc2_dropString`(`memory.h`)で解放する。

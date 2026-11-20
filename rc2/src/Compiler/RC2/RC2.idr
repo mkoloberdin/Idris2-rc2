@@ -94,6 +94,7 @@ import Data.String as String
 import Idris.Syntax
 
 import System
+import System.Directory
 import System.File
 
 import Libraries.Utils.Path
@@ -846,9 +847,12 @@ compileExprWhole c s _ outputDir tm outfile =
      when ("dumplifts" `elem` directiveList) $
          coreLift_ $ writeFile (outputDir </> outfile ++ ".lifts") (dumpLifts liftInfos)
 
-     -- `dumpcc`: print the C compile/link command(s) to stdout -- see
-     -- rc2/doc/directives.md.
+     -- `dumpcc`: print the C compile/link command(s) to stdout; `writecc`:
+     -- write them to a `.cmd` file next to the `.c`; `nocc`: run neither
+     -- (rc2/doc/directives.md).
      let dumpCC = "dumpcc" `elem` directiveList
+     let writeCC = "writecc" `elem` directiveList
+     let noCC = "nocc" `elem` directiveList
 
      -- `extraRuntime=<path>` / `inlineRuntime=<code>`: splice C straight
      -- into the generated output -- see rc2/doc/directives.md for the
@@ -864,27 +868,37 @@ compileExprWhole c s _ outputDir tm outfile =
      let externStructs = getExternStructs directiveList
 
      foreignLibs <- logTime 2 "rc2: C generation" $ generateCSourceFile defs exportedSigs noMain Nothing False injectedRuntime externStructs directiveList library outn
+     let libFile = outputDir </> (if isPrefixOf "lib" outfile then outfile else "lib" ++ outfile) ++ (if sharedLib then ".so" else ".a")
      -- A shared library's code is position independent, and reads the runtime's thread-local
      -- heap through the initial-exec model (the runtime is loaded with the host,
      -- rc2/doc/library-output.md).
-     Just _ <- logTime 2 "rc2: C compile" $ compileCObjectFile outn outobj (if sharedLib then ["-fPIC", "-ftls-model=initial-exec"] else []) dumpCC
-       | Nothing => pure Nothing
-     the (Core (Maybe String)) $ if library
-        then do
-          let libFile = outputDir </> (if isPrefixOf "lib" outfile then outfile else "lib" ++ outfile) ++ (if sharedLib then ".so" else ".a")
-          made <- the (Core (Maybe String)) $ logTime 2 "rc2: library" $
-              if sharedLib then linkSharedLibrary [outobj] libFile dumpCC
-                           else archiveObjectFiles [outobj] libFile dumpCC
-          case made of
-            Nothing => pure Nothing
-            Just _ => do
-              Right () <- coreLift $ writeFile (outputDir </> outfile ++ ".h") (libraryHeader outfile exportedSigs)
-                | Left err => throw (FileErr (outputDir </> outfile ++ ".h") err)
-              flags <- linkTail (("sharedruntime" `elem` directiveList) || sharedLib) foreignLibs
-              Right () <- coreLift $ writeFile (outputDir </> outfile ++ ".link") (unwords flags ++ "\n")
-                | Left err => throw (FileErr (outputDir </> outfile ++ ".link") err)
-              pure (Just libFile)
-        else logTime 2 "rc2: C link" $ compileCFile [outobj] outexec foreignLibs ("sharedruntime" `elem` directiveList) dumpCC
+     compileCmd <- compileCommand outn outobj (if sharedLib then ["-fPIC", "-ftls-model=initial-exec"] else [])
+     finalCmd <- if staticLib then archiveCommand [outobj] libFile
+                 else if sharedLib then sharedLibraryCommand [outobj] libFile
+                 else linkCommand [outobj] outexec foreignLibs ("sharedruntime" `elem` directiveList)
+     when writeCC $ do
+         Just cwd <- coreLift currentDir
+           | Nothing => throw (InternalError "[rc2] writecc: cannot read the current directory")
+         let cmdFile = outputDir </> outfile ++ ".cmd"
+         Right () <- coreLift $ writeFile cmdFile
+                       ("cwd " ++ cwd ++ "\nobject " ++ outobj ++ "\ncompile " ++ compileCmd ++ "\nfinal " ++ finalCmd ++ "\n")
+           | Left err => throw (FileErr cmdFile err)
+         pure ()
+     -- A library's `.h` and `.link` follow a successful build, or the `.c` under `nocc`.
+     let libraryFiles = do
+           Right () <- coreLift $ writeFile (outputDir </> outfile ++ ".h") (libraryHeader outfile exportedSigs)
+             | Left err => throw (FileErr (outputDir </> outfile ++ ".h") err)
+           flags <- linkTail (("sharedruntime" `elem` directiveList) || sharedLib) foreignLibs
+           Right () <- coreLift $ writeFile (outputDir </> outfile ++ ".link") (unwords flags ++ "\n")
+             | Left err => throw (FileErr (outputDir </> outfile ++ ".link") err)
+           pure ()
+     if noCC then do when library libraryFiles; pure (Just outn) else do
+       True <- logTime 2 "rc2: C compile" $ runCommand dumpCC compileCmd
+         | False => pure Nothing
+       True <- logTime 2 (if library then "rc2: library" else "rc2: C link") $ runCommand dumpCC finalCmd
+         | False => pure Nothing
+       when library libraryFiles
+       pure (Just (if library then libFile else outexec))
 
 ||| Resolves a per-module incremental object filename -- as returned by
 ||| `incCompile` below and accumulated into `allIncData` (always a

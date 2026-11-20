@@ -185,6 +185,18 @@ produced its result (unlike section 2's stage disables, which
   that never return a pending closure. See `doc/trampoline-elision.md`.
 - **`dumpcc`** -- prints the exact C compile/link command(s) about to
   run, to stdout.
+- **`writecc`** -- writes the same commands to `<name>.cmd` next to the
+  `.c` (whole-program compiles only), one per line after a key: `cwd` (the
+  directory they run in, since they name files relative to it), `object`
+  (the object file), `compile` (the C source to that object) and `final`
+  (the object to the executable, or the library of `staticlib`/`sharedlib`).
+  `tools/c-split` reads it to write a Makefile for the parts it splits the
+  `.c` into.
+- **`nocc`** -- writes the `.c` (and the `.h`/`.link` of a library, and the
+  `.cmd` of `writecc`) and stops there: the C compiler does not run
+  (whole-program compiles only). For a build that compiles the C another
+  way, such as `tools/c-split`'s Makefile. With `dumpcc`, nothing is
+  printed, since nothing runs; `writecc` writes the commands.
 - **`keepforeign`** -- writes the C wrapper of every `%foreign` declaration,
   also one no call names any more (its calls were all inlined). Without it a
   whole-program build leaves such a wrapper out, headers and libraries kept

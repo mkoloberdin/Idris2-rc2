@@ -97,7 +97,22 @@ typedef struct {
 
 バイト長が`len`の`uint32_t`に収まらない結果(4 GiB超)は、それを構築する時点でabortする(`idris2rc2_checkedStrLen`、`idris2rc2_memory.h`)。気づかないうちに桁あふれし、短すぎる壊れた`len`になることはない。
 
-**1つのブロック。** `idris2rc2_mkEmptyString`と`idris2rc2_mkStringLen`は、セルと`len + 1`バイトの内容をまとめて確保する。`str`は構造体の直後を指し、`header.reserved`は1になる。解体は、`reserved`が0のときだけ2つ目のブロックを解放する。`reserved`が0になるのは、バイト列が別の場所から来る唯一の文字列(`cast Integer String`。その数字列はGMPが確保する)と、解体されることのないimmortalな定数である。`reserved`がセットされた文字列の`str`を置き換えてはならず、そのセルを`realloc`してもならない(`str`は内部ポインタである)。この変更の前は、どの文字列も`malloc`/`free`の組を2回必要とした。
+**1つのブロック。** `idris2rc2_mkEmptyString`と`idris2rc2_mkStringLen`は、セルと`len + 1`バイトの内容をまとめて確保する。`str`は構造体の直後を指し、`header.reserved`には`IDRIS2RC2_HDR_FLAG`が立つ(後述)。解体は、このフラグが立っていないときだけ2つ目のブロックを解放する。フラグが立たないのは、バイト列が別の場所から来る唯一の文字列(`cast Integer String`。その数字列はGMPが確保する)と、解体されることのないimmortalな定数である。フラグが立っている文字列の`str`を置き換えてはならず、そのセルを`realloc`してもならない(`str`は内部ポインタである)。この変更の前は、どの文字列も`malloc`/`free`の組を2回必要とした。
+
+ランタイムの文字列プリミティブ(`strings.c`)は、消費する`String`引数を`idris2rc2_dropString`(`memory.h`)で解放する。`String`がNULLや即値であることはなく、プールのセルであることもないので、最後の参照がその場で解放でき、`idris2rc2_teardown`のようにタグで分岐する必要がない。生成されるCは引き続き`idris2rc2_drop`を使う。IRはボックス化された変数の型を保持していないからである。
+
+## 予約バイト
+
+ヘッダの最後のバイトは、2つのビットを持つ(`IDRIS2RC2_HDR_*`、`idris2rc2_datatypes.h`)。
+
+| ビット | 名前 | 意味 |
+|---|---|---|
+| `0x01` | `FLAG` | タグによって異なる。`String`では、バイト列がセルと同じ割り当てにある(上記)。遅延値では、評価済みである(`lazy-memoization.md`) |
+| `0x80` | `POOLED` | セルがプールから来た(`small-object-allocator.md`) |
+
+`POOLED`は、セルを渡す箇所(`idris2rc2_cellAllocInline`、`idris2rc2_cellAlloc`)で立て、解放する箇所で読む。`idris2rc2_cellPooled`がその唯一の検査である。以前の解放は、タグ、arity、`idris2rc2_poolOn`から判定をやり直しており、解体のたびにタグに対する`switch`をもう1つ実行していた。定数のコンストラクタやクロージャ(static、`STOCKVAL`)と、Cのフレーム上のセル(`stack-con.md`)はどちらのビットも持たず、解放されることもない。
+
+遅延セルは、`POOLED`を残すために、`FLAG`をストアではなくアトミックなORで立てる(`idris2rc2_force`)。
 
 ## 落とし穴: ランタイムの`Makefile`
 
