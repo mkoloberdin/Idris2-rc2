@@ -41,11 +41,11 @@
 | 割り当て箇所 | セルか |
 |---|---|
 | `newConstructor`、`mkClosure`、`mkDouble`、`mkInt64`、`mkBits64`(`memory.c`) | はい |
-| `newIORef`(`ioprims.c:15`)、`mkLazy`(`rt.c:541`)、`mkGCPointer` | はい |
-| `mkInteger`、`mkArray`、`mkBuffer`、`mkThreadID`、`cast Integer String`の`String`(`numeric.c:443`)、`allocString` | いいえ |
+| `newIORef`(`ioprims.c`)、`mkLazy`(`rt.c`)、`mkGCPointer` | はい |
+| `mkInteger`、`mkArray`、`mkBuffer`、`mkThreadID`、`cast Integer String`の`String`(`numeric.c`)、`allocString` | いいえ |
 | `libs/rc2base`の`Mutex`/`Condition`/`Semaphore`/`Barrier`/`JoinHandle`/`Channel`(`concurrency_util.c`) | いいえ |
 
-解放側もタグで分ける。`idris2rc2_teardown`は最後に`idris2rc2_cellFreeInline`を呼ぶ。これは`idris2rc2_cellPooled`(タグとarityによる、割り当てと同じ判定)に問い合わせ、プールのセルでないものを`free()`へ送る。`idris2rc2_trampoline`と`idris2rc2_applyClosureN`(`rt.c`)、`idris2rc2_releaseReuse`(`rt.h`)が解放するクロージャの殻はセルである。チャネルのノード(`concurrency_util.c`)とスレッドのプリミティブはセルではなく、移してはならない。ランタイムの外でセルを解放するものはない。`%export`の結果は別のコピーである。
+解放側は割り当てに従う。`idris2rc2_teardown`は最後に`idris2rc2_cellFreeInline`を呼ぶ。これは`idris2rc2_cellPooled`(割り当てがヘッダに立てた`POOLED`ビット。`constructor-layout.md`の「予約バイト」)に問い合わせ、プールのセルでないものを`free()`へ送る。インラインの割り当てが行うのは、フリーリストのpopだけである(`idris2rc2_poolTryAlloc`)。リストが空のとき、およびプールが無効のときは`idris2rc2_cellAlloc`へ進む。こちらは渡すセルのヘッダを自分で書くので、`malloc`したセルに印が付くことはない。`idris2rc2_trampoline`と`idris2rc2_applyClosureN`(`rt.c`)、`idris2rc2_releaseReuse`(`rt.h`)が解放するクロージャの殻はセルである。チャネルのノード(`concurrency_util.c`)とスレッドのプリミティブはセルではなく、移してはならない。ランタイムの外でセルを解放するものはない。`%export`の結果は別のコピーである。
 
 ### どのクラスか
 
@@ -117,7 +117,7 @@ else push_remote(pg, c);                            // anything else: remote
 ## 検査
 
 - **チェックモード、`IDRIS2RC2_POOL_CHECK`**(コンパイル時)。解放したセルは、`rc`と`reserved`にパターンが設定され、本体の残り(リンクより後)が`0xDD`で埋められる。割り当ては、本体がまだすべて`0xDD`であること(解放後の書き込みがないこと)と、ページのクラスが要求されたものであることを検査する。セルの二重解放や、ページのセル境界上にないポインタは、abortする。`filled`が`arity`を超えるクロージャもabortする。プールのセルには余裕がない。`malloc`は32バイトの要求を40バイトに切り上げるので、はみ出しが隠れていたが、ここでは次のセルのヘッダを上書きしてしまう。エミッタが`idris2rc2_tailcallApplyClosure`を連鎖の最後のホップに限っているのは、このためである(`Emit.idr`の、`applyChain`の上のコメント)。
-- **プールを無効にする。** `IDRIS2RC2_POOL=0`(環境変数。ほかのどのコンストラクタよりも前に読む)または`-DIDRIS2RC2_NO_POOL`(コンパイル時)で、すべてのセルが`malloc`のブロックになる。`cellAlloc`と`idris2rc2_cellPooled`は`idris2rc2_poolOn`を検査する。予測しやすい分岐である。`verify.sh`は、valgrindで走らせるとき(`LEAK_SENSITIVE_TESTS`)にこれを設定する。4 MiBの`mmap`セグメントのプールは、リーク、二重解放、解放後の使用をすべてvalgrindから隠すので、それらのテストは何も検査せずに通ってしまうからである。ASanにも同じ切り替えを使う。
+- **プールを無効にする。** `IDRIS2RC2_POOL=0`(環境変数。ほかのどのコンストラクタよりも前に読む)または`-DIDRIS2RC2_NO_POOL`(コンパイル時)で、すべてのセルが`malloc`のブロックになる。`cellAlloc`が`idris2rc2_poolOn`を検査する。予測しやすい分岐である。どのページにもフリーリストは作られないので、インラインの割り当ては必ずそこへ進む。`verify.sh`は、valgrindで走らせるとき(`LEAK_SENSITIVE_TESTS`)にこれを設定する。4 MiBの`mmap`セグメントのプールは、リーク、二重解放、解放後の使用をすべてvalgrindから隠すので、それらのテストは何も検査せずに通ってしまうからである。ASanにも同じ切り替えを使う。
 - **`rc2/tests/pool/run.sh`**は`verify.sh`から実行され、`poolstress.c`を3通り(出荷時のまま、チェックモード、ThreadSanitizerの下)にビルドして走らせる。内容は、別々のスレッドの生産者と消費者。4つのスレッドの輪で、それぞれが1つ前のスレッドのセルを割り当て、解放するもの。短命な400の生産者と、そのセルを解放する長命な1つの消費者、および生きたセルを持ったまま終わる300のスレッド(使用中のページ数の最大値は小さいままでなければならない。終わったスレッドのページは引き取られるか、掃引される)。かき混ぜた順序での局所的な割り当てと解放の繰り返し。そして大きなヒープを構築して解放するもので、その後に常駐サイズが下がらなければならない(ThreadSanitizerの下では、そのシャドウメモリが常駐するので、これは求めない)。古い`pending`のエントリがあるうちのクラスをまたいだページの再利用と、多数のスレッドが同時に1つのページへ解放する場合は、扱っていない。
 
 ## ステージと、それぞれを決めるもの(0、1a、1b、1c、2は完了)
@@ -164,7 +164,7 @@ else push_remote(pg, c);                            // anything else: remote
 
 ## 解放の経路(2026-11-10)
 
-rc2でビルドしたコンパイラで`base`をビルドしたときのcallgrindプロファイル(439.6 G命令)では、セルの解放が全命令の9.7%を占め、割り当ての3倍だった。`idris2rc2_poolFree`は1回あたり約39命令かかっていた。まれな場合(ページの状態の変化、ほかのヒープのページのセル)がそこへインライン化され、毎回の呼び出しで6つのレジスタを退避していたからである。`idris2rc2_cellFree`は約22命令かかっていた。プールか`malloc`かを決めるためだけに、タグからセルのサイズを計算していたからである。現在の解放は`idris2rc2_poolFreeInline`(所有者の検査、フリーリストへのpush、`used--`、状態の検査1回)であり、まれな場合はインラインでない関数(`idris2rc2_poolAfter`、`idris2rc2_poolFreeRemote`)にある。`idris2rc2_cellPooled`は、割り当てが使うのと同じサイズのマクロ(`IDRIS2RC2_CON_BYTES`、`IDRIS2RC2_CLOSURE_BYTES`)で、タグとarityからプールか`malloc`かを決める。`teardown`とランタイムのクロージャの殻の解放はそれをインライン化する。生成されたCは引き続き`idris2rc2_cellFree`を呼ぶので、10,739箇所の`releaseReuse`は大きくならない。
+rc2でビルドしたコンパイラで`base`をビルドしたときのcallgrindプロファイル(439.6 G命令)では、セルの解放が全命令の9.7%を占め、割り当ての3倍だった。`idris2rc2_poolFree`は1回あたり約39命令かかっていた。まれな場合(ページの状態の変化、ほかのヒープのページのセル)がそこへインライン化され、毎回の呼び出しで6つのレジスタを退避していたからである。`idris2rc2_cellFree`は約22命令かかっていた。プールか`malloc`かを決めるためだけに、タグからセルのサイズを計算していたからである。現在の解放は`idris2rc2_poolFreeInline`(所有者の検査、フリーリストへのpush、`used--`、状態の検査1回)であり、まれな場合はインラインでない関数(`idris2rc2_poolAfter`、`idris2rc2_poolFreeRemote`)にある。`idris2rc2_cellPooled`は、割り当てが使うのと同じサイズのマクロ(`IDRIS2RC2_CON_BYTES`、`IDRIS2RC2_CLOSURE_BYTES`)で、タグとarityからプールか`malloc`かを決めていた。現在はヘッダのビットを読む(`constructor-layout.md`の「予約バイト」)。`teardown`とランタイムのクロージャの殻の解放はそれをインライン化する。生成されたCは引き続き`idris2rc2_cellFree`を呼ぶので、10,739箇所の`releaseReuse`は大きくならない。
 
 `prelude`で測定すると、解放(`poolFree`、`cellFree`)の命令数は3.2 Gから0.4 Gに下がるが、その大半はそれをインライン化する呼び出し元(`teardown`、`trampoline`)へ移るので、合計は31.5 Gから31.0 G(-1.6%)になる。プロファイルから予想した3から5%には届かない。同じ1時間のうちに測った`base`のビルド時間は、73.4秒から71.7秒(-2.3%)、`prelude`は5.87秒から5.65秒(-3.7%)である。
 
