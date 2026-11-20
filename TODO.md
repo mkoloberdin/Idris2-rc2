@@ -48,21 +48,6 @@ CAFへの参照を含むフィールドも消せ、`DeadArgs`は外した引数�
 - 否定側(型が値で決まるものを探して拒否する)では塞げない。型変数も同じ現象で、多相なフィールドの
   型は分解される値の型引数が CExp に残らず、lambda の binder には型がない。
 
-## IR: `dup`・`drop`・`postDrop`の対象を変数IDだけにする(アイデア)
-
-`RDup`・`RDrop`・`postDrop`・`prologueDrop`・`RReuseOffer`の`dupOnShared`/`dropOnUnique`などは、
-今は`RCLocal`のリストで、定数(`RCNull`・`RCErased`・`RCWorld`・畳み込み済みの定数)も型の上では入れられる。
-しかし数えるのは変数だけで、定数への`dup`/`drop`は何もしない。実際に入り込んだ例が
-`DualABI.postDropFor`(定数の引数、`NULL`型のものを含めて`postDrop`に入れていた。直した)で、Emitが
-`idris2rc2_drop(NULL)`を出し、IRのダンプにも`postDrop= [[erased]]`と残っていた。
-
-案: これらのフィールドの型を`List Int`(変数ID)か、`RCLoc`だけを表す型にして、定数を入れられなく
-する。パスが定数を入れる間違いが型エラーになり、Emitの`varName`の定数の分岐(`RCConst`・`RCConstCon`・`RCConstPartial`は
-`/* [rc2] unreachable ... */`を返す)と、各パスの`RCLoc`の場合分けも要らなくなる。`RCExp`の
-構成子の型が変わるので、`postDrop`などを読み書きする全パス(`RC`・`DualABI`・`Loop`・`MutualLoop`・
-`DupMerge`・`PushDown`・`Reuse`・`DeadVars`・`FunDedup`・`Emit`)に影響する。`RCConstCon`の
-`argsConst`と同じ要領(消去される証明)でも書けるが、`List Int`のほうが単純。
-
 ## Performance: tail-position delegating calls stay boxed
 
 Native type inference (`Compiler.RC2.Types`) only applies to values
