@@ -3,7 +3,8 @@
 # and checks it on hand-written C: sample.c has one of each kind of item the
 # tool rewrites (a static prototype and its definition, static constants of a
 # named and of an anonymous struct type, a tentative definition, a stray
-# `;`, a static inline function, braces and quotes inside literals). Cut
+# `;`, a static inline function, braces and quotes inside literals, a
+# preprocessor line inside a body). Cut
 # after every function, every part must compile with -Wall -Werror and the
 # linked program print what the unsplit one prints. Each refuse-*.c is outside
 # what the tool splits and must make it exit with 1.
@@ -69,10 +70,15 @@ echo "PASS  Makefile ($(grep -c '^[^ ]*\.o:' "$OUT/mk/split/Makefile") parts)"
 
 # `clean` removes what make built, and leaves what c-split wrote.
 make -s -C "$OUT/mk/split" clean || fail "make clean failed"
-left="$(find "$OUT/mk/obj" "$OUT/mk/split" -name '*.o' -o -name '*.roots' -o -name sample -type f)"
+left="$(find "$OUT/mk/obj" "$OUT/mk/split" -name '*.o' -o -name '*.roots' -o -name '*.syms' -o -name sample -type f)"
 [[ -z "$left" ]] || fail "make clean left: $left"
 [[ -f "$OUT/mk/split/sample.h" && -f "$OUT/mk/split/sample-0.c" ]] || fail "make clean removed the parts"
 echo "PASS  make clean"
+
+# A compound literal in an initializer is data, not a function body.
+"$C_SPLIT" "$TESTS_DIR/compound.c" "$OUT/compound" > /dev/null || fail "compound.c was refused"
+grep -q '^extern Pair p2' "$OUT/compound/compound.h" || fail "compound.c: p2 is not declared extern in the header"
+echo "PASS  compound literal in an initializer"
 
 for f in "$TESTS_DIR"/refuse-*.c; do
     name="$(basename "$f")"

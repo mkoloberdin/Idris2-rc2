@@ -228,12 +228,12 @@ linkCommand objectFiles outFile foreignLibs sharedRuntime
          ldLibs <- coreLift findLDLibs
          tail <- linkTail sharedRuntime foreignLibs
 
-         -- `-Wno-error=deprecated-declarations`: see `compileCObjectFile`'s
+         -- `-Wno-error=deprecated-declarations`: see `compileCommand`'s
          -- own comment on the same flag -- kept here too since this
          -- step's own `cc` invocation could in principle also compile
          -- from source (not just link an already-built object file),
          -- same reasoning either way.
-         -- `-Wl,--gc-sections`: pairs with `compileCObjectFile`'s own
+         -- `-Wl,--gc-sections`: pairs with `compileCommand`'s own
          -- `-ffunction-sections -fdata-sections` -- see that flag's own
          -- comment for why this matters specifically for incremental
          -- mode's own per-module `.o`s.

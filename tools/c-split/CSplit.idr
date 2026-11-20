@@ -7,6 +7,7 @@
 module CSplit
 
 import Data.Buffer
+import Data.Either
 import Data.List
 import Data.List1
 import Data.SortedSet
@@ -14,6 +15,7 @@ import Data.String
 
 import System
 import System.Directory
+import System.Escape
 import System.File
 import System.File.Buffer
 
@@ -36,8 +38,8 @@ record Item where
   tok : Int
   ||| The `=` of the initializer, or -1.
   eqAt : Int
-  ||| A `(` at depth 0 before the initializer.
-  paren : Bool
+  ||| The first `(` at depth 0 before the initializer, or -1.
+  parenAt : Int
   ||| The first `{` at depth 0 before the initializer and the end of its
   ||| block (an anonymous struct type), or -1.
   braceAt : Int
@@ -50,7 +52,7 @@ record Scan where
   start : Int
   tok : Int
   eqAt : Int
-  paren : Bool
+  parenAt : Int
   braceAt : Int
   braceEnd : Int
   ||| The `{` at depth 0 opened a function body.
@@ -61,7 +63,7 @@ record Scan where
   bol : Bool
 
 fresh : Int -> Scan
-fresh i = MkScan 0 i (-1) (-1) False (-1) (-1) False 0 True
+fresh i = MkScan 0 i (-1) (-1) (-1) (-1) (-1) False 0 True
 
 byteAt : Buffer -> Int -> IO Int
 byteAt b i = cast <$> getBits8 b i
@@ -98,7 +100,7 @@ scanItems b size = go 0 (fresh 0) [<]
                    else pure (min size (e + 1))
 
     emit : Kind -> Int -> Scan -> SnocList Item -> (Scan, SnocList Item)
-    emit k e s acc = (fresh e, acc :< MkItem k s.start s.tok s.eqAt s.paren s.braceAt s.braceEnd e)
+    emit k e s acc = (fresh e, acc :< MkItem k s.start s.tok s.eqAt s.parenAt s.braceAt s.braceEnd e)
 
     seen : Int -> Scan -> Scan
     seen i s = { tok := if s.tok < 0 then i else s.tok, bol := False } s
@@ -109,7 +111,7 @@ scanItems b size = go 0 (fresh 0) [<]
     go i s acc =
       if i >= size
         then if s.tok >= 0 then pure (Left "the input ends inside an item")
-             else pure (Right (acc <>> if s.start < size then [MkItem Decl s.start (-1) (-1) False (-1) (-1) size] else []))
+             else pure (Right (acc <>> if s.start < size then [MkItem Decl s.start (-1) (-1) (-1) (-1) (-1) size] else []))
         else do
           c <- byteAt b i
           n <- if i + 1 < size then byteAt b (i + 1) else pure 0
@@ -118,12 +120,15 @@ scanItems b size = go 0 (fresh 0) [<]
     step i c n s acc =
       if c == 10 then go (i + 1) ({ bol := True } s) acc
       else if isBlank c then go (i + 1) s acc
-      else if c == 47 && n == 47 then do go !(lineEnd (i + 2)) s acc
-      else if c == 47 && n == 42 then do go !(blockEnd (i + 2)) ({ bol := False } s) acc
-      else if c == 35 && s.bol && s.depth == 0
+      else if c == 47 && n == 47 then go !(lineEnd (i + 2)) s acc
+      else if c == 47 && n == 42 then go !(blockEnd (i + 2)) ({ bol := False } s) acc
+      else if c == 35 && s.bol
         then do e <- ppEnd i
-                let (s', acc') = emit PP e (seen i s) acc
-                go e s' acc'
+                -- Inside a function body the line stays where it is; it is
+                -- not C, so its quotes are not scanned as literals.
+                if s.depth > 0 then go e s acc
+                  else if s.tok >= 0 then pure (Left "a preprocessor line inside an item at byte \{show i}")
+                  else let (s', acc') = emit PP e (seen i s) acc in go e s' acc'
       else if c == 34 || c == 39
         then do e <- quoteEnd c (i + 1)
                 go e ({ prev := if s.depth == 0 then c else s.prev } (seen i s)) acc
@@ -141,9 +146,9 @@ scanItems b size = go 0 (fresh 0) [<]
           let top = s.depth == 0
               s = { depth $= (+ 1) } s
           in if not top then s
-             else if c == 123 && s.prev == 41 then { body := True } s
+             else if c == 123 && s.prev == 41 && s.eqAt < 0 then { body := True } s
              else if c == 123 && s.eqAt < 0 && s.braceAt < 0 then { braceAt := i } s
-             else if c == 40 && s.eqAt < 0 then { paren := True } s
+             else if c == 40 && s.eqAt < 0 && s.parenAt < 0 then { parenAt := i } s
              else s
 
         closing : Int -> Scan -> IO (Either String (List Item))
@@ -228,13 +233,13 @@ place b dataNames inParts it = case it.kind of
           else ok (header [whole])
     Fun => do
       ws <- words
-      let isStatic = take 1 ws == ["static"]
+      let isStatic = staticFirst ws
       if elem "inline" ws
         then if isStatic then ok (header [whole]) else failAt "an inline function that is not static"
         else ok (part (if isStatic then unstatic it else [whole]))
     Dat => do
       ws <- words
-      let isStatic = take 1 ws == ["static"]
+      let isStatic = staticFirst ws
       name <- nameBefore b it.eqAt
       if name == "" then failAt "a data definition whose name was not found"
         else if it.braceAt < 0
@@ -247,21 +252,13 @@ place b dataNames inParts it = case it.kind of
       else do
         ws <- words
         case ws of
-          ("static" :: _) =>
-            if it.paren then ok (header (unstatic it))
-              else failAt "a static variable without an initializer"
           (w :: _) =>
-            if elem w ["extern", "typedef"] then ok (header [whole])
-            else if elem w ["struct", "union", "enum"]
-              then if it.braceAt >= 0 then ok (header [whole])
-                   else failAt "a variable of a struct, union or enum type without an initializer"
-            else if it.paren then ok (header [whole])
-            else do
-              name <- nameBefore b (it.end - 1)
-              -- A tentative definition (`char const name[];`): a definition in
-              -- every part that sees it, so the header only declares it.
-              let decl = [Lit "extern ", Slice it.tok it.end, Lit "\n"]
-              ok (MkPlaced [] [] (if contains name dataNames then [] else [whole]) decl)
+            if isPrefixOf "__" w then failAt "an item that starts with a compiler extension"
+            else if elem w ["extern", "typedef"] then ok (header [whole])
+            else if elem w ["struct", "union", "enum"] then typeBlock
+            else if it.parenAt >= 0 then prototype w
+            else if w == "static" then failAt "a static variable without an initializer"
+            else tentative
           [] => if it.end - it.tok == 1 then ok (if inParts then part [whole] else header [whole])
                 else failAt "an item that does not start with an identifier"
   where
@@ -282,6 +279,42 @@ place b dataNames inParts it = case it.kind of
 
     words : IO (List String)
     words = leadingWords b it.tok it.end
+
+    staticFirst : List String -> Bool
+    staticFirst ws = take 1 ws == ["static"]
+
+    blanksUpTo : Int -> Int -> IO Bool
+    blanksUpTo j e = if j >= e then pure True
+                     else if isBlank !(byteAt b j) then blanksUpTo (j + 1) e else pure False
+
+    nextByte : Int -> IO Int
+    nextByte j = if j >= it.end then pure 0
+                 else do c <- byteAt b j
+                         if isBlank c then nextByte (j + 1) else pure c
+
+    -- A type definition goes to every part; a variable declared with it
+    -- (`struct S { ... } v;`) would be defined in every part.
+    typeBlock : IO (Either String Placed)
+    typeBlock =
+      if it.braceAt < 0 then failAt "a variable of a struct, union or enum type without an initializer"
+      else do bare <- blanksUpTo it.braceEnd (it.end - 1)
+              if bare then ok (header [whole])
+                else failAt "a variable declared with a struct, union or enum definition"
+
+    -- `T (*fp)(int);` is a variable, not a prototype.
+    prototype : String -> IO (Either String Placed)
+    prototype w = do
+      c <- nextByte (it.parenAt + 1)
+      if c == 42 then failAt "a variable of a function pointer type"
+        else ok (header (if w == "static" then unstatic it else [whole]))
+
+    -- A tentative definition (`char const name[];`): a definition in every
+    -- part that sees it, so the header only declares it.
+    tentative : IO (Either String Placed)
+    tentative = do
+      name <- nameBefore b (it.end - 1)
+      ok (MkPlaced [] [] (if contains name dataNames then [] else [whole])
+                   [Lit "extern ", Slice it.tok it.end, Lit "\n"])
 
     -- `[static] struct { ... } const name = ...;`: the two translation units
     -- that declare and define it must see the same type, and two anonymous
@@ -320,10 +353,11 @@ layout b target items = do
     names <- dataNames
     go names items (MkLayout [<] [<] [<] [<] [<] 0 False False)
   where
+    isDat : Item -> Bool
+    isDat it = case it.kind of { Dat => True; _ => False }
+
     dataNames : IO (SortedSet String)
-    dataNames = foldlM (\acc, it => case it.kind of
-                          Dat => pure (insert !(nameBefore b it.eqAt) acc)
-                          _ => pure acc) empty items
+    dataNames = fromList <$> traverse (\it => nameBefore b it.eqAt) (filter isDat items)
 
     startsPart : Kind -> Bool
     startsPart Fun = True
@@ -340,7 +374,7 @@ layout b target items = do
                 else l
       let l = { header $= (<>< p.header), externs $= (<>< p.externs),
                 firstPart $= (<>< p.firstPart), current $= (<>< p.part),
-                size $= (+ (it.end - it.start)),
+                size $= (+ (if startsPart it.kind then it.end - it.start else 0)),
                 lastFun := case it.kind of { Fun => True; Decl => l.lastFun; _ => False },
                 inParts := l.inParts || startsPart it.kind } l
       go names rest l
@@ -363,7 +397,10 @@ writeFileOf path b ps = do
   Right h <- openFile path WriteTruncate
     | Left err => pure (Left "\{path}: \{show err}")
   r <- writePieces h b ps
+  fflush h
+  failed <- fileError h
   closeFile h
+  let r = if failed && isRight r then Left "a write failed" else r
   pure (mapFst (\e => "\{path}: \{e}") r)
 
 -------------------------------------------------------------------------------
@@ -396,13 +433,9 @@ readCommands path = do
                      Just v => Right (ltrim v)
                      Nothing => Left "\{path}: no `\{key}` line"
 
-||| A path quoted as `escapeCmd` quotes it outside Windows, which is how it
-||| appears in rc2's command lines.
+||| An argument as rc2's command lines quote it (`escapeCmd`).
 quoteArg : String -> String
-quoteArg p = "\"" ++ concatMap esc (unpack p) ++ "\""
-  where
-    esc : Char -> String
-    esc c = if elem c ['$', '`', '\\', '"'] then pack ['\\', c] else singleton c
+quoteArg = escapeArg
 
 ||| `s` with every `old` replaced by `new`, or Nothing when `old` is not in it.
 replaceAll : (old : String) -> (new : String) -> String -> Maybe String
@@ -446,12 +479,15 @@ argAfter flag cmd = case findSub (unpack (quoteArg flag ++ " \"")) (unpack cmd) 
 makefile : String -> Commands -> (header : String) -> (parts : List String) -> Either String String
 makefile input cmds header parts = do
     when (any unsafeForMake (header :: parts)) $
-      Left "a path with a blank, `:`, `#` or `$` cannot be a make target"
+      Left "a path with a blank or one of `:#$%*?[\\` cannot be a make target"
     src <- maybe (Left "the compile command has no `-c` argument") Right (argAfter "-c" cmds.compile)
+    let cwd = forMake (quoteArg cmds.cwd)
     let obj = quoteArg cmds.object
     let merged' = quoteArg (cmds.object ++ ".parts.o")
+    let syms' = quoteArg (cmds.object ++ ".syms")
     let roots' = quoteArg (cmds.object ++ ".roots")
     let merged = forMake merged'
+    let syms = forMake syms'
     let roots = forMake roots'
     let objs = map objOf parts
     rules <- traverse (rule src obj) (zip parts objs)
@@ -463,20 +499,20 @@ makefile input cmds header parts = do
       , "# few hundred MB with clang -O2)."
       , ".PHONY: all"
       , "all: " ++ unwords objs
-      , "\tcd " ++ quoteArg cmds.cwd ++ " && ld -r -o " ++ merged ++ " " ++ unwords (map quoteArg objs)
+      , "\tcd " ++ cwd ++ " && ld -r -o " ++ merged ++ " " ++ unwords (map quoteArg objs)
           ++ " && objcopy --localize-hidden " ++ merged
-      , "\tcd " ++ quoteArg cmds.cwd ++ " && nm -g --defined-only " ++ merged
-          ++ " | awk '{ print \"-u\", $$3 }' > " ++ roots
+      , "\tcd " ++ cwd ++ " && nm -g --defined-only " ++ merged ++ " > " ++ syms
+          ++ " && awk '{ print \"-u\", $$3 }' " ++ syms ++ " > " ++ roots
           ++ " && ld -r --gc-sections @" ++ roots ++ " -o " ++ forMake obj ++ " " ++ merged
-      , "\tcd " ++ quoteArg cmds.cwd ++ " && " ++ forMake cmds.final
+      , "\tcd " ++ cwd ++ " && " ++ forMake cmds.final
       , ""
       , ".PHONY: clean"
       , "clean:"
-      , "\tcd " ++ quoteArg cmds.cwd ++ " && rm -f " ++ unwords (map forMake ([obj, merged', roots'] ++ product) ++ map quoteArg objs)
+      , "\tcd " ++ cwd ++ " && rm -f " ++ unwords (map forMake ([obj, merged', syms', roots'] ++ product) ++ map quoteArg objs)
       , "" ] ++ rules
   where
     unsafeForMake : String -> Bool
-    unsafeForMake p = any (\c => elem c [' ', '\t', ':', '#', '$']) (unpack p)
+    unsafeForMake p = any (\c => elem c [' ', '\t', ':', '#', '$', '%', '*', '?', '[', '\\']) (unpack p)
 
     objOf : String -> String
     objOf p = substr 0 (length p `minus` 2) p ++ ".o"
@@ -490,13 +526,10 @@ makefile input cmds header parts = do
               (replaceAll src (quoteArg p) cmds.compile)
       c2 <- maybe (Left "the compile command does not name the object file") Right
               (replaceAll obj (quoteArg o) c1)
-      Right "\{o}: \{p} \{header}\n\tcd \{quoteArg cmds.cwd} && \{forMake c2}\n"
+      Right "\{o}: \{p} \{header}\n\tcd \{forMake (quoteArg cmds.cwd)} && \{forMake c2}\n"
 
 -------------------------------------------------------------------------------
 -- Command line
-
-usage : String
-usage = "usage: c-split [--part-bytes N] [--commands FILE.cmd] INPUT.c OUTDIR"
 
 ||| Exit code 1: the input is outside what this tool splits; the caller
 ||| compiles it whole instead.
@@ -510,11 +543,6 @@ die : String -> IO a
 die msg = do
   ignore (fPutStrLn stderr ("c-split: " ++ msg))
   exitWith (ExitFailure 2)
-
-stemOf : String -> String
-stemOf path =
-  let base = last (split (== '/') path) in
-  if isSuffixOf ".c" base then substr 0 (length base `minus` 2) base else base
 
 record Options where
   constructor MkOptions
@@ -550,9 +578,7 @@ main = do
     | Nothing => die "cannot read the current directory"
   let absOut = if isPrefixOf "/" outDir then outDir else here ++ "/" ++ outDir
   let stem = stemOf input
-  let parts = case l.parts :< l.current of
-                [<] => [[<]]
-                ps => ps <>> []
+  let parts = (l.parts :< l.current) <>> []
   let header = outDir ++ "/" ++ stem ++ ".h"
   let names = map (\k => stem ++ "-" ++ show k ++ ".c") [0 .. length parts `minus` 1]
   mk <- the (IO (Maybe String)) $ case cmds of
@@ -574,3 +600,11 @@ main = do
     Right () <- writeFile (outDir ++ "/Makefile") text
       | Left err => die "\{outDir}/Makefile: \{show err}"
     pure ()
+  where
+    usage : String
+    usage = "usage: c-split [--part-bytes N] [--commands FILE.cmd] INPUT.c OUTDIR"
+
+    stemOf : String -> String
+    stemOf path =
+      let base = last (split (== '/') path) in
+      if isSuffixOf ".c" base then substr 0 (length base `minus` 2) base else base

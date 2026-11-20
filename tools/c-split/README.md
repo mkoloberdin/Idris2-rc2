@@ -20,8 +20,8 @@ OUTDIR/INPUT-1.c
 It writes `OUTDIR/INPUT.h` and the parts, and prints the parts one per
 line. Each part starts with `#include "INPUT.h"`; compile each with the
 flags the whole file would have had, and merge the objects into the one
-object the whole file would have made (see "The Makefile"). `--part-bytes` (default 4,000,000) is the size a part grows to
-before the next cut.
+object the whole file would have made (see "The Makefile"). `--part-bytes`
+(default 4,000,000) is the size a part grows to before the next cut.
 
 With `--commands`, it also writes `OUTDIR/Makefile` (below).
 
@@ -40,14 +40,19 @@ depth of `()`, `[]` and `{}`, and cuts the file into top-level items:
 
 - a **preprocessor line** (`#` first on a line, at depth 0, continued by
   a trailing backslash);
-- a **function definition**: a `{` at depth 0 right after a `)`, up to its
-  matching `}`;
+- a **function definition**: a `{` at depth 0 right after a `)`, and before
+  any `=` (so `T x = (T){ ... };` stays data), up to its matching `}`;
 - a **data definition**: a `;` at depth 0 after an `=` at depth 0;
 - a **declaration**: any other `;` at depth 0 (prototypes, `extern`,
   `typedef`, struct definitions, tentative definitions, an empty `;`).
 
-The blanks and comments in front of an item belong to it, so the items put
-back together in order are the input.
+A preprocessor line inside a function body is part of the body; its text is
+not scanned for literals. The blanks and comments in front of an item belong
+to it, so the items put back together in order are the input.
+
+A part reaches a function of another part through the prototype in the
+header, so every function used across parts needs one before it is used.
+rc2 writes a prototype for every function first.
 
 ## Where each item goes
 
@@ -96,8 +101,8 @@ and both the declaration and the definition use that name.
 ## Where the cuts go
 
 Parts are contiguous runs of the input, in order. A cut goes in front of a
-function or data definition once the current part has `--part-bytes` and its
-last definition was a function. rc2 writes the constants a function stages
+function or data definition once the definitions in the current part have
+`--part-bytes` and the last of them was a function. rc2 writes the constants a function stages
 right in front of it, so a function and its constants stay in one part.
 
 The header holds every declaration of the program: 2.8 MB for the
@@ -109,10 +114,14 @@ self-hosted compiler, which a translation unit with nothing else compiles in
 It stops with exit code 1, before writing anything, when it meets:
 
 - a preprocessor line after the first definition (a `#if` or `#define`
-  between functions could not be moved into the header);
+  between functions could not be moved into the header), or inside an item
+  outside a function body;
 - a `static` variable without an initializer;
 - an `inline` function that is not `static`;
-- a variable of a struct, union or enum type without an initializer;
+- a variable of a struct, union or enum type without an initializer, or one
+  declared together with the type (`struct S { ... } v;`);
+- a variable of a function pointer type without an initializer;
+- an item that starts with a compiler extension (`__attribute__`, `__asm__`);
 - a data definition whose type block is not an anonymous struct, or whose
   name is not found;
 - an item that does not start with an identifier, or unbalanced brackets.
@@ -140,8 +149,9 @@ wrote it, so an executable, a `staticlib` and a `sharedlib` are built alike:
 
 1. `ld -r` merges the parts' objects into one;
 2. `objcopy --localize-hidden` makes local what was `static` (see above);
-3. `ld -r --gc-sections`, from every global symbol, drops what was `static`
-   and is not used. In one translation unit the C compiler leaves such a
+3. `ld -r --gc-sections`, from every global symbol (`nm`, then `awk`, in two
+   steps so that a failing `nm` stops make), drops what was `static` and is
+   not used. In one translation unit the C compiler leaves such a
    function out; split, it is compiled, and its calls stay as undefined
    symbols, which a shared library loaded with `dlopen` does not resolve.
 
@@ -155,7 +165,7 @@ name files relative to it, and keeps the flags rc2 took from `IDRIS2_CFLAGS`
 and the like as they were. It needs `ld`, `objcopy`, `nm` and `awk`.
 The arguments are found as rc2 quotes them (`System.Escape.escapeArg`), so
 a command that does not name the source or the object is refused, and so
-is a path a make target cannot hold (a blank, `:`, `#`, `$`).
+is a part path a make target cannot hold (a blank or one of `:#$%*?[\`).
 
 `make -j N` runs N compilers at once. For rc2's self-hosted compiler a part
 takes under 300 MB with `clang -O2`.

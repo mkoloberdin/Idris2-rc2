@@ -194,8 +194,9 @@ produced its result (unlike section 2's stage disables, which
   `.c` into.
 - **`nocc`** -- writes the `.c` (and the `.h`/`.link` of a library, and the
   `.cmd` of `writecc`) and stops there: the C compiler does not run
-  (whole-program compiles only). For a
-  build that compiles the C another way, such as `tools/c-split`'s Makefile.
+  (whole-program compiles only). For a build that compiles the C another
+  way, such as `tools/c-split`'s Makefile. With `dumpcc`, nothing is
+  printed, since nothing runs; `writecc` writes the commands.
 - **`keepforeign`** -- writes the C wrapper of every `%foreign` declaration,
   also one no call names any more (its calls were all inlined). Without it a
   whole-program build leaves such a wrapper out, headers and libraries kept
