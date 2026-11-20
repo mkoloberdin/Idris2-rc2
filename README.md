@@ -14,7 +14,7 @@ rc2 is developed without modifying the upstream Idris 2 codebase. It lives in it
 
 - [Key Highlights](#key-highlights)
 - [Quick Start](#quick-start) ([Environment](#1-environment-setup) / [Build & Install](#2-building-and-installing-rc2) / [Companion Library](#3-installing-the-support-library-rc2base) / [Compiling Programs](#4-compiling-and-running-programs) / [Self-Hosting](#5-building-the-compiler-with-rc2-itself-self-hosting-no-chez-scheme) / [Profiling](#profiling-build-performance---timing))
-- [Ecosystem and Developer Tools](#ecosystem-and-developer-tools) ([rc2base](#libsrc2base-native-c-abi-toolkit) / [control-async](#libscontrol-async-tasks-and-non-blocking-sockets) / [web](#libsweb-http-client-and-servers) / [text-re2](#libstext-re2-google-re2-regex-bindings) / [notcurses & termui](#other-bindings-notcurses-termui) / [rcexpr-lint](#toolsrcexpr-lint-ir-static-checker) / [rcexpr-diff](#toolsrcexpr-diff-ir-diff-tool))
+- [Ecosystem and Developer Tools](#ecosystem-and-developer-tools) ([rc2base](#libsrc2base-native-c-abi-toolkit) / [control-async](#libscontrol-async-tasks-and-non-blocking-sockets) / [web](#libsweb-http-client-and-servers) / [text-re2](#libstext-re2-google-re2-regex-bindings) / [notcurses & termui](#other-bindings-notcurses-termui) / [rcexpr-lint](#toolsrcexpr-lint-ir-static-checker) / [rcexpr-diff](#toolsrcexpr-diff-ir-diff-tool) / [c-split](#toolsc-split-c-file-splitter))
 - [Architecture and Optimization Pipeline](#architecture-and-optimization-pipeline) ([Repository Layout](#repository-layout) / [Compiler Structure](#compiler-structure-rc2) / [Optimization Passes](#ten-key-optimizations))
 - [Deliberate Differences from Upstream RefC](#deliberate-differences-from-upstream-refc) ([Char](#1-full-unicode-scalar-values-for-char) / [String](#2-codepoint-semantics-and-nul-safe-string) / [pthread](#3-real-multithreaded-concurrency-pthread) / [%export](#4-native-c-abi-export-export) / [Lifecycle](#5-process-lifecycle-and-locale-independent-formatting) / [CAF & Lazy Memoization](#6-caf-and-lazy--inf-memoization))
 - [%cg rc2 Directives](#cg-rc2-directives)
@@ -218,6 +218,10 @@ See [`tools/rcexpr-lint/README.md`](tools/rcexpr-lint/README.md) for rules, exit
 
 Compares two `.rcexpr` IR dumps definition by definition. By normalizing variable identifiers in order of appearance and stripping compiler-generated name counters, it isolates exactly which definitions changed between compiler revisions without cascading variable renaming noise. See [`tools/rcexpr-diff/README.md`](tools/rcexpr-diff/README.md).
 
+### `tools/c-split/`: C File Splitter
+
+Splits the one `.c` file rc2 writes for a whole program into a shared header and several parts, so the C compiler takes it in pieces and in parallel. With `--directive writecc --directive nocc`, rc2 writes its compile and link commands next to the `.c` instead of running them, and `c-split --commands` turns them into a Makefile. For the self-hosted compiler (111 MB of C), `make -j4` takes 5 minutes at 0.95 GB instead of 9 minutes at 2.2 GB in one `clang`. See [`tools/c-split/README.md`](tools/c-split/README.md).
+
 ---
 
 ## Architecture and Optimization Pipeline
@@ -236,7 +240,7 @@ Compares two `.rcexpr` IR dumps definition by definition. By normalizing variabl
 ├── libs/text-re2/   Google RE2 regex bindings
 ├── libs/notcurses/  notcurses bindings (System.Notcurses)
 ├── libs/termui/     terminal UI library (TermUI.*)
-├── tools/           IR verification and diff tools (rcexpr-lint, rcexpr-diff)
+├── tools/           IR verification and diff tools, C file splitter (rcexpr-lint, rcexpr-diff, c-split)
 └── rc2/             Core compiler backend
 ```
 

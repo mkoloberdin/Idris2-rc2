@@ -70,14 +70,24 @@ depPkgLibDirs
     = do dirs <- getDirs
          pure (map (</> "lib") (package_dirs dirs ++ extra_dirs dirs))
 
+||| Runs one command line through the shell; `verbose` (`--directive dumpcc`)
+||| prints it first, unconditionally rather than behind a log level, and
+||| before running so that it is still seen when the command fails.
 export
-compileCObjectFile : {auto c : Ref Ctxt Defs}
-                  -> (sourceFile : String)
-                  -> (objectFile : String)
-                  -> (extraFlags : List String)
-                  -> (verbose : Bool)
-                  -> Core (Maybe String)
-compileCObjectFile sourceFile objectFile extraFlags verbose
+runCommand : {auto c : Ref Ctxt Defs} -> (verbose : Bool) -> String -> Core Bool
+runCommand verbose cmd
+    = do log "compiler.refc.cc" 10 cmd
+         when verbose $ coreLift_ $ putStrLn cmd
+         pure (!(coreLift $ system cmd) == 0)
+
+||| The command line that compiles `sourceFile` to `objectFile`.
+export
+compileCommand : {auto c : Ref Ctxt Defs}
+              -> (sourceFile : String)
+              -> (objectFile : String)
+              -> (extraFlags : List String)
+              -> Core String
+compileCommand sourceFile objectFile extraFlags
     = do cc <- coreLift findCC
          cFlags <- coreLift findCFlags
          cppFlags <- coreLift findCPPFlags
@@ -94,7 +104,7 @@ compileCObjectFile sourceFile objectFile extraFlags verbose
          -- (`rc2/doc/incremental-compile.md` "Bugs found while implementing").
          -- `-O2` goes before `cFlags` on purpose: the last `-O` wins, so
          -- `CFLAGS=-O0` still overrides.
-         let runccobj = (escapeCmd $
+         pure $ (escapeCmd $
              [cc, "-O2", "-Werror", "-Wno-error=deprecated-declarations",
                   "-ffunction-sections", "-fdata-sections", "-c", sourceFile,
                   "-o", objectFile,
@@ -102,15 +112,16 @@ compileCObjectFile sourceFile objectFile extraFlags verbose
                   "-I" ++ cDir] ++ map ("-I" ++) depLibDirs ++ extraFlags)
                   ++ " " ++ cppFlags ++ " " ++ cFlags
 
-         log "compiler.refc.cc" 10 runccobj
-         -- `--directive dumpcc` / `%cg rc2 dumpcc`: print the exact
-         -- compile/link command about to run, unconditionally (not
-         -- gated behind a log level) -- printed before running so
-         -- it's still visible if the command itself fails.
-         when verbose $ coreLift_ $ putStrLn runccobj
-         0 <- coreLift $ system runccobj
-           | _ => pure Nothing
-
+export
+compileCObjectFile : {auto c : Ref Ctxt Defs}
+                  -> (sourceFile : String)
+                  -> (objectFile : String)
+                  -> (extraFlags : List String)
+                  -> (verbose : Bool)
+                  -> Core (Maybe String)
+compileCObjectFile sourceFile objectFile extraFlags verbose
+    = do True <- runCommand verbose !(compileCommand sourceFile objectFile extraFlags)
+           | False => pure Nothing
          pure (Just objectFile)
 
 ||| Bundles `objectFiles` into a single `ar`-format static archive at
@@ -135,18 +146,20 @@ compileCObjectFile sourceFile objectFile extraFlags verbose
 ||| incrementally-compiled program, not just the ones that actually
 ||| call it.
 export
+archiveCommand : (objectFiles : List String) -> (archivePath : String) -> Core String
+archiveCommand objectFiles archivePath
+    = do ar <- coreLift findAR
+         pure (escapeCmd ([ar, "rcs", archivePath] ++ objectFiles))
+
+export
 archiveObjectFiles : {auto c : Ref Ctxt Defs}
                   -> (objectFiles : List String)
                   -> (archivePath : String)
                   -> (verbose : Bool)
                   -> Core (Maybe String)
 archiveObjectFiles objectFiles archivePath verbose
-    = do ar <- coreLift findAR
-         let runar = escapeCmd ([ar, "rcs", archivePath] ++ objectFiles)
-         log "compiler.refc.cc" 10 runar
-         when verbose $ coreLift_ $ putStrLn runar
-         0 <- coreLift $ system runar
-           | _ => pure Nothing
+    = do True <- runCommand verbose !(archiveCommand objectFiles archivePath)
+           | False => pure Nothing
          pure (Just archivePath)
 
 ||| What follows the object files on a link line: the `-l` flags of the
@@ -202,14 +215,13 @@ linkTail sharedRuntime foreignLibs
 ||| per-module `.o` into (see that function's own doc comment for why
 ||| an archive, not the raw list, matters there).
 export
-compileCFile : {auto c : Ref Ctxt Defs}
-            -> (objectFiles : List String)
-            -> (outFile : String)
-            -> (foreignLibs : List String)
-            -> (sharedRuntime : Bool)
-            -> (verbose : Bool)
-            -> Core (Maybe String)
-compileCFile objectFiles outFile foreignLibs sharedRuntime verbose
+linkCommand : {auto c : Ref Ctxt Defs}
+           -> (objectFiles : List String)
+           -> (outFile : String)
+           -> (foreignLibs : List String)
+           -> (sharedRuntime : Bool)
+           -> Core String
+linkCommand objectFiles outFile foreignLibs sharedRuntime
     = do cc <- coreLift findCC
          cFlags <- coreLift findCFlags
          ldFlags <- coreLift findLDFlags
@@ -225,21 +237,38 @@ compileCFile objectFiles outFile foreignLibs sharedRuntime verbose
          -- `-ffunction-sections -fdata-sections` -- see that flag's own
          -- comment for why this matters specifically for incremental
          -- mode's own per-module `.o`s.
-         let runcc = (escapeCmd $
+         pure $ (escapeCmd $
              [cc, "-Werror", "-Wno-error=deprecated-declarations", "-Wl,--gc-sections"] ++ objectFiles
                   ++ ["-o", outFile] ++ tail)
                   ++ " " ++ (unwords [cFlags, ldFlags, ldLibs])
 
-         log "compiler.refc.cc" 10 runcc
-         when verbose $ coreLift_ $ putStrLn runcc
-         0 <- coreLift $ system runcc
-           | _ => pure Nothing
-
+export
+compileCFile : {auto c : Ref Ctxt Defs}
+            -> (objectFiles : List String)
+            -> (outFile : String)
+            -> (foreignLibs : List String)
+            -> (sharedRuntime : Bool)
+            -> (verbose : Bool)
+            -> Core (Maybe String)
+compileCFile objectFiles outFile foreignLibs sharedRuntime verbose
+    = do True <- runCommand verbose !(linkCommand objectFiles outFile foreignLibs sharedRuntime)
+           | False => pure Nothing
          pure (Just outFile)
 
 ||| Links `objectFiles` into a shared library, with no runtime and no other
 ||| library: what the library needs is named in the `.link` file written next
 ||| to it, and the host links it (`Compiler.RC2.RC2`, rc2/doc/library-output.md).
+export
+sharedLibraryCommand : (objectFiles : List String) -> (outFile : String) -> Core String
+sharedLibraryCommand objectFiles outFile
+    = do cc <- coreLift findCC
+         cFlags <- coreLift findCFlags
+         ldFlags <- coreLift findLDFlags
+         -- The soname is the file name, so a host that links it records the name, not a path
+         -- (rc2/doc/library-output.md, "Where a shared library is found").
+         pure $ (escapeCmd ([cc, "-shared", "-Werror", "-Wl,-soname," ++ fromMaybe outFile (fileName outFile)] ++ objectFiles ++ ["-o", outFile]))
+                     ++ " " ++ unwords [cFlags, ldFlags]
+
 export
 linkSharedLibrary : {auto c : Ref Ctxt Defs}
                  -> (objectFiles : List String)
@@ -247,15 +276,6 @@ linkSharedLibrary : {auto c : Ref Ctxt Defs}
                  -> (verbose : Bool)
                  -> Core (Maybe String)
 linkSharedLibrary objectFiles outFile verbose
-    = do cc <- coreLift findCC
-         cFlags <- coreLift findCFlags
-         ldFlags <- coreLift findLDFlags
-         -- The soname is the file name, so a host that links it records the name, not a path
-         -- (rc2/doc/library-output.md, "Where a shared library is found").
-         let runcc = (escapeCmd ([cc, "-shared", "-Werror", "-Wl,-soname," ++ fromMaybe outFile (fileName outFile)] ++ objectFiles ++ ["-o", outFile]))
-                     ++ " " ++ unwords [cFlags, ldFlags]
-         log "compiler.refc.cc" 10 runcc
-         when verbose $ coreLift_ $ putStrLn runcc
-         0 <- coreLift $ system runcc
-           | _ => pure Nothing
+    = do True <- runCommand verbose !(sharedLibraryCommand objectFiles outFile)
+           | False => pure Nothing
          pure (Just outFile)

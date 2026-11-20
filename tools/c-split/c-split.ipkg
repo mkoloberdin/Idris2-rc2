@@ -1,0 +1,6 @@
+package c-split
+version = 0.1.0
+authors = "rc2 project"
+
+main = CSplit
+executable = c-split
