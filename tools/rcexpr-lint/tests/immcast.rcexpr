@@ -1,0 +1,34 @@
+def Main.inFrame  (fun args= ["v1:Boxed", "v2:Boxed"] ret= Boxed)
+  let v3 : Boxed =
+    op cast-Integer-Bits32 [v1] postDrop= [v1]
+  let v4 : Boxed =
+    stackcon Main.OfNode [datacon] tag= 0 [v3]
+  let v5 : Boxed =
+    stackcon _builtin.JUST [just] tag= 1 [v3]
+  let v6 : Boxed =
+    callRep Main.owns ["Boxed", "Boxed"] -> Boxed postDrop= [] [v4, v5]
+  drop [v3]
+  drop [v3]
+  let v7 : Boxed =
+    stackcon Main.OfNode [datacon] tag= 0 [v3]
+  let v8 : Boxed =
+    callRep Main.owns ["Boxed", "Boxed"] -> Boxed postDrop= [] [v7, v2]
+  drop [v3]
+  con _builtin.CONS [cons] tag= Just 1 [v6, v8]
+
+def Main.owns  (fun args= ["v1:Boxed", "v2:Boxed"] ret= Boxed)
+  drop [v1, v2]
+  #0
+
+def Main.oneChar  (fun args= ["v1:Boxed", "v2:Boxed"] ret= Boxed)
+  case v1 of
+    0 ->
+      drop [v1]
+      let v3 : Boxed =
+        let v4 : Boxed =
+          op +Integer [v2, #1] postDrop= [v2]
+        op cast-Integer-Char [v4] postDrop= [v4]
+      op op_strcons [v3, #""]
+    _ ->
+      drop [v1, v2]
+      ""

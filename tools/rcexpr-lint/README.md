@@ -163,7 +163,7 @@ Derived from `RC.annotate`, `Reuse.resolveAlt`, `DualABI.postDropFor` and
 | `dup v xN` | creates N |
 | `drop [..]`, `free`, every `postDrop=` list, `prologueDrop`, `dropOnUnique` | one per listed occurrence |
 | `call`, `partial`, `delay`, `apply` (callee too), `con`, `retpack`, `fill`'s value | every `Boxed` operand |
-| `let v : Boxed = op op_strindex|op_strhead|cast_*_to_<small type>` | nothing: the value is an immediate (rc2's `Types.immediateResultOp`), as a comparison's is |
+| `let v : Boxed = op op_strindex|op_strhead|cast-*-<small type>` | nothing: the value is an immediate (rc2's `Types.immediateResultOp`), as a comparison's is |
 | `stackcon` | nothing: its fields are only read, and released by their own `drop`s; a `case` on it walks the alt of its tag only (the others are dead) |
 | `callRep` | operands at a `Boxed` parameter of its signature; the rest are read natively and dropped through `postDrop=` |
 | `callFFIInline` | operands whose type `Compiler.RC2.Types.cfTypeNative` does not read natively (`%World`, `Ptr`, ...); the rest through `postDrop=` |
@@ -457,6 +457,7 @@ checking both the exit code and the exact report text (the fixture's
 | `metrics.rcexpr` | every node kind the metrics count, so each figure is checked against a hand count at least once |
 | `leakclean.rcexpr` | the balanced shapes the leak check has to accept: erased alts, always-unboxed locals, immortal lets, value-position joins, loops (invariant and padded), struct fields, reuse, FFI and `callRep` consumption |
 | `typedcase.rcexpr` | a local scrutinised by a `case` whose alts carry the dump's `u:` mark (always-unboxed constant type) is refcount-free: no leak, and a case field of it may be read after its parent is dropped; the same shapes without the mark are flagged |
+| `immcast.rcexpr` | a `Boxed` local bound to a cast to a small type (`cast-Integer-Bits32`, `cast-Integer-Char`) is an immediate: held by two stack constructors and dropped twice, or passed to `op_strcons` and never dropped, it is no finding |
 | `leak.rcexpr` | one definition per leak-check finding |
 | `borrow.rcexpr` | the borrow statistics, with hand-counted figures (run with `--borrow-stats`) |
 | `borrowtail.rcexpr` | the tail-blocked parameters: one that nets positive over its tail and non-tail call sites, one that nets negative, one blocked by a tail call and a second reason; hand-counted (run with `--borrow-tail-stats`) |

@@ -1,0 +1,22 @@
+rcexpr-lint: immcast.rcexpr: 3 defs, no anomalies found
+metrics (places in the IR, not executions):
+  definitions        3  (functions 3, workers 0, constructors 0, foreign 0, error 0)
+  con                1  (fresh 1, reusing a cell 0)
+  retpack            0  (constructors returned by value, no cell)
+  stackcon           3  (constructors built in the frame, no count)
+  partial            0  (closures built)
+  apply              0  (closure calls)
+  call               2  (plain 0, callRep 2, FFI inline 0)
+  op                 4  (op 4, extprim 0)
+  let                8  (Boxed 8, native 0)
+  case               1  (constructor 0, constant 1, cmp 0)
+  dup                0  (increments, in 0 dup nodes)
+  drop               8  (decrements, in 6 drop nodes)
+  postDrop           3  (decrements attached to another node: postDrop, dropOnUnique, prologueDrop)
+  free               0
+  reuseOffer         0  (releaseReuse 0)
+  loop               0  (continue 0)
+  memoize            0
+  delay              0  (lazy cells built)
+  force              0
+  crash              0

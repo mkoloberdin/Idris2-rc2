@@ -205,12 +205,14 @@ immediateRefs = 1000000000
 
 ||| An op whose result is an immediate although it runs on the boxed path (rc2's
 ||| `Types.immediateResultOp`: a `Char` out of a string, a cast to a small type); a
-||| `Boxed` local bound to one is seeded like a `u:`-case local.
+||| `Boxed` local bound to one is seeded like a `u:`-case local. A cast is spelled as
+||| `Show (PrimFn _)` prints it in the dump, `cast-<from>-<to>` (not the runtime's
+||| `cast_<from>_to_<to>`).
 export
 immediateOp : String -> Bool
 immediateOp op =
     op == "op_strindex" || op == "op_strhead"
-    || (isPrefixOf "cast_" op && any (\t => isSuffixOf ("_to_" ++ t) op) ["Char", "Bits8", "Bits16", "Bits32", "Int8", "Int16", "Int32"])
+    || (isPrefixOf "cast-" op && any (\t => isSuffixOf ("-" ++ t) op) ["Char", "Bits8", "Bits16", "Bits32", "Int8", "Int16", "Int32"])
 
 immediateValue : RCExp -> Bool
 immediateValue (ROpNode False op _ _) = immediateOp op
