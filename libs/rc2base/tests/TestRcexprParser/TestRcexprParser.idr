@@ -35,6 +35,10 @@ module Main
 --   - `neg Double`/`op_strcons`/`==Int` -- a `PrimFn`'s own `Show` is
 --     sometimes two words, sometimes glued to its type, never
 --     predictable from the keyword alone.
+--   - `case #1 of` -- a constant scrutinee: a number read as words
+--     took the `of` too.
+--   - `#'-'` beside `#"-"` -- a `Char` constant and a one-character
+--     `String` stay apart (both were once read back as `"-"`).
 
 import Language.RCExpr.AST
 import Language.RCExpr.Parser
@@ -102,13 +106,20 @@ def Main.immCase  (fun args= ["v1:Boxed"] ret= Boxed)
       #3
     _ ->
       #4
+
+def Main.constScrutinee  (fun args= [] ret= Boxed)
+  case #1 of
+    1 ->
+      call Main.f [#'-', #"-"]
+    _ ->
+      #2
 """
 
 main : IO ()
 main = case parseProgram sample of
     Left err => putStrLn ("PARSE ERROR: " ++ show err)
     Right prog => do
-        printLn (length prog == 9)
+        printLn (length prog == 10)
         traverse_ (\d => case lookup d prog of
                               Just (RCFun _ _ _ (RCall _ n _)) => putStrLn n
                               _ => putStrLn (d ++ " not found or not a single call"))
@@ -130,6 +141,10 @@ main = case parseProgram sample of
         case lookup "Main.inFrame" prog of
              Just (RCFun _ _ _ (RLetIn _ _ (RStackConNode n t fs) _)) => putStrLn (n ++ " " ++ t ++ " " ++ show (length fs))
              _ => putStrLn "Main.inFrame not found or not a stackcon"
+        -- `case #1 of`: the scrutinee one constant; a Char apart from a String.
+        case lookup "Main.constScrutinee" prog of
+             Just (RCFun _ _ _ (RConstCaseNode sc [MkRConstAlt _ (RCall _ _ args)] _)) => printLn (sc :: args)
+             _ => putStrLn "Main.constScrutinee not found or not a constant case"
         case lookup "Main.example" prog of
              Just (RCFun _ _ _ body) => case body of
                  RLetIn 10 Boxed _ (RDupNode (RVar 10) 3 rest) => printLn (checkRest rest)

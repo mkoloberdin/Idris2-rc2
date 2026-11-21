@@ -5,6 +5,7 @@ authors = "rc2 project"
 depends = contrib, rc2base
 
 modules = Borrow,
+          Flow,
           Leak,
           Lint,
           Metrics,

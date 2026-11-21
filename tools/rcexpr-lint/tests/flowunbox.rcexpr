@@ -1,0 +1,110 @@
+-- rc2 directives: --directive dumprcexpr --directive target-os=Linux
+def {rc2_raised_rc2_specConst__braceOpen__mainExpression_colon0_braceClose_14_3:0}  (fun args= ["v108:Boxed", "v106:Boxed", "v105:Boxed", "v180:Boxed"] ret= Boxed)
+  let v107 : Boxed =
+    apply v108 [v106]
+  let v184 : Boxed =
+    dup v180
+    callRep {idris2rc2_worker__braceOpen__mainExpression_colon0_braceClose_0:1} ["Native Erased", "Native Erased", "Boxed", "Boxed", "Boxed"] -> Boxed postDrop= [] [[erased], [erased], #{{__mainExpression:0}:13}/2~closure, v107, v180]
+  let v183 : Boxed =
+    apply v105 [v180]
+  apply v184 [v183]
+
+def {__mainExpression:0}  (fun args= [] ret= Boxed)
+  memoize {__mainExpression:0} : Boxed
+    let v173 : Boxed =
+      let v172 : Boxed =
+        let v171 : Boxed =
+          callRep {idris2rc2_worker_Main_text:2} ["Native Bits8", "Native Bits8"] -> Boxed postDrop= [] [#0, #0]
+        op ++ [v171, #"\n"] postDrop= [v171]
+      call Prelude.IO.prim__putStr [v172, [world]]
+    drop [v173]
+    let v174 : Boxed =
+      call Prelude.Types.foldr_Foldable_List [#{rc2_raised_rc2_specConst__braceOpen__mainExpression_colon0_braceClose_14_3:0}/3~closure([#{{__mainExpression:0}:12}/2~closure]), #{{__mainExpression:0}:1}/1~closure([[erased], [erased]]), #_builtin.CONS@Just 1([#0, #_builtin.CONS@Just 1([#1, #_builtin.CONS@Just 1([#2, [__]])])])]
+    apply v174 [[world]]
+
+def {{__mainExpression:0}:13}  (fun args= ["v121:Boxed", "v120:Boxed"] ret= Boxed)
+  drop [v121]
+  v120
+
+def {{__mainExpression:0}:12}  (fun args= ["v94:Boxed", "v93:Boxed"] ret= Boxed)
+  callRep {idris2rc2_worker__braceOpen__mainExpression_colon0_braceClose_12:0} ["Native Bits8", "Native %World"] -> Boxed postDrop= [] [v94, v93]
+
+def {idris2rc2_worker__braceOpen__mainExpression_colon0_braceClose_12:0}  (fun args= ["v94:Native Bits8", "v93:Native %World"] ret= Boxed worker=True)
+  let v95 : Boxed =
+    let v96 : Boxed =
+      let v97 : Boxed =
+        case v94 of
+          u: 0 ->
+            1
+          u: 1 ->
+            3
+          u: 2 ->
+            "hello"
+      callRep {idris2rc2_worker_Main_text:2} ["Native Bits8", "Native Bits8"] -> Boxed postDrop= [] [v94, v97]
+    op ++ [v96, #"\n"] postDrop= [v96]
+  call Prelude.IO.prim__putStr [v95, [world]]
+
+def {{__mainExpression:0}:1}  (fun args= ["v18:Boxed", "v17:Boxed", "v16:Boxed"] ret= Boxed)
+  drop [v16, v18]
+  v17
+
+def {idris2rc2_worker__braceOpen__mainExpression_colon0_braceClose_0:1}  (fun args= ["v13:Native Erased", "v12:Native Erased", "v11:Boxed", "v10:Boxed", "v9:Boxed"] ret= Boxed worker=True)
+  let v14 : Boxed =
+    apply v10 [v9]
+  apply v11 [v14]
+
+def _builtin.NIL  (con tag= Just 0 arity= 0 newtype= Nothing)
+
+def _builtin.CONS  (con tag= Just 1 arity= 2 newtype= Nothing)
+
+def _builtin.NOTHING  (con tag= Just 0 arity= 0 newtype= Nothing)
+
+def _builtin.JUST  (con tag= Just 1 arity= 1 newtype= Nothing)
+
+def {idris2rc2_worker_Main_text:2}  (fun args= ["v134:Native Bits8", "v135:Native Bits8"] ret= Boxed worker=True)
+  case v134 of
+    u: 0 ->
+      case v135 of
+        u: 1 ->
+          "1"
+        u: 0 ->
+          "0"
+    u: 1 ->
+      callRep Main.tally ["Boxed"] -> Boxed postDrop= [] [v135]
+    u: 2 ->
+      v135
+
+def Main.tally  (fun args= ["v136:Boxed"] ret= Boxed)
+  case v136 of
+    0 ->
+      drop [v136]
+      "."
+    _ ->
+      let v137 : Boxed =
+        op -Integer [v136, #1] postDrop= [v136]
+      let v138 : Boxed =
+        call Main.tally [v137]
+      op ++ [#"+", v138] postDrop= [v138]
+
+def Prelude.Types.foldr_Foldable_List  (fun args= ["v139:Boxed", "v140:Boxed", "v141:Boxed"] ret= Boxed)
+  case v141 of
+    _builtin.NIL [nil] tag= Just 0 args= [] ->
+      drop [v139]
+      v140
+    _builtin.CONS [cons] tag= Just 1 args= [v142, v143] ->
+      dup v142
+      dup v143
+      drop [v141]
+      let v144 : Boxed =
+        dup v139
+        call Prelude.Types.foldr_Foldable_List [v139, v140, v143]
+      apply v139 [v142, v144]
+
+def Prelude.Interfaces.MkMonad  (con tag= Just 0 arity= 3 newtype= Nothing)
+
+def Prelude.Interfaces.MkFoldable  (con tag= Just 0 arity= 6 newtype= Nothing)
+
+def Prelude.Interfaces.MkApplicative  (con tag= Just 0 arity= 3 newtype= Nothing)
+
+def Prelude.IO.prim__putStr  (foreign ["C:idris2_putStr, libidris2_support, idris_support.h", "node:lambda:x=>process.stdout.write(x)", "browser:lambda:x=>console.log(x)"] [String, %World] -> IORes Unit)
+

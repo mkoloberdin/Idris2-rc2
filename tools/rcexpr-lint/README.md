@@ -437,6 +437,44 @@ D counts every field dup made before the parent is dropped (30004); the
 borrowed" on the same dump are only those whose field is then passed to a
 call, so the two are not comparable.
 
+## Producer flow (`--flow`)
+
+`rcexpr-lint --flow <file.rcexpr>` runs the producer-flow check alone
+(`Flow.idr`). Every check above takes rc2's representation decisions as
+given: a `Native` local is not tracked, a scrutinee of a `u:` case is
+refcount-free. This one re-derives them from what can reach each local,
+parameter and result -- a literal, a constructor, a closure, a string
+op, the result of a known function, the arguments of every direct call
+site -- solved to a fixpoint over the whole program, and reports
+
+- a pointer (a string, a constructor, a closure, a string literal, a
+  constant constructor, a constant closure) reaching a slot held as a scalar: a `Native`
+  argument of a `callRep`, a `Native` let, a `Native` parameter
+  (rc2 #343: a `Value t`-typed parameter unboxed by one branch's read);
+- a string, constructor or closure built at run time reaching a local
+  the dump keeps without a count (a constant closure, `#f/2~closure`, is a
+  static and immortal, `rc2/doc/static-closures.md`, so it is not one): one the leak check exempts as
+  always-unboxed, never `dup`ed or dropped, consumed twice on a path.
+
+The domain is a set of producer kinds or Top, and Top never reports: a
+field read out of a constructor, the result of an `apply` or an FFI
+call, and a parameter of a function with no direct caller or reached
+through a closure or a partial application. A report always names a
+producer that is really there; a conflict through those can be missed.
+A function is taken as called only from where the dump calls it: an
+`%export`ed function called from C as well has its C callers' arguments
+missed. A run that reaches no fixpoint in 100 rounds says so and exits 1,
+since what it reports then may be short.
+`--flow-stats` counts the parameters by their representation and the
+flow's verdict on them (scalar, pointer, Top); `--flow-params` prints one
+line per parameter; `--flow-debug` each definition's solved parameters
+and exempt locals.
+
+Measured on a 56 MB dump of a 9,363-definition program: 18 s, 2.5 GB,
+six rounds. Of its native parameters the flow proves about a tenth
+scalar and leaves about 86 % at Top (functions reached only through a
+closure), so it is a check of rc2's choices, not a source of them.
+
 ## Building and testing
 
 ```sh
@@ -462,6 +500,9 @@ checking both the exit code and the exact report text (the fixture's
 | `borrow.rcexpr` | the borrow statistics, with hand-counted figures (run with `--borrow-stats`) |
 | `borrowtail.rcexpr` | the tail-blocked parameters: one that nets positive over its tail and non-tail call sites, one that nets negative, one blocked by a tail call and a second reason; hand-counted (run with `--borrow-tail-stats`) |
 | `pushdown.rcexpr` | the push-down statistics: one definition per pattern with its negative neighbours (a dup needed by every arm, a use before the case, a consumed operand, a sub-field read after the drop), hand-counted (run with `--pushdown-stats`) |
+| `flowunbox.rcexpr` | `--flow`: a string literal reaches a `Native Bits8` parameter through a dependent `Value t` argument (rc2 #343), both the call site and the parameter reported |
+| `flowrc.rcexpr` | `--flow`: a string built at run time reaches a local held without a count (a `u:` case reads it in another branch) |
+| `flowclean.rcexpr` | `--flow`: the program of `flowunbox`, its parameter boxed -- no conflict |
 
 It builds with the plain Chez backend (`idris2 --build rcexpr-lint.ipkg`):
 this tool only reads text files and never needs to run *through* rc2
@@ -479,6 +520,7 @@ itself. It needs `rc2base` already built and installed -- see
 | `Borrow.idr` | the borrow statistics |
 | `Pushdown.idr` | the push-down statistics |
 | `Metrics.idr` | the static counts printed after the report |
+| `Flow.idr` | the producer-flow check (`--flow`) |
 | `tests/` | fixtures and `verify.sh` |
 
 The `.rcexpr` grammar itself is **not** here: `Language.RCExpr.AST`,
