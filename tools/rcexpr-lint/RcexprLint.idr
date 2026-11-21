@@ -82,7 +82,10 @@ runFlow path = do
          Right prog => do
              let (rounds, reports) = flowProgram prog
              traverse_ (\r => putStrLn (path ++ ": " ++ r)) reports
-             putStrLn ("flow: " ++ show (length prog) ++ " defs, fixpoint in " ++ show rounds ++ " rounds, " ++ show (length reports) ++ " conflicts")
+             if rounds >= flowRoundLimit
+                then do putStrLn ("flow: " ++ show (length prog) ++ " defs, no fixpoint in " ++ show rounds ++ " rounds (conflicts may be missed), " ++ show (length reports) ++ " conflicts")
+                        exitFailure
+                else putStrLn ("flow: " ++ show (length prog) ++ " defs, fixpoint in " ++ show rounds ++ " rounds, " ++ show (length reports) ++ " conflicts")
              unless (null reports) exitFailure
 
 main : IO ()

@@ -448,11 +448,12 @@ op, the result of a known function, the arguments of every direct call
 site -- solved to a fixpoint over the whole program, and reports
 
 - a pointer (a string, a constructor, a closure, a string literal, a
-  constant constructor) reaching a slot held as a scalar: a `Native`
+  constant constructor, a constant closure) reaching a slot held as a scalar: a `Native`
   argument of a `callRep`, a `Native` let, a `Native` parameter
   (rc2 #343: a `Value t`-typed parameter unboxed by one branch's read);
 - a string, constructor or closure built at run time reaching a local
-  the dump keeps without a count: one the leak check exempts as
+  the dump keeps without a count (a constant closure, `#f/2~closure`, is a
+  static and immortal, `rc2/doc/static-closures.md`, so it is not one): one the leak check exempts as
   always-unboxed, never `dup`ed or dropped, consumed twice on a path.
 
 The domain is a set of producer kinds or Top, and Top never reports: a
@@ -460,6 +461,10 @@ field read out of a constructor, the result of an `apply` or an FFI
 call, and a parameter of a function with no direct caller or reached
 through a closure or a partial application. A report always names a
 producer that is really there; a conflict through those can be missed.
+A function is taken as called only from where the dump calls it: an
+`%export`ed function called from C as well has its C callers' arguments
+missed. A run that reaches no fixpoint in 100 rounds says so and exits 1,
+since what it reports then may be short.
 `--flow-stats` counts the parameters by their representation and the
 flow's verdict on them (scalar, pointer, Top); `--flow-params` prints one
 line per parameter; `--flow-debug` each definition's solved parameters

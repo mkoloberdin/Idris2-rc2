@@ -1,25 +1,26 @@
+||| Producer flow over a `--directive dumprcexpr` dump: what can reach each
+||| local, parameter and result, solved over the whole program's call sites,
+||| checked against the representation rc2 chose.
+|||
+||| Every other check in this tool takes rc2's representation decisions as
+||| given (a `Native` local is untracked, a `u:`-case scrutinee is
+||| refcount-free). This one re-derives them from producers instead: a
+||| literal, a constructor, a closure, a string op, the result of a known
+||| function, the arguments of a known call site. Where a pointer reaches a
+||| slot rc2 holds as a scalar, or a heap value built at run time reaches a
+||| local rc2 holds without a reference count, that is reported: the class of
+||| rc2 #343 and of the two reference-counting rules
+||| (`Types.typedConstScrutinees`, `RC.alwaysUnboxedBoxedLocalsR`).
+|||
+||| The domain is a set of producer kinds, or Top. Top never reports (a
+||| field read from a constructor, an `apply`'s result, an FFI result, a
+||| parameter of a function reached through a closure), so the check can
+||| miss a conflict but each report names a producer that is really there.
+||| One cell per local, parameter and result (never per allocation site);
+||| the lattice has ten kinds, so the fixpoint is reached in a few rounds.
+|||
+||| This module was licensed by BSD3. see LICENSE file for detail.
 module Flow
-
--- Producer flow over a `--directive dumprcexpr` dump: what can reach each
--- local, parameter and result, solved over the whole program's call sites,
--- checked against the representation rc2 chose.
---
--- Every other check in this tool takes rc2's representation decisions as
--- given (a `Native` local is untracked, a `u:`-case scrutinee is
--- refcount-free). This one re-derives them from producers instead: a
--- literal, a constructor, a closure, a string op, the result of a known
--- function, the arguments of a known call site. Where a pointer reaches a
--- slot rc2 holds as a scalar, or a heap value built at run time reaches a
--- local rc2 holds without a reference count, that is reported: the class of
--- rc2 #343 and of the two reference-counting rules
--- (`Types.typedConstScrutinees`, `RC.alwaysUnboxedBoxedLocalsR`).
---
--- The domain is a set of producer kinds, or Top. Top never reports (a
--- field read from a constructor, an `apply`'s result, an FFI result, a
--- parameter of a function reached through a closure), so the check can
--- miss a conflict but each report names a producer that is really there.
--- One cell per local, parameter and result (never per allocation site);
--- the lattice has eight kinds, so the fixpoint is reached in a few rounds.
 
 import Language.RCExpr.AST
 import Leak
@@ -34,8 +35,9 @@ import Data.String
 %default covering
 
 -- The kinds. `string`/`constructor`/`closure` are pointers built at run
--- time; `string literal`/`constant constructor` are pointers to immortal
--- data (wrong in a scalar slot, harmless without a reference count).
+-- time; `string literal`/`constant constructor`/`constant closure` are
+-- pointers to immortal data (wrong in a scalar slot, harmless without a
+-- reference count).
 public export
 data AV = Top | Some (SortedSet String)
 
@@ -51,19 +53,19 @@ bot = Some empty
 one : String -> AV
 one k = Some (singleton k)
 
-join : AV -> AV -> AV
-join Top _ = Top
-join _ Top = Top
-join (Some a) (Some b) = Some (union a b)
+lub : AV -> AV -> AV
+lub Top _ = Top
+lub _ Top = Top
+lub (Some a) (Some b) = Some (union a b)
 
 joinAll : List AV -> AV
-joinAll = foldl join bot
+joinAll = foldl lub bot
 
 runtimeHeap : List String
 runtimeHeap = ["string", "constructor", "closure"]
 
 pointerKinds : List String
-pointerKinds = runtimeHeap ++ ["string literal", "constant constructor"]
+pointerKinds = runtimeHeap ++ ["string literal", "constant constructor", "constant closure"]
 
 kindsIn : List String -> AV -> List String
 kindsIn _ Top = []
@@ -88,9 +90,14 @@ localValue env (RVar v) = fromMaybe Top (lookup v env)
 localValue _ RUnderscore = bot
 localValue _ RNull = one "null"
 localValue _ (RConst s) = literal s
+-- Told apart by what comes before the first `(`, as `Show RCLocal` writes
+-- them: `#f/2~closure` and `#f/2~closure(caps)` a constant closure (a
+-- static, `doc/static-closures.md`), `#C@1(args)` a constant constructor
+-- (whose args may hold constant closures), `#C@1` a tag-only one.
 localValue _ (ROpaqueCon s) =
-    if isInfixOf "~closure" s then one "closure"
-    else if isInfixOf "(" s then one "constant constructor" else one "null"
+    let head = fst (break (== '(') s) in
+    if isSuffixOf "~closure" head then one "constant closure"
+    else if head /= s then one "constant constructor" else one "null"
 
 stringOp : String -> Bool
 stringOp op = op == "++" || (isPrefixOf "cast-" op && isSuffixOf "-String" op)
@@ -204,7 +211,7 @@ mutual
   val d rs w (RCmp _ _ _ t f) =
       let (w1, a) = val d rs w t
           (w2, b) = val d rs w1 f
-      in (w2, join a b)
+      in (w2, lub a b)
   val d rs w (RConCaseNode _ alts mDef) =
       let (w1, as) = foldl (\(acc, vs), alt =>
                               let acc' = { locals $= \m => foldl (\m', x => insert x Top m') m alt.args } acc
@@ -244,7 +251,7 @@ record State where
 joinArgs : List AV -> List AV -> List AV
 joinArgs [] bs = bs
 joinArgs as [] = as
-joinArgs (a :: as) (b :: bs) = join a b :: joinArgs as bs
+joinArgs (a :: as) (b :: bs) = lub a b :: joinArgs as bs
 
 funs : RCProgram -> List (String, List (Int, RRep), RRep, RCExp)
 funs prog = mapMaybe (\(n, d) => case d of
@@ -258,8 +265,8 @@ roots prog =
     let fs = funs prog
         w0 = MkWalk empty [] [] []
         ws = map (\(n, _, _, body) => fst (val n empty w0 body)) fs
-        called = fromList (concatMap (\w => map fst w.calls) ws)
-        closed = fromList (concatMap refs ws)
+        called = foldl (\acc, w => foldl (\acc', (c, _) => insert c acc') acc w.calls) empty ws
+        closed = foldl (\acc, w => foldl (flip insert) acc (refs w)) empty ws
     in fromList (map (\(n, _, _, _) => n) (filter (\(n, _, _, _) => not (contains n called) || contains n closed) fs))
 
 envOf : State -> SortedSet String -> String -> List (Int, RRep) -> SortedMap Int AV
@@ -277,7 +284,7 @@ step rts fs st =
     foldl (\acc, (n, args, r, body) =>
              let (w, a) = val n st.results (MkWalk (envOf st rts n args) [] [] []) body
                  ps = foldl (\m, (c, as) => insert c (joinArgs as (fromMaybe [] (lookup c m))) m) acc.params w.calls
-             in MkState ps (insert n (join (retValue r a) (fromMaybe bot (lookup n acc.results))) acc.results))
+             in MkState ps (insert n (lub (retValue r a) (fromMaybe bot (lookup n acc.results))) acc.results))
           st fs
 
 -- Every function of the program starts at bottom (it returns nothing yet);
@@ -353,14 +360,25 @@ mutual
 
 
 ||| The reports, and the number of rounds the fixpoint took.
+||| `concatMap` over a list as long as the program: `List`'s own is quadratic
+||| (code-style-Idris2.md).
+concatMapL : (a -> List b) -> List a -> List b
+concatMapL f xs = reverse (foldl (\acc, x => reverseOnto acc (f x)) [] xs)
+
+||| The most rounds `solve` runs; `flowProgram` returning this many rounds
+||| means no fixpoint was reached.
+export
+flowRoundLimit : Nat
+flowRoundLimit = 100
+
 export
 flowProgram : RCProgram -> (Nat, List String)
 flowProgram prog =
     let fs = funs prog
         rts = roots prog
-        limit = 100
+        limit = flowRoundLimit
         (left, st) = solve limit rts fs (MkState empty (initialResults fs))
-        reports = concatMap (\(n, args, r, body) =>
+        reports = concatMapL (\(n, args, r, body) =>
                     let env = envOf st rts n args
                         (w, _) = val n st.results (MkWalk env [] [] []) body
                         paramIssues = mapMaybe (\(v, rep) => case rep of
@@ -388,8 +406,8 @@ flowDebug : RCProgram -> List String
 flowDebug prog =
     let fs = funs prog
         rts = roots prog
-        (_, st) = solve 100 rts fs (MkState empty (initialResults fs))
-    in concatMap (\(n, args, r, body) =>
+        (_, st) = solve flowRoundLimit rts fs (MkState empty (initialResults fs))
+    in concatMapL (\(n, args, r, body) =>
          let env = envOf st rts n args
              (w, _) = val n st.results (MkWalk env [] [] []) body
          in [n ++ (if contains n rts then " (root)" else "") ++ " params " ++ joinBy ", " (map (\(v, _) => "v" ++ show v ++ "=" ++ showAV (fromMaybe Top (lookup v env))) args)
@@ -415,12 +433,12 @@ flowStats prog =
                                        RCFun args r w body => Just (n, args, w)
                                        _ => Nothing) prog
         rts = roots prog
-        (rounds, st) = solve 100 rts (funs prog) (MkState empty (initialResults (funs prog)))
-        rows = concatMap (\(n, args, w) =>
+        (rounds, st) = solve flowRoundLimit rts (funs prog) (MkState empty (initialResults (funs prog)))
+        rows = concatMapL (\(n, args, w) =>
                  let env = envOf st rts n args in
                  map (\(v, rep) => ((if w then "worker " else "entry  ") ++ repClass rep, flowClass (fromMaybe Top (lookup v env)))) args) fs
         tally = foldl (\m, k => insert k (S (fromMaybe 0 (lookup k m))) m) (the (SortedMap (String, String) Nat) empty) rows
-    in ("fixpoint rounds " ++ show (minus 100 rounds) ++ ", functions " ++ show (length fs) ++ ", roots " ++ show (length (Prelude.toList rts)))
+    in ("fixpoint rounds " ++ show (minus flowRoundLimit rounds) ++ ", functions " ++ show (length fs) ++ ", roots " ++ show (length (Prelude.toList rts)))
        :: map (\((r, c), k) => r ++ " | " ++ c ++ " | " ++ show k) (SortedMap.toList tally)
   where
     repClass : RRep -> String
@@ -433,8 +451,8 @@ flowParams : RCProgram -> List String
 flowParams prog =
     let rts = roots prog
         fs = funs prog
-        (_, st) = solve 100 rts fs (MkState empty (initialResults fs))
-    in concatMap (\(n, args, _, _) =>
+        (_, st) = solve flowRoundLimit rts fs (MkState empty (initialResults fs))
+    in concatMapL (\(n, args, _, _) =>
          let env = envOf st rts n args in
          zipWith (\i, (v, rep) => n ++ "\t" ++ show i ++ "\t" ++ show rep ++ "\t" ++ flowClass (fromMaybe Top (lookup v env)))
                  [the Nat 0 .. length args] args) fs
