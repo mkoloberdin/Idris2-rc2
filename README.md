@@ -280,7 +280,7 @@ rc2/
 │   ├── Emit.idr         Mechanical translation from RCExp to C
 │   ├── Emit/Util.idr        Name mangling, literal/value emission, closures, FFI type mapping
 │   ├── Emit/Foreign.idr     %foreign / %export C wrapper generation and FFI marshalling
-│   ├── ForeignSpec.idr      %foreign convention strings (C:/RefC:/RC2:/CExpr:) parser
+│   ├── ForeignSpec.idr      %foreign convention strings (C:/RefC:/RC2:/CExpr:/C__collect_safe:) parser
 │   ├── Emit/ExternRefs.idr  Forward declaration walkers for incremental compilation
 │   ├── Pretty.idr       Human-readable RCExp dumper (--directive dumprcexpr)
 │   ├── CC.idr           C compiler driver and linker orchestration
