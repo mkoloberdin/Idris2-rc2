@@ -40,7 +40,7 @@ data RCLocal : Type where
   RVar        : Int -> RCLocal
   RUnderscore : RCLocal              -- a `dumprcexpr`-rendered dead RConAlt field (Compiler.RC2.DeadVars), or literally `RCLoc 0`
   RNull       : RCLocal
-  RConst      : String -> RCLocal    -- the raw text after `#`, e.g. `"12345.6789"` (with its own quotes) or `42`
+  RConst      : String -> RCLocal    -- the raw text after `#`, e.g. `"12345.6789"` (with its own quotes), `'x'` (a Char, its quotes kept) or `42`
   ROpaqueCon  : String -> RCLocal    -- `RCEmptyCon`/`RCConstCon`/`RCConstClosure` -- raw text after `#`
 
 public export

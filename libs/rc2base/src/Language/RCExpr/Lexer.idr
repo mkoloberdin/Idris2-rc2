@@ -34,12 +34,13 @@ import Text.Token
 %default total
 
 public export
-data RcTokenKind = RcName | RcQuotedString | RcPunct Char | RcIgnore
+data RcTokenKind = RcName | RcQuotedString | RcQuotedChar | RcPunct Char | RcIgnore
 
 public export
 Eq RcTokenKind where
   RcName == RcName = True
   RcQuotedString == RcQuotedString = True
+  RcQuotedChar == RcQuotedChar = True
   RcPunct a == RcPunct b = a == b
   RcIgnore == RcIgnore = True
   _ == _ = False
@@ -83,11 +84,13 @@ public export
 TokenKind RcTokenKind where
   TokType RcName = String
   TokType RcQuotedString = String
+  TokType RcQuotedChar = String
   TokType (RcPunct _) = ()
   TokType RcIgnore = ()
 
   tokValue RcName text = text
   tokValue RcQuotedString text = unescapeQuoted text
+  tokValue RcQuotedChar text = text
   tokValue (RcPunct _) _ = ()
   tokValue RcIgnore _ = ()
 
@@ -170,11 +173,10 @@ quotedStringLit = is '"' <+> manyUntil (is '"') (escape (is '\\') any <|> any) <
 ||| all) `'"'` for the character `"` itself -- `Prelude.Show`'s own
 ||| `showLitChar` never escapes a bare `"` inside a `Char`, only
 ||| inside a `String`, so that character shows up completely
-||| unescaped here. Tokenized the same `RcQuotedString` kind as a
-||| quoted string (`unescapeQuoted` handles both quote characters) --
-||| this grammar never needs to tell a `Char` constant apart from a
-||| `String` one, both are opaque `RConst` payloads either way (see
-||| `Language.RCExpr.AST`'s own module note).
+||| unescaped here. Its own `RcQuotedChar` kind, its value the text
+||| as written (quotes and escapes kept): a reader of `RConst` tells a
+||| `Char` constant (`#'-'`) from a one-character `String` (`#"-"`) by
+||| the quote, which a shared kind, requoted as a `String`, lost.
 rcCharLit : Lexer
 rcCharLit = is '\'' <+> manyUntil (is '\'') (escape (is '\\') any <|> any) <+> is '\''
 
@@ -190,7 +192,7 @@ rcTokenMap = toTokenMap $
     , (is '}', RcPunct '}')
     , (is '#', RcPunct '#')
     , (quotedStringLit, RcQuotedString)
-    , (rcCharLit, RcQuotedString)
+    , (rcCharLit, RcQuotedChar)
     , (nameLit, RcName)
     ]
 
