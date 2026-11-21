@@ -199,6 +199,7 @@ skipGroup _ = Nothing
 
 ||| The parameter reps of a `callRep` signature (`["Boxed", "Native Int"] ->
 ||| ...`).
+export
 sigReps : String -> List String
 sigReps sig = case skipGroup (unpack sig) of
     Nothing => []
@@ -320,6 +321,7 @@ boundToImmediateOp (RDupNode _ _ body) = boundToImmediateOp body
 boundToImmediateOp (RDropNode _ body) = boundToImmediateOp body
 boundToImmediateOp _ = False
 
+export
 hasUnboxedType : String -> Bool
 hasUnboxedType t = any (\n => isInfixOf n t) unboxedTypeNames
 
@@ -404,6 +406,7 @@ padPositions initial body =
     foldl (\acc, args => zipWith (\a, b => a || b) acc (map isConstLocal args))
           (map isConstLocal initial) (continueArgs body [])
 
+export
 exemptLocals : RCExp -> SortedSet Int
 exemptLocals = scanExp empty
 

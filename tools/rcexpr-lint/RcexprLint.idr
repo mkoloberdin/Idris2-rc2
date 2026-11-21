@@ -17,6 +17,7 @@ import Leak
 import Lint
 import Metrics
 import Pushdown
+import Flow
 
 import Data.List
 import Data.SortedMap
@@ -25,7 +26,7 @@ import System
 import System.File
 
 usage : String
-usage = "usage: rcexpr-lint [--borrow-stats | --borrow-stats-direct | --borrow-tail-stats | --pushdown-stats] <file.rcexpr>"
+usage = "usage: rcexpr-lint [--borrow-stats | --borrow-stats-direct | --borrow-tail-stats | --pushdown-stats | --flow | --flow-stats | --flow-params | --flow-debug] <file.rcexpr>"
 
 runOn : Maybe (RCProgram -> List String) -> String -> IO ()
 runOn stats path = do
@@ -71,6 +72,19 @@ runOn stats path = do
             putStrLn "metrics (places in the IR, not executions):"
             traverse_ putStrLn (renderMetrics (metricsOf prog))
 
+||| `--flow`: the producer-flow check (`Flow`), alone.
+runFlow : String -> IO ()
+runFlow path = do
+    Right content <- readFile path
+      | Left err => do putStrLn ("rcexpr-lint: could not read " ++ path ++ ": " ++ show err); exitFailure
+    case parseProgram content of
+         Left err => do putStrLn ("rcexpr-lint: " ++ path ++ ": " ++ show err); exitFailure
+         Right prog => do
+             let (rounds, reports) = flowProgram prog
+             traverse_ (\r => putStrLn (path ++ ": " ++ r)) reports
+             putStrLn ("flow: " ++ show (length prog) ++ " defs, fixpoint in " ++ show rounds ++ " rounds, " ++ show (length reports) ++ " conflicts")
+             unless (null reports) exitFailure
+
 main : IO ()
 main = do
     args <- getArgs
@@ -80,6 +94,10 @@ main = do
          [_, "--borrow-stats-direct", path] => runOn (Just (borrowStats True)) path
          [_, "--borrow-tail-stats", path] => runOn (Just borrowTailStats) path
          [_, "--pushdown-stats", path] => runOn (Just pushdownStats) path
+         [_, "--flow", path] => runFlow path
+         [_, "--flow-debug", path] => runOn (Just flowDebug) path
+         [_, "--flow-stats", path] => runOn (Just flowStats) path
+         [_, "--flow-params", path] => runOn (Just flowParams) path
          _ => do
              putStrLn usage
              exitFailure
