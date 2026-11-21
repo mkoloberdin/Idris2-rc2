@@ -13,8 +13,11 @@ The action `.github/actions/setup-rc2` (both reusable workflows start with it) i
 pinned upstream commit (`setup-idris2.sh`, about 12 minutes, cached in `install/` for as long as the
 pin, the script and the toolchain stay: the key names the Ubuntu, Chez Scheme and gcc versions
 installed, because an Idris 2 built by one Chez Scheme cannot be loaded by another), builds and installs rc2, `libs/rc2base` and `libs/control-async`
-(`build-rc2.sh`, about 5 minutes). `rc2-verify.yml` then runs `verify.sh --skip-build` and
-`rc2-selfhost.yml` runs `selfhost.sh`, both from `rc2/tests`. The logs of a failed run are kept as the
+(`build-rc2.sh`, about 5 minutes). `rc2-verify.yml` then runs `tools/rcexpr-lint/tests/verify.sh`
+(it builds the lint, which `--skip-build` skips, and checks the lint's own fixtures) and then
+`verify.sh --skip-build`, which lints each smoke test's dump only when the lint is built, so the
+lint's tests run first. `verify.sh` still runs when they fail (when the lint did not build, it runs
+without it). `rc2-selfhost.yml` runs `selfhost.sh`. `verify.sh` and `selfhost.sh` run from `rc2/tests`. The logs of a failed run are kept as the
 artifacts `verify-logs` and `selfhost-logs`.
 
 The two scripts are what a person runs too; they only need `scheme` on `PATH`:
@@ -22,6 +25,7 @@ The two scripts are what a person runs too; they only need `scheme` on `PATH`:
 ```sh
 .github/ci/setup-idris2.sh      # install/ gets the pinned Idris 2 (IDRIS2_SRC_URL: where to clone from)
 .github/ci/build-rc2.sh         # rc2 and rc2base
+tools/rcexpr-lint/tests/verify.sh   # also builds the lint rc2/tests/verify.sh uses
 source env.sh && (cd rc2/tests && ./verify.sh --skip-build)
 ```
 
