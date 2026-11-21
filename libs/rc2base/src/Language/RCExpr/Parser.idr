@@ -118,6 +118,19 @@ runG ln g s = do
 isDigitsOnly : String -> Bool
 isDigitsOnly s = s /= "" && all isDigit (unpack s)
 
+||| A quoted constant's text as `Show Constant` wrote it: a `String`
+||| requoted by `show` (`match` decoded it), a `Char` as written (its
+||| `RcQuotedChar` token keeps the quotes), so the two stay apart.
+quotedConstG : Grammar () RcToken True String
+quotedConstG = map show (match RcQuotedString) <|> match RcQuotedChar
+
+||| A numeric constant's token (`42`, `-1`, `1.5`, `1e-3`): a digit
+||| first, or `-` then a digit. No name starts so.
+isNumberText : String -> Bool
+isNumberText s = case unpack s of
+    (c :: cs) => isDigit c || (c == '-' && maybe False isDigit (head' cs))
+    [] => False
+
 mutual
   ||| One name token, or a `{...}` brace group (`braceGroupG`) read as
   ||| one unit -- `Core.Name`'s own `MN` (a machine name) can start
@@ -224,7 +237,7 @@ mutual
   oneGroupTokenG = braceGroupG <|> (match RcName) <|> quotedG <|> punctG
     where
       quotedG : Grammar () RcToken True String
-      quotedG = map show (match RcQuotedString)
+      quotedG = quotedConstG
       punctG : Grammar () RcToken True String
       punctG = matchP '[' <|> matchP ']' <|> matchP ',' <|> matchP '(' <|> matchP ')' <|> matchP '#'
         where
@@ -284,7 +297,7 @@ cfTypeWordsG arrows = do
         the (Grammar () RcToken False ()) (if boundary v then fail "field boundary" else pure ())
         pure v
     quoted : Grammar () RcToken True String
-    quoted = map show (match RcQuotedString)
+    quoted = quotedConstG
     inner : Grammar () RcToken True String
     inner = word <|> quoted <|> (match (RcPunct ',') *> pure ",")
     group : Grammar () RcToken True String
@@ -328,9 +341,11 @@ mutual
   ||| Every `#`-prefixed `RCLocal` shape (`Compiler.RC2.RCExp.RCLocal`'s
   ||| own `Show`), dispatching on whatever comes right after the now
   ||| always-separate `#` token (`Language.RCExpr.Lexer`'s own note on
-  ||| why `#` has to be its own token): a quoted value (`RConst`'s own
-  ||| string, or a `Show Char` constant like `#'"'`) is `RcQuotedString`
-  ||| whole; anything else is `#Name@tag` (`RCEmptyCon`/
+  ||| why `#` has to be its own token): a number (`#42`, `#-1`, `#1.5`)
+  ||| is one token, `RConst`, and ends there -- read as words it took
+  ||| the next ones too, so `case #1 of` lost its `of`; a quoted value
+  ||| (`RConst`'s own string, or a `Show Char` constant like `#'"'`)
+  ||| is one token, its quotes kept apart (`quotedConstG`); anything else is `#Name@tag` (`RCEmptyCon`/
   ||| `RCConstClosure`) or `#Name@tag(args)` (`RCConstCon`, recursive
   ||| -- `args : List RCLocal` prints via the ordinary `[a, b, c]`
   ||| convention `localListG` already reads, so this just reuses it).
@@ -345,21 +360,16 @@ mutual
   hashG : Grammar () RcToken True RCLocal
   hashG = do
       match (RcPunct '#')
-      quotedG <|> nameBasedG
+      numberG <|> quotedG <|> nameBasedG
     where
-      -- `match RcQuotedString` already strips the quotes/decodes
-      -- escapes (`Language.RCExpr.Lexer`'s own `unescapeQuoted`) --
+      numberG : Grammar () RcToken True RCLocal
+      numberG = do
+          n <- match RcName
+          the (Grammar () RcToken False RCLocal) (if isNumberText n then pure (RConst n) else fail "not a number")
       -- `RConst`'s own doc comment says it keeps a quoted value
-      -- *with* its quotes (`Language.RCExpr.AST`), so `show` puts
-      -- them back (Idris2's own `Show String`, the same escaping
-      -- `Compiler.RC2.RCExp`'s `Show Constant`/`Show Char` used to
-      -- write this in the first place -- a `Char` constant, e.g.
-      -- `#'"'`, gets requoted as a `String` here; harmless, since
-      -- this module never re-parses `RConst`'s own opaque payload).
+      -- *with* its quotes (`Language.RCExpr.AST`): `quotedConstG`.
       quotedG : Grammar () RcToken True RCLocal
-      quotedG = do
-          q <- match RcQuotedString
-          pure (RConst (show q))
+      quotedG = map RConst quotedConstG
       nameBasedG : Grammar () RcToken True RCLocal
       nameBasedG = do
           n <- greedyWordsG
@@ -1090,10 +1100,9 @@ mutual
   ||| A `RConstAlt`'s own scrutinee: `Show Constant`'s value, after the
   ||| dump's optional `u:` mark word (always-unboxed type, kept in the text as
   ||| a `u:` prefix) -- either
-  ||| a bare token (a number, or a `Char` literal like `'x'`, both
-  ||| already one `RcName` token whole) or a quoted string (its own
-  ||| `RcQuotedString` token, requoted the same way `quotedConstG`
-  ||| does for a `RConst` local).
+  ||| a bare token (a number, one `RcName` token whole) or a quoted
+  ||| constant (a `String` or a `Char` literal like `'x'`, read by
+  ||| `quotedConstG` as for a `RConst` local).
   constTextG : Grammar () RcToken True String
   constTextG = do
       mark <- option "" (nameEq "u:" *> pure "u:")
@@ -1101,7 +1110,7 @@ mutual
       pure (mark ++ text)
     where
       quotedG : Grammar () RcToken True String
-      quotedG = map show (match RcQuotedString)
+      quotedG = quotedConstG
       plainG : Grammar () RcToken True String
       plainG = anyName
 
