@@ -374,7 +374,7 @@ toRCDefs strict directives incremental roots thunks preFolded0 = do
     reused <- logTime 2 "rc2: RC annotate + Reuse + ConAltNative" $
                 traverse (\(n, d) => do
                   d1 <- toRCDefPostFold (not (stageOff NoBoolCase directives)) d
-                  let fieldCase = not (stageOff NoBoolCase directives) && not (stageOff NoBoolField directives) && isNothing strict
+                  let fieldCase = not (stageOff NoBoolCase directives) && not (stageOff NoBoolField directives) && not (maybe False closed strict)
                   let d2 = applyReuse (not (stageOff NoReuseNested directives)) fieldCase d1
                   d3 <- if stageOff NoConAltNative directives then pure d2 else applyConAltNative strict fieldCase d2
                   pure (n, d3)) memoized
@@ -635,7 +635,7 @@ targetOsDirectives = filter (isPrefixOf "target-os=")
 ||| (`Compiler.RC2.Util`'s `VarId`; it starts at 1 because
 ||| `Compiler.RC2.DeadVars` reserves 0), with the struct table the
 ||| program's `%foreign` signatures declare.
-lowerProgram : {auto c : Ref Ctxt Defs} -> List String -> (incremental : Bool) -> (roots : List Name) -> Maybe Declarations ->
+lowerProgram : {auto c : Ref Ctxt Defs} -> List String -> (incremental : Bool) -> (roots : List Name) -> Maybe (Bool, Declarations) ->
                Maybe NamedCExp -> List (Name, FC, NamedDef) -> Core (List (Name, RCDef), SortedMap Name LiftInfo)
 lowerProgram disabled incremental roots declared main defs = do
     _ <- newRef VarId 1
@@ -648,7 +648,7 @@ lowerProgram disabled incremental roots declared main defs = do
     (preFolded, infos) <- logTime 2 "rc2: Lambda lift + RC normalize" $ normalizeProgram incremental main defs
     -- `Delay` thunks, which their lazy cells memoize (`insertMemoize`).
     let thunks = SortedSet.fromList [n | (n, i) <- SortedMap.toList infos, isDelay i.origin]
-    rc <- toRCDefs (map (\t => strictOf t preFolded) declared) disabled incremental roots thunks preFolded
+    rc <- toRCDefs (map (\(closed, t) => strictOf closed t preFolded) declared) disabled incremental roots thunks preFolded
     pure (rc, infos)
 
 ||| Validates one %export'ed name against its own real elaborated
@@ -814,11 +814,17 @@ compileExprWhole c s _ outputDir tm outfile =
      -- re-deriving it a second time from `exported cdata` directly.
      let roots = MN "__mainExpression" 0 :: map (\(n, _, _, _) => n) exportedSigs
      let dumpStrict = "dumpstrict" `elem` directiveList
+     -- The declared types (rc2/doc/native-type-inference.md): what they show is all that is native across a
+     -- boundary under `strictnative`; by default what they do not show needs a read on every path.
+     -- `loosenative` is the default before that: any read, no table.
+     let strictOn : Bool = optInOn StrictNative directiveList
+     let loose : Bool = elem "loosenative" directiveList && not strictOn
      declared <- the (Core (Maybe Declarations)) $
-                   if optInOn StrictNative directiveList || dumpStrict then Just <$> declarations namedR else pure Nothing
+                   if loose && not dumpStrict then pure Nothing else Just <$> declarations namedR
      -- `dumpstrict`: the table `strictnative` works from (rc2/doc/directives.md)
      when dumpStrict $ maybe (pure ()) (\d => coreLift_ $ writeFile (outputDir </> outfile ++ ".strict") (dumpDeclared d namedR)) declared
-     (defs, liftInfos) <- lowerProgram (disabledStages ++ targetOsDirectives directiveList) False roots (if optInOn StrictNative directiveList then declared else Nothing) mainR namedR
+     let table : Maybe (Bool, Declarations) = if loose then Nothing else map (\d => (strictOn, d)) declared
+     (defs, liftInfos) <- lowerProgram (disabledStages ++ targetOsDirectives directiveList) False roots table mainR namedR
 
      -- `dumprcexpr`: dump the final RCExp to a `.rcexpr` file -- see
      -- rc2/doc/reading-the-ir.md for the format, rc2/doc/directives.md

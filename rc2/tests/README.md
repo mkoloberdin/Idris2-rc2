@@ -105,6 +105,7 @@ program's generated C.
 | `Test185DependentFold` | a fold accumulator whose type depends on an argument is not made a native loop variable from one branch's reads (`doc/native-type-inference.md`'s "Types that depend on a value") | refc |
 | `Test186DependentPtr` | a value that is a pointer for one key and a String for another is not made a `void *` parameter (`doc/native-type-inference.md`'s "Types that depend on a value") | refc |
 | `Test187StrictNative` | under `strictnative`, a value whose type depends on another argument stays boxed when one branch only passes it on, behind a newtype, and as a pointer or a String (`doc/native-type-inference.md`'s "The strict mode") | refc |
+| `Test188DependentEveryPath` | in the default build, a value whose type depends on another value stays boxed and reference-counted when one branch only passes it on, when it is a lambda's argument, and when one branch reads it with a constant `case` or a primitive op and another duplicates it (`doc/native-type-inference.md`'s "The default: a use on every path") | refc, valgrind |
 | `Test90StructReturn` | small constructors returned by value (`doc/struct-return.md`) | refc valgrind check.sh |
 
 ## Loops and deep recursion
