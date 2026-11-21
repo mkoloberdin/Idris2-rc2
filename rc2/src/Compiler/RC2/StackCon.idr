@@ -59,11 +59,11 @@ paramDeps p = go
 ||| passed on is safe when the parameter it goes to is).
 nonEscaping : List (Name, RCDef) -> SortedSet ParamKey
 nonEscaping defs =
-    let start = concatMap entries defs
+    let start = concatMapLinear entries defs
         known : SortedSet ParamKey := fromList (map fst start)
         dependents : SortedMap ParamKey (List ParamKey) :=
             foldl (\m, (k, ds) => foldl (\m2, d => insert d (k :: fromMaybe [] (lookup d m2)) m2) m ds) (the (SortedMap ParamKey (List ParamKey)) empty) start
-        unknown : List ParamKey := concatMap (\(_, ds) => filter (\d => not (contains d known)) ds) start
+        unknown : List ParamKey := concatMapLinear (\(_, ds) => filter (\d => not (contains d known)) ds) start
         escaping = spread dependents unknown (the (SortedSet ParamKey) empty)
     in fromList (filter (\k => not (contains k escaping)) (map fst start))
   where
@@ -137,7 +137,7 @@ fieldUses params p = go
 ||| one is passed to).
 safeFields : SortedSet ParamKey -> List (Name, RCDef) -> SortedSet (Name, Nat, Nat)
 safeFields params defs =
-    let uses = concatMap entries defs
+    let uses = concatMapLinear entries defs
         callers : SortedMap ParamKey (List ParamKey) :=
             foldl (\m, (k, (_, ds)) => foldl (\m2, d => insert d (k :: fromMaybe [] (lookup d m2)) m2) m ds)
                   (the (SortedMap ParamKey (List ParamKey)) empty) uses

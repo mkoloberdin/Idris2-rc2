@@ -632,14 +632,16 @@ applyLateInlineOnce strict tiny early seed roots focus prev dirty defs0 = do
                  splicesInto n =
                      isJust (lookup n defOf) &&
                      (case lookup n carried.info of
+                           -- `callsBackCached` after the candidate test, as in `splices`.
                            Just cs =>
-                               let callees = filter (not . callsBackCached n) (keys cs)
-                               in any (\c => contains c an.eligible || contains c an.smallTiny) callees
-                                    || (inFocus n && any (\c => contains c an.tinyOnly) callees && buildsClosure n)
+                               let callees = keys cs
+                                   back = callsBackCached n
+                               in any (\c => (contains c an.eligible || contains c an.smallTiny) && not (back c)) callees
+                                    || (inFocus n && any (\c => contains c an.tinyOnly && not (back c)) callees && buildsClosure n)
                            Nothing => False)
-             let toProcess = filter splicesInto an.processOrder
+             toProcess <- logTime 4 "rc2: LI select" $ pure $ filter splicesInto an.processOrder
              _ <- newRef SpliceCount (the Nat 0)
-             (final, changed) <- goOrder an.eligible an.tinyOnly toProcess defOf []
+             (final, changed) <- logTime 4 "rc2: LI splice \{show (length toProcess)} defs" $ goOrder an.eligible an.tinyOnly toProcess defOf []
              pure (not (isNil changed),
                    map (\(n, d) => (n, fromMaybe d (lookup n final))) defs, carried, SortedSet.fromList changed)
   where

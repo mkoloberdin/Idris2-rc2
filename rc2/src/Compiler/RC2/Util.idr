@@ -19,6 +19,13 @@ import Data.SortedSet
 
 %default total
 
+||| `concatMap f xs` of a `List`, for a list as long as the whole program: in
+||| linear time, where `concatMap` is quadratic (code-style-Idris2.md), and
+||| without recursing as deep as `xs` is long, as `foldr` would.
+export
+concatMapLinear : (a -> List b) -> List a -> List b
+concatMapLinear f xs = reverse (foldl (\acc, x => reverseOnto acc (f x)) [] xs)
+
 ||| RC.idr wraps a branch/scope body in a leading `RDrop` node whenever
 ||| there are dead owned variables at its entry. Peel it off so its
 ||| drop list can be inspected/refined by a later pass instead of

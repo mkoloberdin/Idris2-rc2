@@ -1573,7 +1573,7 @@ generateCSourceFile defs0 exports noMain entryHelper dropUnimplementableForeign 
      -- `RUnderApp`/`RCConstPartial` one for the same name in favour of
      -- the real arity, regardless of which order they were seen in.
      let locallyOwnedFns = SortedSet.fromList $ mapMaybe (\(n, d) => case d of MkRCFun{} => Just n; MkRCForeign{} => Just n; _ => Nothing) defs
-     let externalFnArity = foldl (\acc, (n, ar) => insertWith max n ar acc) Data.SortedMap.empty (concatMap (externalFunctionRefsD . snd) defs)
+     let externalFnArity = foldl (\acc, (n, ar) => insertWith max n ar acc) Data.SortedMap.empty (concatMapLinear (externalFunctionRefsD . snd) defs)
      let externFns = filter (\(n, _) => not (contains n locallyOwnedFns)) (SortedMap.toList externalFnArity)
      update FunctionDefinitions (map (\(n, ar) => "extern IDRIS2RC2_Value *\{cName n}(" ++ showSep ", " (replicate ar "IDRIS2RC2_Value *") ++ ");\n") externFns ++)
      -- `withFile`'s own continuation runs in a `HasIO io`-polymorphic
