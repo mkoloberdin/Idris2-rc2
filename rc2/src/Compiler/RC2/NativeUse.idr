@@ -245,25 +245,35 @@ nativeArgTypesFor tracked (RLoop _ loopParams initial _ body) =
     in fromInitial `unionMaps` nativeArgTypesFor tracked body
 nativeArgTypesFor _ _ = empty
 
-||| What the declared types show (`--directive strictnative`, rc2/doc/native-type-inference.md's "The strict mode"):
-||| what each parameter id, function result and constructor field may be held as. One not listed is not shown.
+||| What the declared types show (rc2/doc/native-type-inference.md's "The strict mode" and "The default: a use on
+||| every path"): what each parameter id, function result and constructor field may be held as. One not listed
+||| is not shown: its type is a stuck application, a type variable, or it has no declared type at all.
+||| `closed` (`--directive strictnative`): what is not shown is boxed. Otherwise (the default) what is not
+||| shown may be held natively only on the evidence of a read on every path (`mustReadsFor`).
 public export
 record Strict where
   constructor MkStrict
+  closed : Bool
   params : SortedMap LocalId (List NativeTy)
   returns : SortedMap Name (List NativeTy)
-  cons : SortedMap Name (List (List NativeTy))
+  cons : SortedMap Name (List (Maybe (List NativeTy)))
 
-||| Whether the function `n`'s declared result shows that it may be held as `ty`; always, without the mode.
+||| Whether the function `n`'s declared result lets it be held as `ty`: a shown result has to list it; one not
+||| shown is refused when `closed`, and otherwise left to the producers (every tail a native value of `ty`,
+||| `DualABI.returnEligibility`), which is evidence that does not depend on a path.
 export
 returnShown : Maybe Strict -> Name -> NativeTy -> Bool
-returnShown strict n ty = maybe True (\s => maybe False (elem ty) (lookup n s.returns)) strict
+returnShown strict n ty = maybe True (\s => maybe (not s.closed) (elem ty) (lookup n s.returns)) strict
 
-||| `strict` narrowed to the fields `args` of the constructor `con`.
+||| `strict` narrowed to the fields `args` of the constructor `con`. A field whose declared type shows nothing
+||| is boxed when `closed`, and not listed otherwise.
 export
 fieldStrict : Maybe Strict -> Name -> List LocalId -> Maybe Strict
 fieldStrict strict con args =
-    map (\s => MkStrict (SortedMap.fromList (zip args (fromMaybe [] (lookup con s.cons)))) empty empty) strict
+    map (\s => let fields = zip args (fromMaybe [] (lookup con s.cons))
+                   listed = if s.closed then map (\(a, f) => (a, fromMaybe [] f)) fields
+                                        else mapMaybe (\(a, f) => map (a,) f) fields
+               in MkStrict s.closed (SortedMap.fromList listed) empty empty) strict
 
 ||| The type each operand position of `op` requires, whatever its own result representation (boxed or
 ||| native): a cast's source type; a string op's string and index positions; the op's own type otherwise.
@@ -300,22 +310,64 @@ opOperandTypes op args = maybe [] (\ty => map (, ty) (toList args)) (ownType op)
     ownType Crash = Nothing
     ownType _ = Just DoubleType   -- the Double functions
 
-||| Every primitive type at which each of `tracked` is read anywhere in `e`, boxed reads included: an
-||| operand of a primitive op or a fused comparison, or the scrutinee of a constant `case` (the type of its
-||| literals). Unlike `nativeArgTypes`, which counts only the reads Emit renders natively, this counts every
-||| typed read, so a conflict between branches is visible.
-primReadTypesFor : SortedSet LocalId -> RCExp -> SortedMap LocalId (SortedSet PrimType)
-primReadTypesFor tracked e = foldr (\(a, ty), acc => addTracked tracked a ty acc) (concatMaps (map (primReadTypesFor tracked) (children e))) (here e)
+||| The typed primitive reads `e` itself makes, boxed reads included: an operand of a primitive op or a fused
+||| comparison, or the scrutinee of a constant `case` (the type of its literals).
+typedReadsHere : RCExp -> List (RCLocal, PrimType)
+typedReadsHere (ROp _ _ op args _) = opOperandTypes op args
+typedReadsHere (RCmpCase _ op args _ _ _) = map (, cmpOpTy op) (toList args)
+typedReadsHere (RConstCase _ sc alts _) = mapMaybe (\(MkRConstAlt c _) => map (sc,) (constTy c)) alts
   where
     constTy : Constant -> Maybe PrimType
     constTy (Str _) = Just StringType
     constTy (BI _) = Just IntegerType
     constTy c = litRep c
+typedReadsHere _ = []
+
+||| Every primitive type at which each of `tracked` is read anywhere in `e`, boxed reads included
+||| (`typedReadsHere`). Unlike `nativeArgTypes`, which counts only the reads Emit renders natively, this counts
+||| every typed read, so a conflict between branches is visible.
+primReadTypesFor : SortedSet LocalId -> RCExp -> SortedMap LocalId (SortedSet PrimType)
+primReadTypesFor tracked e = foldr (\(a, ty), acc => addTracked tracked a ty acc) (concatMaps (map (primReadTypesFor tracked) (children e))) (typedReadsHere e)
+
+||| The primitive types at which each of `tracked` is read on EVERY path through `e` that returns; `Nothing`
+||| when no path returns (a crash). A read on one path only says what the value is on that path: under a
+||| `case` on a key the same local is a `Bool` in one branch and a `String` in another (`Value (vt k)`), and
+||| the branch that only passes it on has no read at all. A read every path makes is made whatever the key,
+||| so the value has that representation at every call. This is the evidence for a local whose declared type
+||| shows nothing (a stuck application, a type variable, a lifted lambda's argument).
+||| Counted: an operand of a primitive op that is not delayed, of a fused comparison, the scrutinee of a
+||| constant `case`, and a native `let` or loop slot bound to the local (an unboxing an earlier pass decided
+||| under this same check). Passing the local on, returning it or storing it is not a read.
+export
+mustReadsFor : SortedSet LocalId -> RCExp -> Maybe (SortedMap LocalId (SortedSet PrimType))
+mustReadsFor tracked e =
+    case e of
+         RCrash _ _ => Nothing
+         RLet _ _ _ value body => [| unionMaps (Just own) [| unionMaps (mustReadsFor tracked value) (mustReadsFor tracked body) |] |]
+         RCmpCase _ _ _ _ _ _ => map (unionMaps own) (meet (map (mustReadsFor tracked) (children e)))
+         RConCase _ _ _ _ => meet (map (mustReadsFor tracked) (children e))
+         RConstCase _ _ _ _ => map (unionMaps own) (meet (map (mustReadsFor tracked) (children e)))
+         _ => case children e of
+                   [k] => map (unionMaps own) (mustReadsFor tracked k)
+                   _ => Just own
+  where
     here : RCExp -> List (RCLocal, PrimType)
-    here (ROp _ _ op args _) = opOperandTypes op args
-    here (RCmpCase _ op args _ _ _) = map (, cmpOpTy op) (toList args)
-    here (RConstCase _ sc alts _) = mapMaybe (\(MkRConstAlt c _) => map (sc,) (constTy c)) alts
-    here _ = []
+    here (ROp _ (Just _) _ _ _) = []
+    here (RLet _ _ rep (RV _ a) _) = maybe [] (\ty => [(a, ty)]) (nativeSlotTy rep)
+    here (RLoop _ loopParams initial _ _) = mapMaybe (\((_, rep), a) => map (a,) (nativeSlotTy rep)) (zip loopParams initial)
+    here x = typedReadsHere x
+
+    own : SortedMap LocalId (SortedSet PrimType)
+    own = foldr (\(a, ty), acc => addTracked tracked a ty acc) empty (here e)
+
+    both : SortedMap LocalId (SortedSet PrimType) -> SortedMap LocalId (SortedSet PrimType) -> SortedMap LocalId (SortedSet PrimType)
+    both a b = SortedMap.fromList (mapMaybe (\(k, x) => map (\y => (k, intersection x y)) (lookup k b)) (SortedMap.toList a))
+
+    -- the paths that return: a branch that never does constrains nothing
+    meet : List (Maybe (SortedMap LocalId (SortedSet PrimType))) -> Maybe (SortedMap LocalId (SortedSet PrimType))
+    meet ms = case catMaybes ms of
+                   [] => Nothing
+                   (m :: rest) => Just (foldl both m rest)
 
 ||| Those of `tracked` that are the scrutinee of a constructor `case` with an alternative that binds fields
 ||| anywhere in `e`: there the local is a heap constructor (`Maybe`, a record, a list), never a native value,
@@ -331,20 +383,38 @@ takenApartFor tracked e = foldr union (here e) (map (takenApartFor tracked) (chi
     here (RConCase _ (RCLoc i) alts _) = if contains i tracked && any binds alts then singleton i else empty
     here _ = empty
 
-||| Whether `ty`, chosen for `p` from some of its reads, is consistent with the typed reads and the cases.
-fits : Maybe Strict -> SortedMap LocalId (SortedSet PrimType) -> SortedSet LocalId -> LocalId -> NativeTy -> Bool
-fits strict reads apart p ty =
-    maybe True (\s => maybe False (elem ty) (lookup p s.params)) strict &&
+||| Whether `ty`, chosen for `p` from some of its reads, is consistent with the typed reads and the cases, and
+||| with what `p`'s declared type shows. A `p` that is shown has to be shown `ty`. One that is not is refused
+||| when `closed`; otherwise a primitive type needs a read at it on every path (`must`: `mustReadsFor`), the
+||| world and an erased value pass (the evidence for them is `NullParams`': every caller passes one, or the
+||| value reaches a `%foreign` world position), and a pointer does not (it is chosen from the calls of some
+||| paths).
+fits : Maybe Strict -> SortedMap LocalId (SortedSet PrimType) -> SortedSet LocalId -> Lazy (Maybe (SortedMap LocalId (SortedSet PrimType))) -> LocalId -> NativeTy -> Bool
+fits strict reads apart must p ty =
+    declared &&
     not (contains p apart) &&
     (let tys = maybe [] Prelude.toList (lookup p reads)
      in case ty of
              TPrim t => all (== t) tys
              _ => null tys)   -- a pointer or an erased value is no primitive's operand
+  where
+    onEveryPath : Bool
+    onEveryPath = case ty of
+                       TPrim WorldType => True
+                       TPrim t => maybe True (\m => maybe False (contains t) (lookup p m)) must
+                       TErased => True
+                       _ => False
+    declared : Bool
+    declared = case strict of
+                    Nothing => True
+                    Just s => case lookup p s.params of
+                                   Just shown => elem ty shown
+                                   Nothing => not s.closed && onEveryPath
 
 ||| `chosen` without the entries that do not fit the other reads of `body`, in one walk of `body` for all of
 ||| them: every typed primitive read of the id agrees with its type (`primReadTypesFor`; none for a pointer),
-||| and no branch takes it apart as a constructor with fields (`takenApartFor`). A value whose type depends on
-||| another argument (`Value (vt k)`, `Dom o r`) fails one or the other when its branches disagree.
+||| no branch takes it apart as a constructor with fields (`takenApartFor`), and its declared type, or failing
+||| that a read on every path, shows the type (`fits`). `body` has to be the whole scope of the ids.
 ||| See rc2/doc/native-type-inference.md's "Types that depend on a value".
 export
 consistentNatives : Maybe Strict -> RCExp -> SortedMap LocalId NativeTy -> SortedMap LocalId NativeTy
@@ -352,7 +422,8 @@ consistentNatives strict body chosen =
     let ids = SortedSet.fromList (keys chosen)
         reads = primReadTypesFor ids body
         apart = takenApartFor ids body
-    in SortedMap.fromList (filter (\(p, ty) => fits strict reads apart p ty) (SortedMap.toList chosen))
+        must = delay (mustReadsFor ids body)
+    in SortedMap.fromList (filter (\(p, ty) => fits strict reads apart must p ty) (SortedMap.toList chosen))
 
 ||| `consistentNatives` for the one id `p`.
 export

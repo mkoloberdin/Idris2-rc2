@@ -451,14 +451,15 @@ alwaysUnboxedArgs (Just ty) args =
     isRealLoc (RCLoc _) = True
     isRealLoc _ = False
 
-||| Every genuine RCLoc used as an operand of a native op at a position
+||| Every genuine RCLoc that is an operand of a native op at a position
 ||| whose PrimType is `Types.alwaysUnboxed` (Int8/16/32, Bits8/16/32,
-||| Char): such an operand is *always* a tagged pointer at runtime, by
-||| Idris2's own type discipline (a single local can't have two
-||| different types), regardless of how else it's declared (typically a
+||| Char) on every path through its scope (`Types.onEveryPath`), or that
+||| a `let` binds to an immediate: such a local is a tagged pointer at
+||| every execution, regardless of how else it's declared (typically a
 ||| Boxed function argument -- the calling convention itself is
-||| unchanged) or used elsewhere. A single qualifying use site is
-||| therefore sufficient evidence for the *whole* variable. Folded into
+||| unchanged). One use site is not evidence for the whole variable: a
+||| local whose type depends on a value (`Value t`) has a different type
+||| in each branch of the `case` on `t`. Folded into
 ||| `natives` in annotateDef alongside nativeLocalsR's genuinely-native
 ||| locals -- both end up meaning the same thing to every consumer of
 ||| `natives` (`splitBorrows`, `boxedOperands`, `RV`, RLet's owned'/
@@ -470,10 +471,16 @@ alwaysUnboxedArgs (Just ty) args =
 ||| calls at all is pure waste. Operates on Phase 1's output, same as
 ||| nativeLocalsR and for the same reason.
 alwaysUnboxedBoxedLocalsR : RCExp -> SortedSet RCLocal
-alwaysUnboxedBoxedLocalsR (RLet _ var rep value body) =
-    let vs = union (alwaysUnboxedBoxedLocalsR value) (alwaysUnboxedBoxedLocalsR body) in
-    if boolProducer rep value || nullProducer value || immProducer rep value then insert (RCLoc var) vs else vs
+alwaysUnboxedBoxedLocalsR e = union (producers e) (onEveryPath operands e)
   where
+    -- An operand read is evidence only when every path through the local's scope makes one
+    -- (`Types.onEveryPath`): a local whose type depends on a value is a `Bits8` in the branch that reads
+    -- it so and a `String` in another. A delayed op is not a read here.
+    operands : RCExp -> SortedSet RCLocal
+    operands (ROp _ Nothing op args _) = alwaysUnboxedArgs (map (\ty => opArgTyFor ty op) (opResultRep op)) args
+    operands (RCmpCase _ op args _ _ _) = alwaysUnboxedArgs (Just (cmpOpTy op)) args
+    operands _ = empty
+
     ||| A Boxed `let` bound directly to an op whose result is an immediate although
     ||| the op runs on the boxed path (`Types.immediateResultOp`: a `Char` out of a
     ||| string, a cast to a small type). Producer-side evidence, as `boolProducer`.
@@ -499,15 +506,13 @@ alwaysUnboxedBoxedLocalsR (RLet _ var rep value body) =
     boolProducer : Rep -> RCExp -> Bool
     boolProducer RBoxed (ROp _ Nothing op _ _) = boolResultOp op
     boolProducer _ _ = False
-alwaysUnboxedBoxedLocalsR (ROp _ _ op args _) =
-    alwaysUnboxedArgs (map (\ty => opArgTyFor ty op) (opResultRep op)) args
-alwaysUnboxedBoxedLocalsR (RConCase _ _ alts mDef) = foldConAltsR alwaysUnboxedBoxedLocalsR alts mDef
-alwaysUnboxedBoxedLocalsR (RConstCase _ _ alts mDef) = foldConstAltsR alwaysUnboxedBoxedLocalsR alts mDef
-alwaysUnboxedBoxedLocalsR (RCmpCase _ op args _ t f) =
-    union (alwaysUnboxedArgs (Just (cmpOpTy op)) args)
-          (union (alwaysUnboxedBoxedLocalsR t) (alwaysUnboxedBoxedLocalsR f))
-alwaysUnboxedBoxedLocalsR (RMemoize _ _ _ body) = alwaysUnboxedBoxedLocalsR body
-alwaysUnboxedBoxedLocalsR _ = empty
+
+    -- the locals a `let` binds to an immediate: evidence wherever it is
+    producers : RCExp -> SortedSet RCLocal
+    producers (RLet _ var rep value body) =
+        let vs = union (producers value) (producers body) in
+        if boolProducer rep value || nullProducer value || immProducer rep value then insert (RCLoc var) vs else vs
+    producers x = foldl (\acc, k => union acc (producers k)) empty (children x)
 
 ||| Which of `vars` need a dup: thread (and shrink) `owned` exactly as
 ||| before -- the *first* occurrence of an owned variable moves it (no dup
