@@ -174,6 +174,44 @@ foldMap f = foldl (\acc, elem => acc <+> f elem) neutral
 各リストを直接畳み込む。結合結果そのものが必要なら
 `foldr (++) []`を使う(右結合なので合計長に比例)。
 
+### `where`で定義した表は使うたびに作り直される
+
+`where`の定義は、外側の関数の引数(パターン変数)を参照すると、その引数を取る
+関数としてラムダリフトされる。引数を取らない「定数」に見えても、**使うたびに
+評価し直される**。`let`ブロックの中でも、型シグネチャを別の行に書いた定義
+(`x : T`と`x = e`)は同じ局所定義になり、同じことが起きる。
+
+```idris
+-- NG: go が1歩進むたびに defOf(全定義の表)を作り直す
+f defs keys = go keys
+  where
+    defOf : SortedMap Name RCDef
+    defOf = fromList defs
+
+    go : List Name -> Nat
+    go [] = 0
+    go (k :: ks) = maybe 0 size (lookup k defOf) + go ks
+
+-- OK: 本体で1回だけ束縛し(`x = e`か`x : T := e`)、使う関数へ引数で渡す
+f defs keys = let defOf : SortedMap Name RCDef := fromList defs in go defOf keys
+  where
+    go : SortedMap Name RCDef -> List Name -> Nat
+    go defOf [] = 0
+    go defOf (k :: ks) = maybe 0 size (lookup k defOf) + go defOf ks
+```
+
+全定義から作る表を、定義ごとや再帰の1歩ごとに引くと、プログラムの大きさの
+2乗になる。実測例(経緯は`rc2/doc/constant-constructor-specialization.md`の
+"The `where`-clause trap that got this reverted once"):
+
+| 箇所 | 修正前 | 修正後 |
+|---|---|---|
+| `SpecClosure`の`goKeys`(idris2-lsp) | 102.9秒 | 0.01秒 |
+| `Pending.pendingFuns`(セルフホストのC生成全体) | 560秒 | 8.9秒 |
+
+`where`には、引数を取る補助関数だけを置く。全体から作る集合・表・リストは、
+本体で`x = e`か`x : T := e`の形で束縛して、引数で渡す。
+
 ### 集合を下から積み上げるときは`union`の引数順に注意
 
 `Data.SortedSet.union x y`は実装が`foldr insert x y`で、

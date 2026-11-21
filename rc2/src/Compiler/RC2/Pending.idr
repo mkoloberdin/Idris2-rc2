@@ -51,44 +51,34 @@ funTails defs = SortedMap.fromList (mapMaybe (\(n, d) => case d of
 ||| The functions that may return a pending closure: the least set holding
 ||| every function with a `Pending` tail, and every function that passes on
 ||| the result of a call to a member or to a function not defined here.
+||| The tables are `let`-bound (`x = e` or `x : T := e`): in a `where` clause,
+||| or as a let-block definition with its own signature, they would depend on
+||| `defs` and be rebuilt at every use, quadratic in the program.
 export
 pendingFuns : List (Name, RCDef) -> SortedSet Name
-pendingFuns defs = go (SortedSet.fromList seeds) seeds
+pendingFuns defs =
+    let funs = funTails defs
+        -- every name defined here: the boxed functions, the constructors and
+        -- the foreign wrappers
+        defined = SortedSet.fromList (keys funs ++ mapMaybe (\(n, d) => case d of
+                                                                   MkRCFun {} => Nothing
+                                                                   _ => Just n) defs)
+        isSeed : TailKind -> Bool
+        isSeed Pending = True
+        isSeed (Passes g) = not (contains g defined)
+        isSeed Done = False
+        seeds = [n | (n, ts) <- SortedMap.toList funs, any isSeed ts]
+        -- who passes on the result of `g`
+        callers : SortedMap Name (List Name) := foldl (\m, (n, ts) => foldl (\m', t => case t of
+                                                         Passes g => insert g (n :: fromMaybe [] (lookup g m')) m'
+                                                         _ => m') m ts) SortedMap.empty (SortedMap.toList funs)
+    in go callers (SortedSet.fromList seeds) seeds
   where
-    funs : SortedMap Name (List TailKind)
-    funs = funTails defs
-
-    -- defined here, but not a boxed function: a constructor or a foreign wrapper
-    others : SortedSet Name
-    others = SortedSet.fromList (mapMaybe (\(n, d) => case d of
-                                                         MkRCFun {} => Nothing
-                                                         _ => Just n) defs)
-
-    known : SortedSet Name
-    known = SortedSet.fromList (keys funs)
-
-    unknown : Name -> Bool
-    unknown n = not (contains n known || contains n others)
-
-    isSeed : TailKind -> Bool
-    isSeed Pending = True
-    isSeed (Passes g) = unknown g
-    isSeed Done = False
-
-    seeds : List Name
-    seeds = [n | (n, ts) <- SortedMap.toList funs, any isSeed ts]
-
-    -- who passes on the result of `g`
-    callers : SortedMap Name (List Name)
-    callers = foldl (\m, (n, ts) => foldl (\m', t => case t of
-                                                       Passes g => insert g (n :: fromMaybe [] (lookup g m')) m'
-                                                       _ => m') m ts) empty (SortedMap.toList funs)
-
-    go : SortedSet Name -> List Name -> SortedSet Name
-    go acc [] = acc
-    go acc (g :: rest) =
+    go : SortedMap Name (List Name) -> SortedSet Name -> List Name -> SortedSet Name
+    go callers acc [] = acc
+    go callers acc (g :: rest) =
         let new = filter (\c => not (contains c acc)) (fromMaybe [] (lookup g callers))
-        in go (foldl (flip insert) acc new) (new ++ rest)
+        in go callers (foldl (flip insert) acc new) (new ++ rest)
 
 ||| The functions of `defs` whose result is never a pending closure: a non-tail
 ||| call to one needs no trampoline. Only a function defined here can be named.
