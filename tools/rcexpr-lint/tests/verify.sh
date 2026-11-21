@@ -86,6 +86,7 @@ check "foreigntypes.rcexpr (struct and function types in %foreign signatures)" "
 check "leakclean.rcexpr (balanced shapes the leak check must accept)" "$TESTS_DIR/leakclean.rcexpr" 0
 check "stackcon.rcexpr (a constructor in the frame: fields borrowed, the alt of its tag taken)" "$TESTS_DIR/stackcon.rcexpr" 0
 check "typedcase.rcexpr (typed-constant case scrutinees are refcount-free)" "$TESTS_DIR/typedcase.rcexpr" 0
+check "immcast.rcexpr (a Boxed local bound to a cast to a small type is an immediate: its drops and its unconsumed end are no finding)" "$TESTS_DIR/immcast.rcexpr" 0
 check "leak.rcexpr (every leak-check finding fires)" "$TESTS_DIR/leak.rcexpr" 1
 check "borrow.rcexpr (borrow statistics, hand-counted)" "$TESTS_DIR/borrow.rcexpr" 0 --borrow-stats
 check "borrowtail.rcexpr (tail-blocked parameters, hand-counted)" "$TESTS_DIR/borrowtail.rcexpr" 0 --borrow-tail-stats
