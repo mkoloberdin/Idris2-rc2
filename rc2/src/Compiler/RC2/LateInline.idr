@@ -531,10 +531,12 @@ inlineInto strict tiny defOf eligible tinyOnly self = go empty empty []
     -- A call is spliced when its callee is `eligible`, or `tinyOnly` and either
     -- of at most `tinyAlwaysSize` nodes, or of at most `tiny` given a closure the
     -- caller built (`closures`: the locals bound to a `partial`) or a constant closure.
+    -- `callsBack` last: it walks the callee's whole body, and most calls are
+    -- to callees that are not candidates at all.
     splices : SortedSet LocalId -> Name -> List RCLocal -> Bool
     splices closures n args =
-        not (callsBack defOf self n)
-          && (contains n eligible || (contains n tinyOnly && (fitsNow tinyAlwaysSize n || (any (isClosure closures) args && fitsNow tiny n))))
+        (contains n eligible || (contains n tinyOnly && (fitsNow tinyAlwaysSize n || (any (isClosure closures) args && fitsNow tiny n))))
+          && not (callsBack defOf self n)
       where
         isClosure : SortedSet LocalId -> RCLocal -> Bool
         isClosure cl (RCLoc i) = contains i cl
