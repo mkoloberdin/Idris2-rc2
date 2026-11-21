@@ -83,7 +83,7 @@ resolveForeignTarget ccs =
              pure ( if tag == "RefC" || tag == "RC2" then CLangRefC else CLangC
                   , CallSym (UN $ Basic sym))
          Right (Just (MkForeignSpec _ (FExpr parts) _)) => pure (CLangC, CallExpr parts)
-         Right Nothing => throw $ UserError "[rc2] a %foreign declaration has no implementation rc2 can call: it needs a \"CExpr:\", \"RC2:\", \"RefC:\" or \"C:\" alternative"
+         Right Nothing => throw $ UserError "[rc2] a %foreign declaration has no implementation rc2 can call: it needs a \"CExpr:\", \"RC2:\", \"RefC:\", \"C:\" or \"C__collect_safe:\" alternative"
          Left err => throw $ UserError "[rc2] invalid %foreign declaration: \{err}"
 
 ||| Marshal every `fargs` position, call `fctName`, and return the raw C
@@ -324,7 +324,7 @@ emitForeignDef n ccs fargs ret = emitGenericForeignWrapper
 
               decreaseIndentation
               emit EmptyFC "}"
-          Right Nothing => throw $ UserError "[rc2] %foreign declaration \{show n} has no implementation rc2 can call: it needs a \"CExpr:\", \"RC2:\", \"RefC:\" or \"C:\" alternative"
+          Right Nothing => throw $ UserError "[rc2] %foreign declaration \{show n} has no implementation rc2 can call: it needs a \"CExpr:\", \"RC2:\", \"RefC:\", \"C:\" or \"C__collect_safe:\" alternative"
           Left err => throw $ UserError "[rc2] invalid %foreign declaration \{show n}: \{err}"
 
 ||| The C signature of the wrapper for an `%export` declaration, without the
@@ -441,7 +441,7 @@ emitExportWrapper n exportedCName fargs ret = do
     argPack ty i = "(IDRIS2RC2_Value *)" ++ packCFType ty ("p_" ++ show i)
 
 ||| True for a `%foreign` rc2 can implement: one carrying a convention
-||| `parseForeign` recognizes (`CExpr:`/`C:`/`RefC:`/`RC2:`). Otherwise whole-program mode
+||| `parseForeign` recognizes (`CExpr:`/`C:`/`RefC:`/`RC2:`/`C__collect_safe:`). Otherwise whole-program mode
 ||| keeps a hard compile error (a reachable one means the program calls
 ||| something rc2 cannot implement; a link-time "undefined reference" would
 ||| hide that). Incremental mode (`dropUnimplementableForeign = True`) drops

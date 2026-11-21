@@ -89,9 +89,16 @@ badLibName lib =
 ||| pairs hardcoded to the "RefC" tag; our own runtime provides
 ||| matching C symbols for those so we can reuse the declarations
 ||| as-is instead of forking prelude.
+||| "C__collect_safe" is Chez's tag for a C call that may block: Chez
+||| collects only when every thread is at a safe point, so it marks the
+||| thread as one for the call's duration. rc2 has no collector to let
+||| run, and no lock held across a C call, so it is the same call as
+||| "C:". Last, so a declaration with both keeps its "C:" string. Some
+||| libraries give a blocking call only this tag (posix's `read`,
+||| `write`, `poll`; linux's `epoll_wait`), which rc2 could not call.
 export
 foreignTags : List String
-foreignTags = ["CExpr", "RC2", "RefC", "C"]
+foreignTags = ["CExpr", "RC2", "RefC", "C", "C__collect_safe"]
 
 ||| The highest-priority tag present in `ccs` as `(tag, raw string,
 ||| payload after the first ':')`. Same selection as upstream's

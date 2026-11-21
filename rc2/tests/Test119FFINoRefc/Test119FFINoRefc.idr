@@ -3,7 +3,7 @@ module Main
 -- Copyright 2026, Hattori,Hiroki. All rights reserved.
 -- This module was licensed by BSD3.
 
--- %foreign calls real RefC cannot build: a String aliasing its GCAnyPtr argument, a const char * return, `CExpr:` priority over `C:`.
+-- %foreign calls real RefC cannot build: a String aliasing its GCAnyPtr argument, a const char * return, `CExpr:` priority over `C:`, `C__collect_safe:` read as `C:`.
 -- Each section is a formerly separate test kept verbatim as its own
 -- module (its `main` renamed `run`); see rc2/tests/README.md.
 
@@ -12,6 +12,7 @@ import Test119FFINoRefc.ConstCFStringReturn
 import Test119FFINoRefc.CExprPriority
 import Test119FFINoRefc.NativePtr
 import Test119FFINoRefc.ForeignScalar
+import Test119FFINoRefc.CollectSafe
 
 main : IO ()
 main = do
@@ -20,3 +21,4 @@ main = do
     CExprPriority.run
     NativePtr.run
     ForeignScalar.run
+    CollectSafe.run

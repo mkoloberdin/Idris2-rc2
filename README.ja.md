@@ -280,7 +280,7 @@ rc2/
 │   ├── Emit.idr         RCExp -> C コードの機械的変換
 │   ├── Emit/Util.idr        名前マングリング、リテラル・値出力、クロージャ、FFI 型変換
 │   ├── Emit/Foreign.idr     %foreign / %export ラッパー生成と FFI マーシャリング
-│   ├── ForeignSpec.idr      %foreign 規約文字列（C:/RefC:/RC2:/CExpr:）のパーサ
+│   ├── ForeignSpec.idr      %foreign 規約文字列（C:/RefC:/RC2:/CExpr:/C__collect_safe:）のパーサ
 │   ├── Emit/ExternRefs.idr  インクリメンタルコンパイル用の前方宣言ウォーカー
 │   ├── Pretty.idr       RCExp ダンプ出力（--directive dumprcexpr）
 │   ├── CC.idr           C コンパイラ起動とリンク処理

@@ -5,3 +5,4 @@
 #include "Test26GCPtrAliasString.c"
 #include "Test47ConstCFStringReturn.c"
 #include "Test129CExprPriority.c"
+#include "CollectSafe.c"

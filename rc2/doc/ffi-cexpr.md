@@ -76,7 +76,7 @@ character literals (with backslash escapes), so commas inside a macro
 call, a string literal or a character literal do not split. Options are
 trimmed. Unbalanced brackets and unterminated literals are compile
 errors. The split applies to every tag rc2 accepts (`CExpr:`, `RC2:`,
-`RefC:`, `C:`), replacing upstream's comma-only `parseCC`. `C:`, `RefC:` and `RC2:` strings parse as before (no existing one
+`RefC:`, `C:`, `C__collect_safe:`), replacing upstream's comma-only `parseCC`. `C:`, `RefC:` and `RC2:` strings parse as before (no existing one
 contains brackets or quotes), and only the chosen string of a
 declaration is examined. A `:` after the first one (as in
 `?:`) is part of the expression.
@@ -187,5 +187,17 @@ rc2 never converts such a value into an `Integer` for you.
 
 ## Priority
 
-`CExpr:` is looked up first, before `RC2:`, `RefC:` and `C:`, whatever
-the order of the strings in the declaration.
+`CExpr:` is looked up first, before `RC2:`, `RefC:`, `C:` and
+`C__collect_safe:`, whatever the order of the strings in the declaration.
+
+`C__collect_safe:` is Chez's tag for a C call that may block (Chez
+collects only when every thread is at a safe point, so it marks the
+calling thread as one while the call runs). rc2 has no collector to let
+run and holds no lock across a C call, so it compiles the string as the
+same call as `C:`. It comes last: a declaration that has both keeps its
+`C:` string. Libraries that give a blocking call only this tag (posix's
+`read`, `write` and `poll`, linux's `epoll_wait`) get past the "no
+implementation" error. A string of this tag with a library and no header,
+as posix gives them, still needs the C prototype from somewhere: rc2
+writes none for a header-less declaration (as RefC), and gcc 14 rejects
+the implicit declaration.
