@@ -27,7 +27,15 @@ jobs:
       - name: Set up rc2
         uses: ./.github/actions/setup-rc2
 
+      # Builds rcexpr-lint (`verify.sh --skip-build` does not) and checks its own
+      # fixtures, so that Verify also lints each smoke test's dump.
+      - name: rcexpr-lint tests
+        id: lint
+        run: tools/rcexpr-lint/tests/verify.sh
+
+      # Also when the lint's tests failed, but not when the setup did.
       - name: Verify
+        if: ${{ !cancelled() && steps.lint.conclusion != 'skipped' }}
         run: |
           source env.sh
           # from rc2/tests: the multi-module tests name their modules by the path from here

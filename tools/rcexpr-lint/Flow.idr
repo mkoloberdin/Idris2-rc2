@@ -265,8 +265,8 @@ roots prog =
     let fs = funs prog
         w0 = MkWalk empty [] [] []
         ws = map (\(n, _, _, body) => fst (val n empty w0 body)) fs
-        called = foldl (\acc, w => foldl (\acc', (c, _) => insert c acc') acc w.calls) empty ws
-        closed = foldl (\acc, w => foldl (flip insert) acc (refs w)) empty ws
+        called = foldl (\acc, w => foldl (\acc', (c, _) => insert c acc') acc w.calls) (the (SortedSet String) empty) ws
+        closed = foldl (\acc, w => foldl (flip insert) acc (refs w)) (the (SortedSet String) empty) ws
     in fromList (map (\(n, _, _, _) => n) (filter (\(n, _, _, _) => not (contains n called) || contains n closed) fs))
 
 envOf : State -> SortedSet String -> String -> List (Int, RRep) -> SortedMap Int AV
