@@ -25,6 +25,10 @@
 # `borrowtail.rcexpr` is run with `--borrow-tail-stats`: one parameter that
 # nets positive over tail and non-tail call sites, one that nets negative,
 # one blocked by a tail call and another reason; hand-counted too.
+# `flowunbox.rcexpr`, `flowrc.rcexpr` and `flowclean.rcexpr` are run with `--flow`:
+# dumps of two small programs (rc2 #343's dependent-parameter shapes) where a pointer
+# reaches a slot held as a scalar, or a run-time string a local held without a count;
+# the clean one is the first program compiled with that parameter boxed.
 # `pushdown.rcexpr` is run with `--pushdown-stats`; each definition is one
 # pattern (or a negative case next to it) and every figure was counted by
 # hand: the A/B/C1/C2/D/D0 events, the E census and the dup/drop totals.
@@ -91,5 +95,8 @@ check "borrow.rcexpr (borrow statistics, hand-counted)" "$TESTS_DIR/borrow.rcexp
 check "borrowtail.rcexpr (tail-blocked parameters, hand-counted)" "$TESTS_DIR/borrowtail.rcexpr" 0 --borrow-tail-stats
 check "borrowdirect.rcexpr (direct tail calls not counted as tail calls, hand-counted)" "$TESTS_DIR/borrowdirect.rcexpr" 0 --borrow-stats-direct
 check "pushdown.rcexpr (push-down statistics, hand-counted)" "$TESTS_DIR/pushdown.rcexpr" 0 --pushdown-stats
+check "flowunbox.rcexpr (a string literal reaches a Native Bits8 parameter: rc2 #343)" "$TESTS_DIR/flowunbox.rcexpr" 1 --flow
+check "flowrc.rcexpr (a run-time string reaches a local held without a count)" "$TESTS_DIR/flowrc.rcexpr" 1 --flow
+check "flowclean.rcexpr (the program of flowunbox, its parameter boxed: no conflict)" "$TESTS_DIR/flowclean.rcexpr" 0 --flow
 
 echo "=== All rcexpr-lint checks passed ==="

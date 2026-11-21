@@ -1,0 +1,275 @@
+-- rc2 directives: --directive dumprcexpr --directive strictnative --directive target-os=Linux
+def {__mainExpression:0}  (fun args= [] ret= Boxed)
+  memoize {__mainExpression:0} : Boxed
+    let v179 : Boxed =
+      let v178 : Boxed =
+        let v177 : Boxed =
+          callRep {idris2rc2_worker_Main_run:0} ["Native Bits8", "Boxed"] -> Boxed postDrop= [] [#0, #1]
+        op ++ [v177, #"\n"] postDrop= [v177]
+      call Prelude.IO.prim__putStr [v178, [world]]
+    drop [v179]
+    let v176 : Boxed =
+      let v175 : Boxed =
+        let v174 : Boxed =
+          let v173 : Boxed =
+            12345678901234567890
+          callRep {idris2rc2_worker_Main_run:0} ["Native Bits8", "Boxed"] -> Boxed postDrop= [] [#1, v173]
+        op ++ [v174, #"\n"] postDrop= [v174]
+      call Prelude.IO.prim__putStr [v175, [world]]
+    drop [v176]
+    let v172 : Boxed =
+      let v171 : Boxed =
+        let v170 : Boxed =
+          let v169 : Boxed =
+            call Main.build [#5]
+          callRep {idris2rc2_worker_Main_run:0} ["Native Bits8", "Boxed"] -> Boxed postDrop= [] [#2, v169]
+        op ++ [v170, #"\n"] postDrop= [v170]
+      call Prelude.IO.prim__putStr [v171, [world]]
+    drop [v172]
+    let v168 : Boxed =
+      let v167 : Boxed =
+        let v166 : Boxed =
+          let v185 : Boxed =
+            #0
+          let v186 : Boxed =
+            #2000
+          loop ["v186:Boxed", "v185:Boxed"] initial= [v186, v185]
+          case v186 of
+            0 ->
+              drop [v186]
+              v185
+            _ ->
+              let v206 : Boxed =
+                op -Integer [v186, #1] postDrop= [v186]
+              let v205 : Boxed =
+                let v204 : Boxed =
+                  let v203 : Boxed =
+                    let v202 : Boxed =
+                      let v201 : Boxed =
+                        let v200 : Boxed =
+                          let v199 : Boxed =
+                            dup v206
+                            op +Integer [v206, #1] postDrop= [v206]
+                          call Main.build [v199]
+                        callRep {idris2rc2_worker_Main_run:0} ["Native Bits8", "Boxed"] -> Boxed postDrop= [] [#2, v200]
+                      let v198 : Boxed =
+                        let v197 : Boxed =
+                          op op_strlen [v201] postDrop= [v201]
+                        op cast-Int-Integer [v197] postDrop= [v197]
+                      cmp <=Integer [#0, v198]
+                      then
+                        v198
+                      else
+                        drop [v198]
+                        0
+                    op +Integer [v185, v202] postDrop= [v185, v202]
+                  let v196 : Boxed =
+                    let v195 : Boxed =
+                      let v194 : Boxed =
+                        dup v206
+                        op *Integer [v206, #1000003] postDrop= [v206]
+                      callRep {idris2rc2_worker_Main_run:0} ["Native Bits8", "Boxed"] -> Boxed postDrop= [] [#1, v194]
+                    let v193 : Boxed =
+                      let v192 : Boxed =
+                        op op_strlen [v195] postDrop= [v195]
+                      op cast-Int-Integer [v192] postDrop= [v192]
+                    cmp <=Integer [#0, v193]
+                    then
+                      v193
+                    else
+                      drop [v193]
+                      0
+                  op +Integer [v203, v196] postDrop= [v203, v196]
+                let v191 : Boxed =
+                  let v190 : Boxed =
+                    let v189 : Boxed =
+                      cmp <=Integer [v206, #3]
+                      then
+                        0
+                      else
+                        1
+                    callRep {idris2rc2_worker_Main_run:0} ["Native Bits8", "Boxed"] -> Boxed postDrop= [] [#0, v189]
+                  let v188 : Boxed =
+                    let v187 : Boxed =
+                      op op_strlen [v190] postDrop= [v190]
+                    op cast-Int-Integer [v187] postDrop= [v187]
+                  cmp <=Integer [#0, v188]
+                  then
+                    v188
+                  else
+                    drop [v188]
+                    0
+                op +Integer [v204, v191] postDrop= [v204, v191]
+              continue loop [v206, v205]
+        let v165 : Boxed =
+          op cast-Integer-String [v166] postDrop= [v166]
+        v165
+      op ++ [v167, #"\n"] postDrop= [v167]
+    call Prelude.IO.prim__putStr [v168, [world]]
+
+def _builtin.NIL  (con tag= Just 0 arity= 0 newtype= Nothing)
+
+def _builtin.CONS  (con tag= Just 1 arity= 2 newtype= Nothing)
+
+def _builtin.NOTHING  (con tag= Just 0 arity= 0 newtype= Nothing)
+
+def _builtin.JUST  (con tag= Just 1 arity= 1 newtype= Nothing)
+
+def {idris2rc2_worker_Main_run:0}  (fun args= ["v22:Native Bits8", "v23:Boxed"] ret= Boxed worker=True)
+  case v22 of
+    u: 0 ->
+      case v23 of
+        u: 1 ->
+          let v109 : Boxed =
+            case v22 of
+              u: 0 ->
+                #0
+              u: 1 ->
+                #0
+              u: 2 ->
+                #1
+          let v108 : Boxed =
+            callRep {idris2rc2_worker_Main_encode:1} ["Native Bits8", "Boxed"] -> Boxed postDrop= [] [v22, #0]
+          let v107 : Boxed =
+            let v106 : Boxed =
+              let v105 : Boxed =
+                callRep {idris2rc2_worker_Main_encode:1} ["Native Bits8", "Boxed"] -> Boxed postDrop= [] [v22, #1]
+              let v104 : Boxed =
+                let v103 : Boxed =
+                  callRep {idris2rc2_worker_Main_encode:1} ["Native Bits8", "Boxed"] -> Boxed postDrop= [] [v22, v109]
+                op ++ [#"/", v103] postDrop= [v103]
+              op ++ [v105, v104] postDrop= [v105, v104]
+            op ++ [#"/", v106] postDrop= [v106]
+          op ++ [v108, v107] postDrop= [v108, v107]
+        u: 0 ->
+          let v119 : Boxed =
+            case v22 of
+              u: 0 ->
+                #0
+              u: 1 ->
+                #1
+              u: 2 ->
+                #0
+          let v118 : Boxed =
+            callRep {idris2rc2_worker_Main_encode:1} ["Native Bits8", "Boxed"] -> Boxed postDrop= [] [v22, #1]
+          let v117 : Boxed =
+            let v116 : Boxed =
+              let v115 : Boxed =
+                callRep {idris2rc2_worker_Main_encode:1} ["Native Bits8", "Boxed"] -> Boxed postDrop= [] [v22, #0]
+              let v114 : Boxed =
+                let v113 : Boxed =
+                  callRep {idris2rc2_worker_Main_encode:1} ["Native Bits8", "Boxed"] -> Boxed postDrop= [] [v22, v119]
+                op ++ [#"/", v113] postDrop= [v113]
+              op ++ [v115, v114] postDrop= [v115, v114]
+            op ++ [#"/", v116] postDrop= [v116]
+          op ++ [v118, v117] postDrop= [v118, v117]
+    u: 1 ->
+      let v129 : Boxed =
+        case v22 of
+          u: 0 ->
+            case v23 of
+              u: 1 ->
+                v23
+              u: 0 ->
+                v23
+          u: 1 ->
+            v23
+          u: 2 ->
+            v23
+      let v128 : Boxed =
+        callRep {idris2rc2_worker_Main_encode:1} ["Native Bits8", "Boxed"] -> Boxed postDrop= [] [v22, v23]
+      let v127 : Boxed =
+        let v126 : Boxed =
+          let v125 : Boxed =
+            callRep {idris2rc2_worker_Main_encode:1} ["Native Bits8", "Boxed"] -> Boxed postDrop= [] [v22, v23]
+          let v124 : Boxed =
+            let v123 : Boxed =
+              callRep {idris2rc2_worker_Main_encode:1} ["Native Bits8", "Boxed"] -> Boxed postDrop= [] [v22, v129]
+            op ++ [#"/", v123] postDrop= [v123]
+          op ++ [v125, v124] postDrop= [v125, v124]
+        op ++ [#"/", v126] postDrop= [v126]
+      op ++ [v128, v127] postDrop= [v128, v127]
+    u: 2 ->
+      let v139 : Boxed =
+        case v22 of
+          u: 0 ->
+            case v23 of
+              u: 1 ->
+                v23
+              u: 0 ->
+                v23
+          u: 1 ->
+            v23
+          u: 2 ->
+            v23
+      let v138 : Boxed =
+        callRep {idris2rc2_worker_Main_encode:1} ["Native Bits8", "Boxed"] -> Boxed postDrop= [] [v22, v23]
+      let v137 : Boxed =
+        let v136 : Boxed =
+          let v135 : Boxed =
+            callRep {idris2rc2_worker_Main_encode:1} ["Native Bits8", "Boxed"] -> Boxed postDrop= [] [v22, v23]
+          let v134 : Boxed =
+            let v133 : Boxed =
+              callRep {idris2rc2_worker_Main_encode:1} ["Native Bits8", "Boxed"] -> Boxed postDrop= [] [v22, v139]
+            op ++ [#"/", v133] postDrop= [v133]
+          op ++ [v135, v134] postDrop= [v135, v134]
+        op ++ [#"/", v136] postDrop= [v136]
+      op ++ [v138, v137] postDrop= [v138, v137]
+
+def {idris2rc2_worker_Main_encode:1}  (fun args= ["v57:Native Bits8", "v58:Boxed"] ret= Boxed worker=True)
+  case v57 of
+    u: 0 ->
+      case v58 of
+        u: 1 ->
+          "1"
+        u: 0 ->
+          "0"
+    u: 1 ->
+      let v147 : Boxed =
+        op cast-Integer-String [v58]
+      v147
+    u: 2 ->
+      v58
+
+def Main.build  (fun args= ["v59:Boxed"] ret= Boxed)
+  let v60 : Boxed =
+    let v61 : Boxed =
+      dup v59
+      let v181 : Boxed =
+        v59
+      let v182 : Boxed =
+        [__]
+      loop ["v182:Boxed", "v181:Boxed"] initial= [v182, v181]
+      case v181 of
+        0 ->
+          drop [v181]
+          v182
+        _ ->
+          let v184 : Boxed =
+            op -Integer [v181, #1] postDrop= [v181]
+          let v183 : Boxed =
+            con _builtin.CONS [cons] tag= Just 1 [#'x', v182]
+          continue loop [v183, v184]
+    call Prelude.Types.fastPack [v61]
+  let v62 : Boxed =
+    op cast-Integer-String [v59] postDrop= [v59]
+  op ++ [v60, v62] postDrop= [v60, v62]
+
+def Prelude.Types.fastPack  (foreign ["RC2:idris2rc2_fastPackFixed"] [RC2Value ] -> RC2Value )
+
+def Prelude.Show.User  (con tag= Just 4 arity= 1 newtype= Nothing)
+
+def Prelude.Show.PrefixMinus  (con tag= Just 5 arity= 0 newtype= Nothing)
+
+def Prelude.Show.Open  (con tag= Just 0 arity= 0 newtype= Nothing)
+
+def Prelude.Show.Equal  (con tag= Just 1 arity= 0 newtype= Nothing)
+
+def Prelude.Show.Dollar  (con tag= Just 2 arity= 0 newtype= Nothing)
+
+def Prelude.Show.Backtick  (con tag= Just 3 arity= 0 newtype= Nothing)
+
+def Prelude.Show.App  (con tag= Just 6 arity= 0 newtype= Nothing)
+
+def Prelude.IO.prim__putStr  (foreign ["C:idris2_putStr, libidris2_support, idris_support.h", "node:lambda:x=>process.stdout.write(x)", "browser:lambda:x=>console.log(x)"] [String, %World] -> IORes Unit)
+

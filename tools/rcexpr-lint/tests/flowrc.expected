@@ -1,0 +1,2 @@
+flowrc.rcexpr: {idris2rc2_worker_Main_run:0}: v23 is held without a reference count (a `u:` case or an immediate op reads it) but a string built at run time reaches it
+flow: 17 defs, fixpoint in 2 rounds, 1 conflicts
