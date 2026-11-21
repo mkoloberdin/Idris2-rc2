@@ -196,4 +196,8 @@ calling thread as one while the call runs). rc2 has no collector to let
 run and holds no lock across a C call, so it compiles the string as the
 same call as `C:`. It comes last: a declaration that has both keeps its
 `C:` string. Libraries that give a blocking call only this tag (posix's
-`read`, `write` and `poll`, linux's `epoll_wait`) build without a shim.
+`read`, `write` and `poll`, linux's `epoll_wait`) get past the "no
+implementation" error. A string of this tag with a library and no header,
+as posix gives them, still needs the C prototype from somewhere: rc2
+writes none for a header-less declaration (as RefC), and gcc 14 rejects
+the implicit declaration.
