@@ -280,28 +280,29 @@ onEveryPath here e = let (must, found) = go e in maybe found (union found) must
          foldl (\f, i => if contains (RCLoc i) must then insert (RCLoc i) f else f) found ids)
 
     -- the locals used on every returning path of the expression (`Nothing`: no path returns), and
-    -- the locals bound inside it that were found
+    -- the locals bound inside it that were found. The larger set, from below, is `union`'s first
+    -- argument (code-style-Idris2.md, "集合を下から積み上げるときは`union`の引数順に注意")
     covering
     go : RCExp -> (Maybe (SortedSet RCLocal), SortedSet RCLocal)
     go (RCrash _ _) = (Nothing, empty)
     go x@(RLet _ var _ value body) =
         let (mv, fv) = go value
             (mb, fb) = close [var] (go body)
-        in (map (union (here x)) [| union mv mb |], union fv fb)
+        in (map (`union` here x) [| union mb mv |], union fb fv)
     go x@(RLoop _ loopParams _ _ body) =
-        let (m, f) = close (map fst loopParams) (go body) in (map (union (here x)) m, f)
+        let (m, f) = close (map fst loopParams) (go body) in (map (`union` here x) m, f)
     go x@(RConCase _ _ alts mDef) =
         let rs = map (\(MkRConAlt _ _ _ args body) => close args (go body)) alts ++ map go (toList mDef)
-        in (map (union (here x)) (meet (map fst rs)), foldl union empty (map snd rs))
+        in (map (`union` here x) (meet (map fst rs)), foldl union empty (map snd rs))
     go x@(RConstCase _ _ _ _) =
         let rs = map go (children x)
-        in (map (union (here x)) (meet (map fst rs)), foldl union empty (map snd rs))
+        in (map (`union` here x) (meet (map fst rs)), foldl union empty (map snd rs))
     go x@(RCmpCase _ _ _ _ _ _) =
         let rs = map go (children x)
-        in (map (union (here x)) (meet (map fst rs)), foldl union empty (map snd rs))
+        in (map (`union` here x) (meet (map fst rs)), foldl union empty (map snd rs))
     -- every node with more than one child (`RLet` and the cases) is above; one with one child runs it
     go x = case children x of
-                [k] => let (m, f) = go k in (map (union (here x)) m, f)
+                [k] => let (m, f) = go k in (map (`union` here x) m, f)
                 _ => (Just (here x), empty)
 
 ||| Every genuine `RCLoc` that an `RConstCase` whose alts are all constants of an `alwaysUnboxed` type (`B8`,

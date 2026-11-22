@@ -153,8 +153,11 @@ binderOf _ _ = Nothing
 declaredOf : {auto c : Ref Ctxt Defs} -> (raised : Bool) -> Name -> List Name -> Core (Maybe Declared)
 declaredOf raised n args = do
     defs <- get Ctxt
-    Just gdef <- lookupCtxtExact n (gamma defs)
+    -- Decoded without writing it back, as `lookupCtxtExact` does: only its type is wanted here, and
+    -- keeping every definition decoded took 0.5 GB more on rc2's own build.
+    Just (idx, entry) <- lookupContextEntry n (gamma defs)
         | Nothing => pure Nothing
+    gdef <- decode (gamma defs) idx False entry
     let arity = case definition gdef of
                      PMDef _ as _ _ _ => Just (length as)
                      _ => Nothing

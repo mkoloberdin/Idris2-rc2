@@ -820,7 +820,7 @@ compileExprWhole c s _ outputDir tm outfile =
      let strictOn : Bool = optInOn StrictNative directiveList
      let loose : Bool = elem "loosenative" directiveList && not strictOn
      declared <- the (Core (Maybe Declarations)) $
-                   if loose && not dumpStrict then pure Nothing else Just <$> declarations namedR
+                   if loose && not dumpStrict then pure Nothing else Just <$> logTime 2 "rc2: Declared types" (declarations namedR)
      -- `dumpstrict`: the table `strictnative` works from (rc2/doc/directives.md)
      when dumpStrict $ maybe (pure ()) (\d => coreLift_ $ writeFile (outputDir </> outfile ++ ".strict") (dumpDeclared d namedR)) declared
      let table : Maybe (Bool, Declarations) = if loose then Nothing else map (\d => (strictOn, d)) declared
