@@ -8,19 +8,21 @@
 // there), just with the idris2rc2_ prefix instead of idris2_.
 
 IDRIS2RC2_Value *idris2rc2_Data_IORef_prim__newIORef(IDRIS2RC2_Value *, IDRIS2RC2_Value *, IDRIS2RC2_Value *);
-// Inline: a read or a write is a few instructions besides the call
-// (the lock is not taken while the program has one thread,
-// idris2rc2_spin_lock), and only the generated code calls them.
+// While the program has one thread a read is a plain +1 and a write a
+// plain +1, a store and a -1: those are inline, behind one test of
+// idris2rc2_threaded. Once threaded, the slot lock is taken out of line
+// (ioprims.c), so only a call is repeated at every use.
+IDRIS2RC2_Value *idris2rc2_ioref_readLocked(IDRIS2RC2_IORef *r);
+void idris2rc2_ioref_writeLocked(IDRIS2RC2_IORef *r, IDRIS2RC2_Value *newValue);
+
 static inline IDRIS2RC2_Value *idris2rc2_Data_IORef_prim__readIORef(IDRIS2RC2_Value *erased,
                                                                     IDRIS2RC2_Value *ioref,
                                                                     IDRIS2RC2_Value *world) {
   (void)erased;
   (void)world;
   IDRIS2RC2_IORef *r = (IDRIS2RC2_IORef *)ioref;
-  idris2rc2_spin_lock(&r->lock);
-  IDRIS2RC2_Value *result = idris2rc2_dup(r->v);
-  idris2rc2_spin_unlock(&r->lock);
-  return result;
+  if (__builtin_expect(!idris2rc2_threaded, 1)) return idris2rc2_dupPlain(r->v);
+  return idris2rc2_ioref_readLocked(r);
 }
 
 static inline IDRIS2RC2_Value *idris2rc2_Data_IORef_prim__writeIORef(IDRIS2RC2_Value *erased,
@@ -30,12 +32,14 @@ static inline IDRIS2RC2_Value *idris2rc2_Data_IORef_prim__writeIORef(IDRIS2RC2_V
   (void)erased;
   (void)world;
   IDRIS2RC2_IORef *r = (IDRIS2RC2_IORef *)ioref;
-  idris2rc2_dup(newValue);
-  idris2rc2_spin_lock(&r->lock);
-  IDRIS2RC2_Value *old = r->v;
-  r->v = newValue;
-  idris2rc2_spin_unlock(&r->lock);
-  idris2rc2_drop(old);
+  if (__builtin_expect(!idris2rc2_threaded, 1)) {
+    idris2rc2_dupPlain(newValue);
+    IDRIS2RC2_Value *old = r->v;
+    r->v = newValue;
+    idris2rc2_dropPlain(old);
+  } else {
+    idris2rc2_ioref_writeLocked(r, newValue);
+  }
   return NULL;
 }
 

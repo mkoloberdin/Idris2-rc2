@@ -19,6 +19,25 @@ IDRIS2RC2_Value *idris2rc2_Data_IORef_prim__newIORef(IDRIS2RC2_Value *erased,
   return (IDRIS2RC2_Value *)r;
 }
 
+// The threaded halves of readIORef and writeIORef (ioprims.h): the lock
+// keeps a reader's load+dup apart from a writer's swap and drop
+// (idris2rc2_util.h's idris2rc2_spin_lock).
+IDRIS2RC2_Value *idris2rc2_ioref_readLocked(IDRIS2RC2_IORef *r) {
+  idris2rc2_spin_lock(&r->lock);
+  IDRIS2RC2_Value *result = idris2rc2_dup(r->v);
+  idris2rc2_spin_unlock(&r->lock);
+  return result;
+}
+
+void idris2rc2_ioref_writeLocked(IDRIS2RC2_IORef *r, IDRIS2RC2_Value *newValue) {
+  idris2rc2_dup(newValue);
+  idris2rc2_spin_lock(&r->lock);
+  IDRIS2RC2_Value *old = r->v;
+  r->v = newValue;
+  idris2rc2_spin_unlock(&r->lock);
+  idris2rc2_drop(old);
+}
+
 // Atomic compare-and-swap against an IORef's own current value,
 // compared by reference identity (the same tagged-pointer bit pattern
 // `expected` itself is, never `Eq`) -- guarded by the same
