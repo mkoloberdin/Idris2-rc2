@@ -19,29 +19,6 @@ IDRIS2RC2_Value *idris2rc2_Data_IORef_prim__newIORef(IDRIS2RC2_Value *erased,
   return (IDRIS2RC2_Value *)r;
 }
 
-IDRIS2RC2_Value *idris2rc2_Data_IORef_prim__readIORef(IDRIS2RC2_Value *erased,
-						      IDRIS2RC2_Value *ioref,
-						      IDRIS2RC2_Value *world) {
-  IDRIS2RC2_IORef *r = (IDRIS2RC2_IORef *)ioref;
-  idris2rc2_spin_lock(&r->lock);
-  IDRIS2RC2_Value *result = idris2rc2_dup(r->v);
-  idris2rc2_spin_unlock(&r->lock);
-  return result;
-}
-
-IDRIS2RC2_Value *idris2rc2_Data_IORef_prim__writeIORef(
-    IDRIS2RC2_Value *erased, IDRIS2RC2_Value *ioref, IDRIS2RC2_Value *newValue,
-    IDRIS2RC2_Value *world) {
-  IDRIS2RC2_IORef *r = (IDRIS2RC2_IORef *)ioref;
-  idris2rc2_dup(newValue);
-  idris2rc2_spin_lock(&r->lock);
-  IDRIS2RC2_Value *old = r->v;
-  r->v = newValue;
-  idris2rc2_spin_unlock(&r->lock);
-  idris2rc2_drop(old);
-  return NULL;
-}
-
 // Atomic compare-and-swap against an IORef's own current value,
 // compared by reference identity (the same tagged-pointer bit pattern
 // `expected` itself is, never `Eq`) -- guarded by the same

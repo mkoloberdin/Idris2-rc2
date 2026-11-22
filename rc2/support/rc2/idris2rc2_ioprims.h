@@ -1,14 +1,43 @@
 #pragma once
 
 #include "idris2rc2_datatypes.h"
+#include "idris2rc2_memory.h"
 
 // Names mirror `idris2_<mangled qualified name>` as produced by
 // Compiler/RC2/RC2.idr's handling of AExtPrim nodes (see the whitelist
 // there), just with the idris2rc2_ prefix instead of idris2_.
 
 IDRIS2RC2_Value *idris2rc2_Data_IORef_prim__newIORef(IDRIS2RC2_Value *, IDRIS2RC2_Value *, IDRIS2RC2_Value *);
-IDRIS2RC2_Value *idris2rc2_Data_IORef_prim__readIORef(IDRIS2RC2_Value *, IDRIS2RC2_Value *, IDRIS2RC2_Value *);
-IDRIS2RC2_Value *idris2rc2_Data_IORef_prim__writeIORef(IDRIS2RC2_Value *, IDRIS2RC2_Value *, IDRIS2RC2_Value *, IDRIS2RC2_Value *);
+// Inline: a read or a write is a few instructions besides the call
+// (the lock is not taken while the program has one thread,
+// idris2rc2_spin_lock), and only the generated code calls them.
+static inline IDRIS2RC2_Value *idris2rc2_Data_IORef_prim__readIORef(IDRIS2RC2_Value *erased,
+                                                                    IDRIS2RC2_Value *ioref,
+                                                                    IDRIS2RC2_Value *world) {
+  (void)erased;
+  (void)world;
+  IDRIS2RC2_IORef *r = (IDRIS2RC2_IORef *)ioref;
+  idris2rc2_spin_lock(&r->lock);
+  IDRIS2RC2_Value *result = idris2rc2_dup(r->v);
+  idris2rc2_spin_unlock(&r->lock);
+  return result;
+}
+
+static inline IDRIS2RC2_Value *idris2rc2_Data_IORef_prim__writeIORef(IDRIS2RC2_Value *erased,
+                                                                     IDRIS2RC2_Value *ioref,
+                                                                     IDRIS2RC2_Value *newValue,
+                                                                     IDRIS2RC2_Value *world) {
+  (void)erased;
+  (void)world;
+  IDRIS2RC2_IORef *r = (IDRIS2RC2_IORef *)ioref;
+  idris2rc2_dup(newValue);
+  idris2rc2_spin_lock(&r->lock);
+  IDRIS2RC2_Value *old = r->v;
+  r->v = newValue;
+  idris2rc2_spin_unlock(&r->lock);
+  idris2rc2_drop(old);
+  return NULL;
+}
 
 IDRIS2RC2_Value *idris2rc2_Data_IOArray_Prims_prim__newArray(IDRIS2RC2_Value *, IDRIS2RC2_Value *, IDRIS2RC2_Value *, IDRIS2RC2_Value *);
 IDRIS2RC2_Value *idris2rc2_Data_IOArray_Prims_prim__arrayGet(IDRIS2RC2_Value *, IDRIS2RC2_Value *, IDRIS2RC2_Value *, IDRIS2RC2_Value *);
