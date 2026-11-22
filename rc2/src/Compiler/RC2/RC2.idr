@@ -816,7 +816,7 @@ compileExprWhole c s _ outputDir tm outfile =
      let dumpStrict = "dumpstrict" `elem` directiveList
      -- The declared types (rc2/doc/native-type-inference.md): what they show is all that is native across a
      -- boundary under `strictnative`; by default what they do not show needs a read on every path.
-     -- `loosenative` is the default before that: any read, no table.
+     -- `loosenative` builds no table, and a parameter takes any read again; `strictnative` wins over it.
      let strictOn : Bool = optInOn StrictNative directiveList
      let loose : Bool = elem "loosenative" directiveList && not strictOn
      declared <- the (Core (Maybe Declarations)) $

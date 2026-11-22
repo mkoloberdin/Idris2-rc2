@@ -343,7 +343,7 @@ mustReadsFor : SortedSet LocalId -> RCExp -> Maybe (SortedMap LocalId (SortedSet
 mustReadsFor tracked e =
     case e of
          RCrash _ _ => Nothing
-         RLet _ _ _ value body => [| unionMaps (Just own) [| unionMaps (mustReadsFor tracked value) (mustReadsFor tracked body) |] |]
+         RLet _ _ _ value body => map (unionMaps own) [| unionMaps (mustReadsFor tracked value) (mustReadsFor tracked body) |]
          RCmpCase _ _ _ _ _ _ => map (unionMaps own) (meet (map (mustReadsFor tracked) (children e)))
          RConCase _ _ _ _ => meet (map (mustReadsFor tracked) (children e))
          RConstCase _ _ _ _ => map (unionMaps own) (meet (map (mustReadsFor tracked) (children e)))
@@ -398,8 +398,8 @@ fits strict reads apart must p ty =
              TPrim t => all (== t) tys
              _ => null tys)   -- a pointer or an erased value is no primitive's operand
   where
-    onEveryPath : Bool
-    onEveryPath = case ty of
+    readOnEveryPath : Bool
+    readOnEveryPath = case ty of
                        TPrim WorldType => True
                        TPrim t => maybe True (\m => maybe False (contains t) (lookup p m)) must
                        TErased => True
@@ -409,7 +409,7 @@ fits strict reads apart must p ty =
                     Nothing => True
                     Just s => case lookup p s.params of
                                    Just shown => elem ty shown
-                                   Nothing => not s.closed && onEveryPath
+                                   Nothing => not s.closed && readOnEveryPath
 
 ||| `chosen` without the entries that do not fit the other reads of `body`, in one walk of `body` for all of
 ||| them: every typed primitive read of the id agrees with its type (`primReadTypesFor`; none for a pointer),

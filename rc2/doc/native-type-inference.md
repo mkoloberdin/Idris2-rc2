@@ -739,7 +739,8 @@ freed twice. The strict mode did not cover those two (`Test188DependentEveryPath
 2. otherwise (a stuck application, a type variable, a lifted lambda's argument, a copy rc2 made, a
    constructor field whose type shows nothing): a read at that type **on every path through the local's
    scope that returns** (`NativeUse.mustReadsFor`, `Types.onEveryPath`). A path that crashes constrains
-   nothing. The scope of a parameter is the definition, of a `let`, a field or a loop slot its body;
+   nothing. A path that ends in a loop's `continue` or a tail call does return, without a read: the
+   next iteration may run with another key, so it is not left out like a crash. The scope of a parameter is the definition, of a `let`, a field or a loop slot its body;
 3. producers, as before: a `let` bound to an op with an immediate result, a comparison, `NULL`; the world
    and erased parameters `NullParams` finds; a result every tail of which is a native value.
 
@@ -765,7 +766,7 @@ What would win that back without the old rule is producer evidence for a closed 
 `NullParams.forwardStates`), added to the table before `Loop` asks it. Not built.
 
 `--directive loosenative` builds without the table and the every-path rule for parameters (the reference
-counting rules are not switched): for measuring only.
+counting rules are not switched): for measuring only. Under `strictnative` it does nothing.
 
 ## Bugs found and fixed (chronological, see `git log`/`BENCHMARKS.md` for commit-level detail)
 

@@ -299,6 +299,7 @@ onEveryPath here e = let (must, found) = go e in maybe found (union found) must
     go x@(RCmpCase _ _ _ _ _ _) =
         let rs = map go (children x)
         in (map (union (here x)) (meet (map fst rs)), foldl union empty (map snd rs))
+    -- every node with more than one child (`RLet` and the cases) is above; one with one child runs it
     go x = case children x of
                 [k] => let (m, f) = go k in (map (union (here x)) m, f)
                 _ => (Just (here x), empty)
