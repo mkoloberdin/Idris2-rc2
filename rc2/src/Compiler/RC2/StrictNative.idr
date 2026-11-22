@@ -180,7 +180,7 @@ declaredOf raised n args = do
 ||| What each field of the constructor `n` of `arity` fields may be held as, from its declared type, in
 ||| field order. Upstream drops the erased arguments (`arity` counts what is left); when the declared
 ||| type's other binders do not come to `arity`, nothing is shown.
-declaredFields : {auto c : Ref Ctxt Defs} -> Name -> Nat -> Core (List (List NativeTy))
+declaredFields : {auto c : Ref Ctxt Defs} -> Name -> Nat -> Core (List Allowed)
 declaredFields n arity = do
     defs <- get Ctxt
     Just gdef <- lookupCtxtExact n (gamma defs)
@@ -188,14 +188,14 @@ declaredFields n arity = do
     (bs, _) <- binders defs Z !(nf defs Env.empty (type gdef))
     let fields = map snd (filter (not . fst) bs)
     if length fields /= arity then pure [] else
-        traverse (\t => map (fromMaybe []) (classify defs depth t)) fields
+        traverse (classify defs depth) fields
 
 ||| What the declared types of a program show.
 export
 record Declarations where
   constructor MkDeclarations
   funs : SortedMap Name Declared
-  cons : SortedMap Name (List (List NativeTy))
+  cons : SortedMap Name (List Allowed)
 
 ||| The declared arguments and results of the functions of `defs`, and the declared fields of its
 ||| constructors. A copy `ArityRaiseCExp` made to take the world (its `raisedName`) has its original's
@@ -217,10 +217,11 @@ declarations defs = do
 
 ||| The table keyed by the parameter ids lowering gave each function, for the passes after it.
 export
-strictOf : Declarations -> List (Name, RCDef) -> Strict
-strictOf decl defs =
+strictOf : (closed : Bool) -> Declarations -> List (Name, RCDef) -> Strict
+strictOf closed decl defs =
     let matched = mapMaybe match defs
-    in MkStrict (SortedMap.fromList (concatMap (\(_, ps, d) => mapMaybe (\(p, a) => map (p,) a) (zip ps d.args)) matched))
+    in MkStrict closed
+                (SortedMap.fromList (concatMap (\(_, ps, d) => mapMaybe (\(p, a) => map (p,) a) (zip ps d.args)) matched))
                 (SortedMap.fromList (mapMaybe (\(n, _, d) => map (n,) d.ret) matched))
                 decl.cons
   where

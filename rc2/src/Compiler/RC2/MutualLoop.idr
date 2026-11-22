@@ -203,7 +203,8 @@ buildGroup strict calleeTable existingNames memberDefs groupNames = do
     let boxedSlots : SortedSet LocalId :=
             SortedSet.fromList (concatMap (\(k, o, w) => if isJust k then [] else map slotAt (take w [o ..]))
                                           (zip3 classes classOffsets widths))
-    -- `strictnative`: a native class's slots are shown to hold its type, and the tag an `Int64`
+    -- The merged function has no declared type, so with the table (`strictnative` and the default,
+    -- not `loosenative`) a native class's slots are shown to hold its type, and the tag an `Int64`
     let shown : List (LocalId, NativeTy) :=
             if isNothing strict then []
             else (tagId, TPrim Int64Type) ::

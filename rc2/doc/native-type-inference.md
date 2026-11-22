@@ -712,6 +712,62 @@ gets no worker), and the benchmarks are small loops over `Int`, whose declared t
 The lambda-rogue test suite prints the same output in both builds (one of its settings tests fails
 in both, with this environment's data directory).
 
+## The default: a use on every path
+
+The strict mode refuses everything the declared types do not show. The default keeps the evidence of the
+reads for those, but only the part of it that a type depending on a value cannot break.
+
+**The rule that was wrong.** "A local has one type, so one read of it at a type says what it is
+everywhere." Three analyses relied on it:
+
+- `NativeUse.nativeArgTypes*` (a native read anywhere chooses a parameter's, a loop variable's or a field's
+  type; `consistentNative` only vetoed a visible contradiction);
+- `Types.typedConstScrutinees` (a constant `case` on immediates anywhere makes the local refcount-free
+  everywhere: `RC.definitionNatives`, `Reuse`, `ConAltNative`, `DualABI.applyCallSiteRewrite`);
+- `RC.alwaysUnboxedBoxedLocalsR` (an operand of a small-integer or `Char` op or comparison anywhere, the
+  same).
+
+A local of type `Value (vt k)` has one type per branch of the `case` on the key. The first rule unboxed a
+`String` as a byte (#343); the other two left the `dup` and `drop` of the `String` out, so `(s, s)` was
+freed twice. The strict mode did not cover those two (`Test188DependentEveryPath`'s `CaseCounted` and
+`OperandCounted` segfaulted under `strictnative` as well).
+
+**The rule now.** What a local may be held as is decided by, in order:
+
+1. its declared type, where that shows the representation (the strict mode's table, built for every
+   whole-program compile): only what it shows;
+2. otherwise (a stuck application, a type variable, a lifted lambda's argument, a copy rc2 made, a
+   constructor field whose type shows nothing): a read at that type **on every path through the local's
+   scope that returns** (`NativeUse.mustReadsFor`, `Types.onEveryPath`). A path that crashes constrains
+   nothing. A path that ends in a loop's `continue` or a tail call does return, without a read: the
+   next iteration may run with another key, so it is not left out like a crash. The scope of a parameter is the definition, of a `let`, a field or a loop slot its body;
+3. producers, as before: a `let` bound to an op with an immediate result, a comparison, `NULL`; the world
+   and erased parameters `NullParams` finds; a result every tail of which is a native value.
+
+Why 2 is sound: a path of the body is taken for some value of the key. A read every returning path makes
+is made for every value of the key, so at every call the value has the representation the read needs
+(a well-typed program does not read a `String` with a `Bits8` op). A read on some paths says that only
+for the keys that take them. No type is needed, so it holds for a lambda and for a copy.
+
+What counts as a read: an operand of a primitive op that is not delayed, of a fused comparison, the
+scrutinee of a constant `case`, and a native `let` or loop slot bound to the local (an unboxing an earlier
+pass decided under this same check). Passing the local to a function, returning it or storing it does not.
+
+**What it gives up** against the default before it: a local whose declared type shows nothing and that
+some path only passes on or returns. In practice that is an accumulator or an invariant of a function
+with no declared type (a specialised copy of `map`/`foldl`, a lifted lambda) and a pointer chosen from the
+calls of some paths. A function with a declared type keeps everything (`go : Int -> Int -> Int`: the type
+shows `acc`). Of the 31 `tests/bench` programs 29 compile to the same C as before; `BenchListChurn` loses
+the invariant `n` of its specialised `map (+ n)` (the `Cons` branch reads it, the `Nil` branch does not)
+and takes 11% longer, as under `strictnative`; `BenchListFuse` differs and runs no slower.
+
+What would win that back without the old rule is producer evidence for a closed function's parameters
+(every call site passes a literal, a native local, or a parameter shown or found native: the shape of
+`NullParams.forwardStates`), added to the table before `Loop` asks it. Not built.
+
+`--directive loosenative` builds without the table and the every-path rule for parameters (the reference
+counting rules are not switched): for measuring only. Under `strictnative` it does nothing.
+
 ## Bugs found and fixed (chronological, see `git log`/`BENCHMARKS.md` for commit-level detail)
 
 1. **`Cast Integer Int` memory corruption.** `opResultRep (Cast i o)`

@@ -16,6 +16,7 @@ import Compiler.RC2.RCExp
 import Core.CompileExpr
 import Core.TT
 
+import Data.List
 import Data.SortedSet
 
 %default total
@@ -253,34 +254,79 @@ repOf (ROp _ _ op _ _) = opResultRep op
 repOf (RPrimVal _ c) = litRep c
 repOf _ = Nothing
 
-||| Every genuine `RCLoc` scrutinised by an `RConstCase` whose alts are all
-||| constants of an `alwaysUnboxed` type (`B8`, `Char`, `Int8`...): by
-||| Idris2's typing such a local holds a tagged immediate (a `Bool`, an
-||| all-nullary enum or a `Bits8`), whatever its declared `Rep`, so
-||| dup/drop/free on it are no-ops, as for `alwaysUnboxedBoxedLocalsR`'s
-||| operands. Evidence is the alts' own constant kind (`litRep`), never a
-||| bare `0`/`1`: an `Int` or `Nat` match has `I`/`BI` alts and does not
-||| qualify. Only the unboxing decision uses this; the case itself, its
-||| default branch included, is untouched. Switch: `--directive noboolcase`.
+||| The locals `here` reports ON EVERY PATH through their scope that returns, `here e'` being what the node
+||| `e'` itself shows of its operands (not of its children). The scope of a `let`, a constructor
+||| alternative's field or a loop slot is its body; a free local's (a parameter's) is `e`, which has to be the
+||| whole definition.
+||| This is the evidence a use gives of a local's representation. A use on one path only says what the local
+||| is on that path: a local of type `Value t` is a `Bool` in the branch that knows `t = AFlag` and a `String`
+||| in another, which may only pass it on. A use every path makes is made whatever the key
+||| (rc2/doc/native-type-inference.md's "The default: a use on every path").
+export covering
+onEveryPath : (here : RCExp -> SortedSet RCLocal) -> RCExp -> SortedSet RCLocal
+onEveryPath here e = let (must, found) = go e in maybe found (union found) must
+  where
+    -- the paths that return: a branch that never does constrains nothing
+    meet : List (Maybe (SortedSet RCLocal)) -> Maybe (SortedSet RCLocal)
+    meet ms = case catMaybes ms of
+                   [] => Nothing
+                   (m :: rest) => Just (foldl intersection m rest)
+
+    -- `ids` go out of scope: those every path used are found, and none is reported further up
+    close : List LocalId -> (Maybe (SortedSet RCLocal), SortedSet RCLocal) -> (Maybe (SortedSet RCLocal), SortedSet RCLocal)
+    close ids (Nothing, found) = (Nothing, found)
+    close ids (Just must, found) =
+        (Just (foldl (\m, i => delete (RCLoc i) m) must ids),
+         foldl (\f, i => if contains (RCLoc i) must then insert (RCLoc i) f else f) found ids)
+
+    -- the locals used on every returning path of the expression (`Nothing`: no path returns), and
+    -- the locals bound inside it that were found
+    covering
+    go : RCExp -> (Maybe (SortedSet RCLocal), SortedSet RCLocal)
+    go (RCrash _ _) = (Nothing, empty)
+    go x@(RLet _ var _ value body) =
+        let (mv, fv) = go value
+            (mb, fb) = close [var] (go body)
+        in (map (union (here x)) [| union mv mb |], union fv fb)
+    go x@(RLoop _ loopParams _ _ body) =
+        let (m, f) = close (map fst loopParams) (go body) in (map (union (here x)) m, f)
+    go x@(RConCase _ _ alts mDef) =
+        let rs = map (\(MkRConAlt _ _ _ args body) => close args (go body)) alts ++ map go (toList mDef)
+        in (map (union (here x)) (meet (map fst rs)), foldl union empty (map snd rs))
+    go x@(RConstCase _ _ _ _) =
+        let rs = map go (children x)
+        in (map (union (here x)) (meet (map fst rs)), foldl union empty (map snd rs))
+    go x@(RCmpCase _ _ _ _ _ _) =
+        let rs = map go (children x)
+        in (map (union (here x)) (meet (map fst rs)), foldl union empty (map snd rs))
+    -- every node with more than one child (`RLet` and the cases) is above; one with one child runs it
+    go x = case children x of
+                [k] => let (m, f) = go k in (map (union (here x)) m, f)
+                _ => (Just (here x), empty)
+
+||| Every genuine `RCLoc` that an `RConstCase` whose alts are all constants of an `alwaysUnboxed` type (`B8`,
+||| `Char`, `Int8`...) scrutinises on every path through the local's scope (`onEveryPath`): such a local
+||| holds a tagged immediate (a `Bool`, an all-nullary enum or a `Bits8`) at every execution, whatever its
+||| declared `Rep`, so dup/drop/free on it are no-ops, as for `alwaysUnboxedBoxedLocalsR`'s operands.
+||| A case on one path only is not evidence: leaving the dup and drop out of the branch where the local is a
+||| `String` frees it twice or never. `e` has to be the whole definition.
+||| Evidence is the alts' own constant kind (`litRep`), never a bare `0`/`1`: an `Int` or `Nat` match has
+||| `I`/`BI` alts and does not qualify. Only the unboxing decision uses this; the case itself, its default
+||| branch included, is untouched. Switch: `--directive noboolcase`.
 ||| See `doc/native-type-inference.md`, "Typed-constant case scrutinees".
 ||| Shared by `RC.definitionNatives` and `DualABI`'s call-site rewrite, which
 ||| must not give such a local a `postDrop` `annotate` never paired with a dup.
 export covering
 typedConstScrutinees : RCExp -> SortedSet RCLocal
-typedConstScrutinees e = go empty e
+typedConstScrutinees = onEveryPath here
   where
     immediateAlts : List RConstAlt -> Bool
     immediateAlts [] = False
     immediateAlts alts = all (\(MkRConstAlt c _) => maybe False alwaysUnboxed (litRep c)) alts
 
-    covering
-    go : SortedSet RCLocal -> RCExp -> SortedSet RCLocal
-    go acc (RConstCase fc sc alts mDef) =
-        let acc' = case sc of
-                        RCLoc _ => if immediateAlts alts then insert sc acc else acc
-                        _ => acc
-        in foldl go acc' (children (RConstCase fc sc alts mDef))
-    go acc x = foldl go acc (children x)
+    here : RCExp -> SortedSet RCLocal
+    here (RConstCase _ sc@(RCLoc _) alts _) = if immediateAlts alts then singleton sc else empty
+    here _ = empty
 
 ||| Removes `imm`'s locals from every `RAppNameRep` `postDrop`. A local
 ||| `typedConstScrutinees` found is refcount-free for `annotate`, so no dup

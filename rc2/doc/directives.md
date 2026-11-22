@@ -115,6 +115,7 @@ Directives that look like they belong on this list but don't:
   is taken apart at once, some fields unread, calls a copy of the function that does not make
   them; a `Dec`-returning recursion like upstream's `isLTE` becomes a loop. Off by default: on the
   compiler and on lambda-rogue it changed nothing measurable (`doc/dead-fields.md`).
+- **`loosenative`** builds without the declared-type table and the every-path rule that the default applies to a parameter whose declared type shows nothing (`doc/native-type-inference.md`, "The default: a use on every path"); the every-path rule of reference counting stays. It miscompiles values whose type depends on a value; it is there to measure what the rule costs. With `strictnative` it does nothing.
 - **`strictnative` is an opt-in stage.** A value is held natively across a function boundary (a
   worker's argument or result, a loop variable, a spliced callee's parameter) only where its
   declared type shows the representation; a lifted lambda, a copy rc2 made and a type variable are

@@ -388,5 +388,7 @@ main = do
 Workaround: `--directive strictnative` (`%cg rc2 strictnative`) keeps such a value boxed, because a
 declared type that is a stuck application or a type variable is not shown to fix the representation
 (`rc2/doc/native-type-inference.md`, "The strict mode"; `Test187StrictNative` is these programs).
-It is off by default, so the default build still miscompiles them. TODO.md keeps the producer
+It is off by default. Since the every-path rule (`rc2/doc/native-type-inference.md`, "The default: a use on every
+path"; `Test188DependentEveryPath`) the default build keeps such a value boxed too: this entry stays for
+`--directive loosenative` and for incremental builds, which have no table. TODO.md keeps the producer
 evidence that would let a local, not only a parameter or a result, be judged as well.
