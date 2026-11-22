@@ -4,7 +4,7 @@ authors = "rc2 project"
 
 sourcedir = "src"
 
-depends = idris2, contrib, network
+depends = idris2, contrib
 
 modules = Compiler.RC2.CC,
           Compiler.RC2.RCExp,
