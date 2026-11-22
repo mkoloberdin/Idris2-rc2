@@ -341,14 +341,15 @@ primReadTypesFor tracked e = foldr (\(a, ty), acc => addTracked tracked a ty acc
 export
 mustReadsFor : SortedSet LocalId -> RCExp -> Maybe (SortedMap LocalId (SortedSet PrimType))
 mustReadsFor tracked e =
+    -- the larger map, from below, is `unionMaps`' first argument, as in `Types.onEveryPath`
     case e of
          RCrash _ _ => Nothing
-         RLet _ _ _ value body => map (unionMaps own) [| unionMaps (mustReadsFor tracked value) (mustReadsFor tracked body) |]
-         RCmpCase _ _ _ _ _ _ => map (unionMaps own) (meet (map (mustReadsFor tracked) (children e)))
+         RLet _ _ _ value body => map (`unionMaps` own) [| unionMaps (mustReadsFor tracked body) (mustReadsFor tracked value) |]
+         RCmpCase _ _ _ _ _ _ => map (`unionMaps` own) (meet (map (mustReadsFor tracked) (children e)))
          RConCase _ _ _ _ => meet (map (mustReadsFor tracked) (children e))
-         RConstCase _ _ _ _ => map (unionMaps own) (meet (map (mustReadsFor tracked) (children e)))
+         RConstCase _ _ _ _ => map (`unionMaps` own) (meet (map (mustReadsFor tracked) (children e)))
          _ => case children e of
-                   [k] => map (unionMaps own) (mustReadsFor tracked k)
+                   [k] => map (`unionMaps` own) (mustReadsFor tracked k)
                    _ => Just own
   where
     here : RCExp -> List (RCLocal, PrimType)
