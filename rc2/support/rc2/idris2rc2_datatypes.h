@@ -339,7 +339,7 @@ IDRIS2RC2_DEFINE_CONST_CLOSURE_ARGS(20)
 #undef IDRIS2RC2_DEFINE_CONST_CLOSURE_ARGS
 
 // `lock` guards `v` itself (the swap-and-drop-old sequence in
-// writeIORef/readIORef, ioprims.c) -- see util.h's idris2rc2_spin_lock
+// writeIORef/readIORef, ioprims.h) -- see util.h's idris2rc2_spin_lock
 // doc comment for why a bare atomic load+dup on `v` isn't enough.
 //
 // A lazy value (rc2/doc/lazy-memoization.md) is this struct too, tagged

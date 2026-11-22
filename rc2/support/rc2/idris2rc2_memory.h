@@ -104,6 +104,20 @@ void idris2rc2_teardown(IDRIS2RC2_Value *v);
 void idris2rc2_enableMultiThreading(void);
 int idris2rc2_isMultiThreaded(void);
 
+// The single-threaded halves of idris2rc2_dup and idris2rc2_rc_release, for
+// a caller that has tested !idris2rc2_threaded itself (the IORef accessors,
+// ioprims.h): no atomics, no second test.
+static inline void idris2rc2_rc_acquirePlain(IDRIS2RC2_Header *h) {
+  if (h->rc != IDRIS2RC2_REFCOUNT_MAX) h->rc++;
+}
+
+static inline bool idris2rc2_rc_releasePlain(IDRIS2RC2_Header *h) {
+  uint16_t c = h->rc;
+  if (c == IDRIS2RC2_REFCOUNT_MAX) return false;
+  h->rc = (uint16_t)(c - 1);
+  return c == 1;
+}
+
 // Drops one reference; true if it was the last, so the caller tears the
 // object down. Once threaded, the acquire before that is a load, not
 // atomic_thread_fence: ThreadSanitizer does not model fences and reports
@@ -117,10 +131,7 @@ static inline bool idris2rc2_rc_release(IDRIS2RC2_Header *h) {
     (void)atomic_load_explicit(&h->refCount, memory_order_acquire);
     return true;
   }
-  uint16_t c = h->rc;
-  if (c == IDRIS2RC2_REFCOUNT_MAX) return false;
-  h->rc = (uint16_t)(c - 1);
-  return c == 1;
+  return idris2rc2_rc_releasePlain(h);
 }
 
 // Increments the refcount of `v` (a no-op for unboxed/NULL/immortal values)
@@ -134,10 +145,22 @@ static inline IDRIS2RC2_Value *idris2rc2_dup(IDRIS2RC2_Value *v) {
 	atomic_fetch_add_explicit(&v->header.refCount, 1, memory_order_relaxed);
       return v;
     }
-    if (v->header.rc != IDRIS2RC2_REFCOUNT_MAX) v->header.rc++;
+    idris2rc2_rc_acquirePlain(&v->header);
   }
 
   return v;
+}
+
+// idris2rc2_dup and idris2rc2_drop while the program has one thread
+// (idris2rc2_rc_acquirePlain).
+static inline IDRIS2RC2_Value *idris2rc2_dupPlain(IDRIS2RC2_Value *v) {
+  if (v && !idris2rc2_is_unboxed(v)) idris2rc2_rc_acquirePlain(&v->header);
+  return v;
+}
+
+static inline void idris2rc2_dropPlain(IDRIS2RC2_Value *v) {
+  if (v && !idris2rc2_is_unboxed(v) && idris2rc2_rc_releasePlain(&v->header))
+    idris2rc2_teardown(v);
 }
 
 // Batched form of idris2rc2_dup: increments v's refcount by `n` (n >= 1)
