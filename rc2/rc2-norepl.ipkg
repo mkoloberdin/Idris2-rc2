@@ -4,7 +4,7 @@ authors = "rc2 project"
 
 sourcedir = "src_norepl"
 
-depends = idris2, contrib, network, rc2
+depends = idris2, contrib, rc2
 
 modules = NoRepl.SchemeStubs,
           NoRepl.Driver,
