@@ -1,0 +1,4 @@
+{"event":"start","indexDir":"@BUILD@/index","packages":2}
+{"event":"package","key":"fixture-0.1.0-@HASH@","modules":1}
+{"event":"module","key":"fixture-0.1.0-@HASH@","module":"Fixture","result":"unchanged"}
+{"event":"done","updated":0,"unchanged":1,"failed":0,"removed":1}

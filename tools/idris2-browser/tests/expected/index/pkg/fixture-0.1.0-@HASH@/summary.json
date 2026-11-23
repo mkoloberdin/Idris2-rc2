@@ -1,0 +1,58 @@
+{
+  "formatVersion": 1,
+  "key": "fixture-0.1.0-@HASH@",
+  "stats": {
+    "modulesFound": 2,
+    "modulesFailed": 0,
+    "ttcBytes": @N@,
+    "definitions": {
+      "data": 2,
+      "record": 1,
+      "interface": 1,
+      "constructor": 6,
+      "function": 12,
+      "foreign": 1,
+      "builtin": 0,
+      "hole": 0,
+      "other": 0
+    },
+    "visibility": {
+      "private": 1,
+      "export": 7,
+      "public export": 15
+    },
+    "totality": {
+      "total": 11,
+      "covering": 11,
+      "partial": 1
+    },
+    "exportedWithDoc": 10,
+    "exported": 22,
+    "modulesWithDoc": 1
+  },
+  "names": [
+    ["Fixture.Shapes.Shape","Fixture.Shapes","data","public export",false],
+    ["Fixture.Shapes.Circle","Fixture.Shapes","constructor","public export",false],
+    ["Fixture.Shapes.Square","Fixture.Shapes","constructor","public export",false],
+    ["Fixture.Shapes.area","Fixture.Shapes","function","export",false],
+    ["Fixture.Shapes.(|+|)","Fixture.Shapes","function","export",true],
+    ["Fixture.Colour","Fixture","data","public export",true],
+    ["Fixture.Red","Fixture","constructor","public export",false],
+    ["Fixture.Green","Fixture","constructor","public export",false],
+    ["Fixture.Blue","Fixture","constructor","public export",false],
+    ["Fixture.Point","Fixture","record","public export",true],
+    ["Fixture.MkPoint","Fixture","constructor","public export",false],
+    ["Fixture.Point.(.x)","Fixture","function","public export",true],
+    ["Fixture.Point.x","Fixture","function","public export",true],
+    ["Fixture.Point.(.y)","Fixture","function","public export",false],
+    ["Fixture.Point.y","Fixture","function","public export",false],
+    ["Fixture.Named","Fixture","interface","public export",true],
+    ["Fixture.name","Fixture","function","public export",true],
+    ["Fixture.double","Fixture","function","export",true],
+    ["Fixture.undocumented","Fixture","function","export",false],
+    ["Fixture.hidden","Fixture","function","private",true],
+    ["Fixture.loop","Fixture","function","export",true],
+    ["Fixture.firstOf","Fixture","function","export",true],
+    ["Fixture.cAbs","Fixture","foreign","export",false]
+  ]
+}

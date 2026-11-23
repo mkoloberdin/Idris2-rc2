@@ -1,0 +1,20 @@
+package idris2-browser
+version = 0.1.0
+authors = "rc2 project"
+
+-- The terminal browser, built with rc2 (`idris2-rc2 --cg rc2 --build`):
+-- termui is rc2-only. It reads the index and never links idris2api; see
+-- doc/design.md, "Architecture".
+depends = contrib, rc2base, control-async, termui
+
+sourcedir = "src"
+builddir = "build/browser"
+
+modules = IdrisBrowser.JSON,
+          IdrisBrowser.Schema,
+          IdrisBrowser.Stats,
+          IdrisBrowser.Load,
+          IdrisBrowser.App
+
+main = IdrisBrowser.Main
+executable = idris2-browser

@@ -14,7 +14,7 @@ rc2は、上流のIdris 2本体を変更せずに開発されています。手�
 
 - [主な特徴とハイライト](#主な特徴とハイライト)
 - [クイックスタート](#クイックスタート)（[環境準備](#1-環境変数の準備) / [ビルド](#2-rc2本体のビルドとインストール) / [ライブラリ導入](#3-サポートライブラリrc2baseのインストール) / [コンパイル実行](#4-プログラムのコンパイルと実行) / [セルフホスティング](#5-rc2-自身でコンパイラをビルドするセルフホスティングchez-scheme-なし) / [性能計測](#ビルド時の性能計測--timing)）
-- [付属エコシステムと開発ツール](#付属エコシステムと開発ツール)（[rc2base](#libsrc2baseネイティブc-abiツールキット) / [control-async](#libscontrol-asyncタスクとノンブロッキングソケット) / [web](#libswebhttpクライアントとサーバ) / [text-re2](#libstext-re2google-re2正規表現バインディング) / [notcurses・termui](#その他のバインディングnotcurses-termui) / [rcexpr-lint](#toolsrcexpr-lintir静的解析バグ検出ツール) / [rcexpr-diff](#toolsrcexpr-diffir差分比較ツール) / [c-split](#toolsc-splitcファイル分割ツール)）
+- [付属エコシステムと開発ツール](#付属エコシステムと開発ツール)（[rc2base](#libsrc2baseネイティブc-abiツールキット) / [control-async](#libscontrol-asyncタスクとノンブロッキングソケット) / [web](#libswebhttpクライアントとサーバ) / [text-re2](#libstext-re2google-re2正規表現バインディング) / [notcurses・termui](#その他のバインディングnotcurses-termui) / [rcexpr-lint](#toolsrcexpr-lintir静的解析バグ検出ツール) / [rcexpr-diff](#toolsrcexpr-diffir差分比較ツール) / [c-split](#toolsc-splitcファイル分割ツール) / [idris2-browser](#toolsidris2-browserパッケージブラウザ)）
 - [アーキテクチャと最適化パイプライン](#アーキテクチャと最適化パイプライン)（[リポジトリ構成](#リポジトリ全体の構成) / [コンパイラ内部構成](#コンパイラ本体rc2の内部構成) / [最適化パス](#主要な最適化パス10の技術的柱)）
 - [上流RefCとの意図的な違い・改善点](#上流refcとの意図的な違い改善点)（[Char](#1-完全なunicodeスカラー値に対応したchar) / [String](#2-コードポイント準拠とnul終端安全なstring) / [pthread](#3-本物のマルチスレッド並行処理pthread) / [%export](#4-ネイティブc-abiとの直接連携export) / [ライフサイクル](#5-プロセスのライフサイクルとロケール非依存な数値書式化) / [CAF・Lazyメモ化](#6-正しい意味論を保証するcafとlazy--infのメモ化)）
 - [%cg rc2ディレクティブによるチューニング](#cg-rc2ディレクティブによるチューニング)
@@ -223,6 +223,10 @@ tools/rcexpr-lint/build/exec/rcexpr-lint build/exec/prog.rcexpr
 
 rc2がプログラム全体について書き出す1つの`.c`ファイルを、共有ヘッダと複数のパートに分割し、Cコンパイラがそれを小分けにして並列に処理できるようにします。`--directive writecc --directive nocc`を指定すると、rc2はコンパイルとリンクのコマンドを実行せず、`.c`の隣に書き出します。`c-split --commands`は、それをMakefileにします。セルフホスティングしたコンパイラ（Cで111 MB）では、1回の`clang`で9分・2.2 GBかかるところ、`make -j4`なら5分・0.95 GBで済みます。詳細は[`tools/c-split/README.ja.md`](tools/c-split/README.ja.md)を参照してください。
 
+### `tools/idris2-browser/`：パッケージブラウザ
+
+環境にインストールされているIdris 2のパッケージを端末で閲覧するツールです。パッケージとその統計、モジュール、各モジュールの定義（種類・型・ドキュメントコメント）を表示し、全定義名を検索できます。`idris2api`を使うインデクサ（Chez）がインストール済みのTTCファイルを読んでJSONの索引を作ります。索引の形式は公開されているので、エディタのプラグインからも読めます。画面はrc2と`termui`で作っています。詳細は[`tools/idris2-browser/README.ja.md`](tools/idris2-browser/README.ja.md)を参照してください。
+
 ---
 
 ## アーキテクチャと最適化パイプライン
@@ -240,7 +244,7 @@ rc2がプログラム全体について書き出す1つの`.c`ファイルを、
 ├── libs/web/        HTTPクライアントとサーバ（rc2baseとcontrol-asyncが必要）
 ├── libs/text-re2/   Google RE2正規表現バインディング
 ├── libs/notcurses/  notcursesバインディング（System.Notcurses）
-├── tools/           IR検証・差分解析ツール、Cファイル分割ツール（rcexpr-lint, rcexpr-diff, c-split）
+├── tools/           IR検証・差分解析ツール、Cファイル分割ツール、パッケージブラウザ（rcexpr-lint, rcexpr-diff, c-split, idris2-browser）
 └── rc2/             コアコンパイラ本体
 ```
 

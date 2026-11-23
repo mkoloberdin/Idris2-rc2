@@ -1,0 +1,87 @@
+{
+  "formatVersion": 1,
+  "key": "fixture-0.1.0-@HASH@",
+  "module": "Fixture.Shapes",
+  "ttc": {
+    "path": "@BUILD@/prefix/idris2-0.8.0/fixture-0.1.0/2025081600/Fixture/Shapes.ttc",
+    "bytes": @N@,
+    "mtime": "2020-01-01T00:00:00Z"
+  },
+  "status": "ok",
+  "error": null,
+  "doc": null,
+  "imports": [
+    {
+      "module": "Prelude",
+      "public": false,
+      "as": "Prelude"
+    }
+  ],
+  "definitions": [
+    {
+      "name": "Fixture.Shapes.Shape",
+      "kind": "data",
+      "visibility": "public export",
+      "totality": "total",
+      "type": "Type",
+      "doc": null,
+      "location": {
+        "module": "Fixture.Shapes",
+        "start": [3,0],
+        "end": [3,42]
+      }
+    },
+    {
+      "name": "Fixture.Shapes.Circle",
+      "kind": "constructor",
+      "visibility": "public export",
+      "totality": "total",
+      "type": "Double -> Shape",
+      "doc": null,
+      "location": {
+        "module": "Fixture.Shapes",
+        "start": [3,13],
+        "end": [3,26]
+      }
+    },
+    {
+      "name": "Fixture.Shapes.Square",
+      "kind": "constructor",
+      "visibility": "public export",
+      "totality": "total",
+      "type": "Double -> Shape",
+      "doc": null,
+      "location": {
+        "module": "Fixture.Shapes",
+        "start": [3,29],
+        "end": [3,42]
+      }
+    },
+    {
+      "name": "Fixture.Shapes.area",
+      "kind": "function",
+      "visibility": "export",
+      "totality": "covering",
+      "type": "Shape -> Double",
+      "doc": null,
+      "location": {
+        "module": "Fixture.Shapes",
+        "start": [5,0],
+        "end": [6,22]
+      }
+    },
+    {
+      "name": "Fixture.Shapes.(|+|)",
+      "kind": "function",
+      "visibility": "export",
+      "totality": "covering",
+      "type": "Shape -> Shape -> Double",
+      "doc": "An operator of this module's own fixity.",
+      "location": {
+        "module": "Fixture.Shapes",
+        "start": [12,0],
+        "end": [14,32]
+      }
+    }
+  ]
+}
