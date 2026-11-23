@@ -147,7 +147,7 @@ total partial covering
 
 ## 性能上の落とし穴
 
-### `List`に対する`concat`/`concatMap`は二次時間
+### `List`に対する`concat`/`concatMap`は二次時間(`concatMap`は型が決まれば例外)
 
 `Foldable List`は`foldMap`を末尾再帰版で上書きしている
 (`libs/prelude/Prelude/Types.idr`)。
@@ -160,6 +160,24 @@ foldMap f = foldl (\acc, elem => acc <+> f elem) neutral
 **左結合**の`++`になる。`++`は左辺を丸ごとコピーするため、累積結果が
 要素ごとに複製され、リスト数k・合計長Tに対しておよそ`k*T/2`の
 コンス操作になる。スタック安全と引き換えに二次時間という取引である。
+
+上流の#3869以降(`idris2-src`の2026-11-23の更新で取り込み)、`concatMap`には
+`t = List`かつ結果が`String`または`List b`のときの`%transform`がある
+(`fastConcat (map f xs)`と`listBindOnto f [] xs`、どちらも線形)。`%transform`は
+利用側のモジュールの型検査で右辺に当たるので、rc2にも効く。ただし当たるのは
+呼び出す場所で型が具体的に決まっているときだけで、次は今も二次時間になる。
+
+- `concat`(`concat (map f xs)`など、リストのリスト)。`String`のリストは`fastConcat`になる。
+- `Foldable t =>`の汎用関数の中の`concatMap`。
+
+rc2でk=20,000、T=200,000を測った値:
+
+| 書き方 | #3869より前 | 後 |
+|---|---|---|
+| `concatMap f xs`(型が具体的) | 12.2秒 | 0.007秒 |
+| `concat (map f xs)` | 12.9秒 | 12.8秒 |
+| 汎用関数の中の`concatMap` | 12.3秒 | 12.3秒 |
+| `foldr (\x, acc => f x ++ acc) []` | 0.005秒 | 0.005秒 |
 
 要素数が数個の`alts`や引数リストなら問題にならないが、**全定義を
 またぐ規模で使うと致命的**になる。実測例(idris2-lsp、定義35,513件):
