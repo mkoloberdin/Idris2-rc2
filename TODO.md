@@ -5,6 +5,17 @@ scattered code comments. Nothing below is a known correctness bug in
 what's implemented -- see `rc2/tests/refc-suite/README.md` for bugs that
 were found and already fixed.
 
+## 上流の#3915が取り込まれたら`NatMagic`を見直す(2026-11-23)
+
+上流のPR idris-lang/Idris2#3915(未マージ)は、`Data.Nat`の`isLTE`・`lte`・`minimum`・`maximum`を
+`%transform`で`Integer`の比較に置き換える。rc2の`Compiler.RC2.NatMagic`(`rc2/doc/nat-magic.md`)と
+目的が重なる。手元の`idris2-src`には当てて試しているが、rc2側は上流に取り込まれるまで変えない。
+
+取り込まれたら、次のことをする。
+- `NatMagic`を外すか、`%transform`の効かない呼び出しのために残すかを決める。`%transform`は利用側の
+  型検査で右辺に当たるので、残る理由になるのは`isLTE`を値として渡す場合などに限られる。
+- `rc2/doc/nat-magic.md`と`--directive nonatmagic`を、決めたことに合わせて直す。
+
 ## 方針: 使われない値の計算を消してよいか(検討中、2026-11-16)
 
 `unsafePerformIO`と`crash`は純粋とみなし、その効果のタイミングがずれることは許している
