@@ -1,0 +1,30 @@
+┌─────────────────────────┐┌──────────────────────────────┐┌───────────────────────────────────────┐
+│Packages                 ││Modules                       ││Definitions (exported)                 │
+│> fixture 0.1.0          ││> Fixture                     ││> data Colour                         █│
+│  stale 0.1.0 !          ││  Fixture.Shapes              ││  con  Red                            █│
+│                         ││                              ││  con  Green                          █│
+│                         ││                              ││  con  Blue                           █│
+│                         ││                              ││  rec  Point                          █│
+│                         ││                              ││  con  MkPoint                        █│
+│                         ││                              ││  fn   Point.(.x)                     █│
+│                         ││                              ││  fn   Point.x                        ││
+│                         ││                              ││  fn   Point.(.y)                     ││
+│                         ││                              ││  fn   Point.y                        ││
+│                         ││                              ││  ifc  Named                          ││
+└─────────────────────────┘└──────────────────────────────┘└───────────────────────────────────────┘
+ Doc │ Type │ Stats │ Package
+┌──────────────────────────────────────────────────────────────────────────────────────────────────┐
+│fixture 0.1.0                                                                                    █│
+│                                                                                                 █│
+│- directory: /fixture/prefix/idris2-0.8.0/fixture-0.1.0                                          █│
+│- search dir: /fixture/prefix/idris2-0.8.0                                                       █│
+│- status: ok                                                                                     █│
+│- selected by idris2: yes                                                                        █│
+│- sources: installed                                                                             █│
+│- TTC versions: 2025081600                                                                       █│
+│                                                                                                 █│
+│Depends on                                                                                       ││
+│                                                                                                 ││
+│- base                                                                                           ││
+└──────────────────────────────────────────────────────────────────────────────────────────────────┘
+F1 Doc F2 Type F3 Stats F4 Package F5 Filter F6 Search F10 Quit

@@ -1,0 +1,45 @@
+{
+  "formatVersion": 1,
+  "packages": [
+    {
+      "key": "fixture-0.1.0-@HASH@",
+      "name": "fixture",
+      "version": "0.1.0",
+      "dir": "@BUILD@/prefix/idris2-0.8.0/fixture-0.1.0",
+      "searchDir": "@BUILD@/prefix/idris2-0.8.0",
+      "selected": true,
+      "status": "ok",
+      "ttcVersions": [2025081600],
+      "ipkg": {
+        "file": "@BUILD@/prefix/idris2-0.8.0/fixture-0.1.0/fixture.ipkg",
+        "version": "0.1.0",
+        "brief": null,
+        "authors": null,
+        "license": null,
+        "sourcedir": null,
+        "depends": [
+          {
+            "name": "base",
+            "bounds": ""
+          }
+        ],
+        "modules": [],
+        "main": null,
+        "executable": null
+      },
+      "sources": "installed"
+    },
+    {
+      "key": "stale-0.1.0-@HASH@",
+      "name": "stale",
+      "version": "0.1.0",
+      "dir": "@BUILD@/prefix/idris2-0.8.0/stale-0.1.0",
+      "searchDir": "@BUILD@/prefix/idris2-0.8.0",
+      "selected": false,
+      "status": "unreadable",
+      "ttcVersions": [2020010100],
+      "ipkg": null,
+      "sources": "none"
+    }
+  ]
+}

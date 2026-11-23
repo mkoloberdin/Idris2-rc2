@@ -1,0 +1,53 @@
+{
+  "formatVersion": 1,
+  "key": "fixture-0.1.0-@HASH@",
+  "stats": {
+    "modulesFound": 1,
+    "modulesFailed": 0,
+    "ttcBytes": @N@,
+    "definitions": {
+      "data": 1,
+      "record": 1,
+      "interface": 1,
+      "constructor": 4,
+      "function": 10,
+      "foreign": 1,
+      "builtin": 0,
+      "hole": 0,
+      "other": 0
+    },
+    "visibility": {
+      "private": 1,
+      "export": 5,
+      "public export": 12
+    },
+    "totality": {
+      "total": 8,
+      "covering": 9,
+      "partial": 1
+    },
+    "exportedWithDoc": 9,
+    "exported": 17,
+    "modulesWithDoc": 1
+  },
+  "names": [
+    ["Fixture.Colour","Fixture","data","public export",true],
+    ["Fixture.Red","Fixture","constructor","public export",false],
+    ["Fixture.Green","Fixture","constructor","public export",false],
+    ["Fixture.Blue","Fixture","constructor","public export",false],
+    ["Fixture.Point","Fixture","record","public export",true],
+    ["Fixture.MkPoint","Fixture","constructor","public export",false],
+    ["Fixture.Point.(.x)","Fixture","function","public export",true],
+    ["Fixture.Point.x","Fixture","function","public export",true],
+    ["Fixture.Point.(.y)","Fixture","function","public export",false],
+    ["Fixture.Point.y","Fixture","function","public export",false],
+    ["Fixture.Named","Fixture","interface","public export",true],
+    ["Fixture.name","Fixture","function","public export",true],
+    ["Fixture.double","Fixture","function","export",true],
+    ["Fixture.undocumented","Fixture","function","export",false],
+    ["Fixture.hidden","Fixture","function","private",true],
+    ["Fixture.loop","Fixture","function","export",true],
+    ["Fixture.firstOf","Fixture","function","export",true],
+    ["Fixture.cAbs","Fixture","foreign","export",false]
+  ]
+}

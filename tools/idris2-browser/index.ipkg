@@ -1,0 +1,22 @@
+package idris2-browser-index
+version = 0.1.0
+authors = "rc2 project"
+
+-- The indexer reads TTC files, so it links `idris2api` and must be the same
+-- Idris 2 version as the compiler that wrote them. It is built with the
+-- default (Chez) backend; see doc/design.md, "Architecture".
+depends = idris2, contrib
+
+sourcedir = "src"
+builddir = "build/index"
+
+modules = IdrisBrowser.JSON,
+          IdrisBrowser.Schema,
+          IdrisBrowser.Stats,
+          IdrisBrowser.Index.Files,
+          IdrisBrowser.Index.Discover,
+          IdrisBrowser.Index.ReadTTC,
+          IdrisBrowser.Index.Update
+
+main = IdrisBrowser.Index.Main
+executable = idris2-browser-index

@@ -1,0 +1,30 @@
+┌────────────────────────┐┌─────────────────────────────┐┌─────────────────────────────────────────┐
+│Packages                ││Modules                      ││Definitions (all)                        │
+│> fixture 0.1.0         ││> Fixture                    ││  rec  Point                            ││
+│  stale 0.1.0 !         ││  Fixture.Shapes             ││  con  MkPoint                          ││
+│                        ││                             ││  fn   Point.(.x)                       ││
+│                        ││                             ││  fn   Point.x                          █│
+│                        ││                             ││  fn   Point.(.y)                       █│
+│                        ││                             ││  fn   Point.y                          █│
+│                        ││                             ││  ifc  Named                            █│
+│                        ││                             ││  fn   name                             █│
+│                        ││                             ││  fn   double                           █│
+│                        ││                             ││  fn   undocumented                     ││
+│                        ││                             ││> fn   hidden  (private)                ││
+└────────────────────────┘└─────────────────────────────┘└─────────────────────────────────────────┘
+ Doc │ Type │ Stats │ Package
+┌──────────────────────────────────────────────────────────────────────────────────────────────────┐
+│hidden                                                                                            │
+│                                                                                                  │
+│ hidden : Int                                                                                     │
+│                                                                                                  │
+│Private, with "quotes", a \ backslash, a tab and a second line.                                   │
+│                                                                                                  │
+│------------------------------------------------------------------------------------------------- │
+│                                                                                                  │
+│Fixture                                                                                           │
+│                                                                                                  │
+│A package for the indexer's tests: one definition of every kind.                                  │
+│                                                                                                  │
+└──────────────────────────────────────────────────────────────────────────────────────────────────┘
+F1 Doc F2 Type F3 Stats F4 Package F5 Filter F6 Search F10 Quit

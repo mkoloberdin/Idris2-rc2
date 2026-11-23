@@ -1,0 +1,266 @@
+{
+  "formatVersion": 1,
+  "key": "fixture-0.1.0-@HASH@",
+  "module": "Fixture",
+  "ttc": {
+    "path": "@BUILD@/prefix/idris2-0.8.0/fixture-0.1.0/2025081600/Fixture.ttc",
+    "bytes": @N@,
+    "mtime": "2020-01-01T00:00:00Z"
+  },
+  "status": "ok",
+  "error": null,
+  "doc": "A package for the indexer's tests: one definition of every kind.",
+  "imports": [
+    {
+      "module": "Data.List",
+      "public": false,
+      "as": "Data.List"
+    },
+    {
+      "module": "Fixture.Shapes",
+      "public": true,
+      "as": "Fixture.Shapes"
+    },
+    {
+      "module": "Prelude",
+      "public": false,
+      "as": "Prelude"
+    }
+  ],
+  "definitions": [
+    {
+      "name": "Fixture.Colour",
+      "kind": "data",
+      "visibility": "public export",
+      "totality": "total",
+      "type": "Type",
+      "doc": "A colour, with a non-ASCII doc: 色 and 🐈 survive the index.",
+      "location": {
+        "module": "Fixture",
+        "start": [8,0],
+        "end": [8,32]
+      }
+    },
+    {
+      "name": "Fixture.Red",
+      "kind": "constructor",
+      "visibility": "public export",
+      "totality": "total",
+      "type": "Colour",
+      "doc": null,
+      "location": {
+        "module": "Fixture",
+        "start": [8,14],
+        "end": [8,17]
+      }
+    },
+    {
+      "name": "Fixture.Green",
+      "kind": "constructor",
+      "visibility": "public export",
+      "totality": "total",
+      "type": "Colour",
+      "doc": null,
+      "location": {
+        "module": "Fixture",
+        "start": [8,20],
+        "end": [8,25]
+      }
+    },
+    {
+      "name": "Fixture.Blue",
+      "kind": "constructor",
+      "visibility": "public export",
+      "totality": "total",
+      "type": "Colour",
+      "doc": null,
+      "location": {
+        "module": "Fixture",
+        "start": [8,28],
+        "end": [8,32]
+      }
+    },
+    {
+      "name": "Fixture.Point",
+      "kind": "record",
+      "visibility": "public export",
+      "totality": "total",
+      "type": "Type",
+      "doc": "A point in the plane.",
+      "location": {
+        "module": "Fixture",
+        "start": [10,0],
+        "end": [16,9]
+      }
+    },
+    {
+      "name": "Fixture.MkPoint",
+      "kind": "constructor",
+      "visibility": "public export",
+      "totality": "total",
+      "type": "Int -> Int -> Point",
+      "doc": null,
+      "location": {
+        "module": "Fixture",
+        "start": [10,0],
+        "end": [16,9]
+      }
+    },
+    {
+      "name": "Fixture.Point.(.x)",
+      "kind": "function",
+      "visibility": "public export",
+      "totality": "covering",
+      "type": "Point -> Int",
+      "doc": "The horizontal coordinate.",
+      "location": {
+        "module": "Fixture",
+        "start": [15,2],
+        "end": [15,9]
+      }
+    },
+    {
+      "name": "Fixture.Point.x",
+      "kind": "function",
+      "visibility": "public export",
+      "totality": "covering",
+      "type": "Point -> Int",
+      "doc": "The horizontal coordinate.",
+      "location": {
+        "module": "Fixture",
+        "start": [15,2],
+        "end": [15,9]
+      }
+    },
+    {
+      "name": "Fixture.Point.(.y)",
+      "kind": "function",
+      "visibility": "public export",
+      "totality": "covering",
+      "type": "Point -> Int",
+      "doc": null,
+      "location": {
+        "module": "Fixture",
+        "start": [16,2],
+        "end": [16,9]
+      }
+    },
+    {
+      "name": "Fixture.Point.y",
+      "kind": "function",
+      "visibility": "public export",
+      "totality": "covering",
+      "type": "Point -> Int",
+      "doc": null,
+      "location": {
+        "module": "Fixture",
+        "start": [16,2],
+        "end": [16,9]
+      }
+    },
+    {
+      "name": "Fixture.Named",
+      "kind": "interface",
+      "visibility": "public export",
+      "totality": "total",
+      "type": "Type -> Type",
+      "doc": "Things that have a name.",
+      "location": {
+        "module": "Fixture",
+        "start": [18,0],
+        "end": [22,20]
+      }
+    },
+    {
+      "name": "Fixture.name",
+      "kind": "function",
+      "visibility": "public export",
+      "totality": "covering",
+      "type": "Named a => a -> String",
+      "doc": "The name of a value.",
+      "location": {
+        "module": "Fixture",
+        "start": [22,2],
+        "end": [22,6]
+      }
+    },
+    {
+      "name": "Fixture.double",
+      "kind": "function",
+      "visibility": "export",
+      "totality": "total",
+      "type": "Nat -> Nat",
+      "doc": "Total and documented.",
+      "location": {
+        "module": "Fixture",
+        "start": [30,0],
+        "end": [33,19]
+      }
+    },
+    {
+      "name": "Fixture.undocumented",
+      "kind": "function",
+      "visibility": "export",
+      "totality": "covering",
+      "type": "List Int -> Int",
+      "doc": null,
+      "location": {
+        "module": "Fixture",
+        "start": [36,0],
+        "end": [37,30]
+      }
+    },
+    {
+      "name": "Fixture.hidden",
+      "kind": "function",
+      "visibility": "private",
+      "totality": "covering",
+      "type": "Int",
+      "doc": "Private, with \"quotes\", a \\ backslash, a tab\tand\na second line.",
+      "location": {
+        "module": "Fixture",
+        "start": [40,0],
+        "end": [43,12]
+      }
+    },
+    {
+      "name": "Fixture.loop",
+      "kind": "function",
+      "visibility": "export",
+      "totality": "covering",
+      "type": "Int -> Int",
+      "doc": "Covering, not checked for termination.",
+      "location": {
+        "module": "Fixture",
+        "start": [46,0],
+        "end": [49,17]
+      }
+    },
+    {
+      "name": "Fixture.firstOf",
+      "kind": "function",
+      "visibility": "export",
+      "totality": "partial",
+      "type": "List a -> a",
+      "doc": "Partial: a missing case.",
+      "location": {
+        "module": "Fixture",
+        "start": [52,0],
+        "end": [55,21]
+      }
+    },
+    {
+      "name": "Fixture.cAbs",
+      "kind": "foreign",
+      "visibility": "export",
+      "totality": "covering",
+      "type": "Int -> Int",
+      "doc": null,
+      "location": {
+        "module": "Fixture",
+        "start": [58,0],
+        "end": [60,17]
+      }
+    }
+  ]
+}

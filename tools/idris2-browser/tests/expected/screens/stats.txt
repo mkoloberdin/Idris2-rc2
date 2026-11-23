@@ -1,0 +1,30 @@
+┌─────────────────────────┐┌──────────────────────────────┐┌───────────────────────────────────────┐
+│Packages                 ││Modules                       ││Definitions (exported)                 │
+│> fixture 0.1.0          ││> Fixture                     ││> data Colour                         █│
+│  stale 0.1.0 !          ││  Fixture.Shapes              ││  con  Red                            █│
+│                         ││                              ││  con  Green                          █│
+│                         ││                              ││  con  Blue                           █│
+│                         ││                              ││  rec  Point                          █│
+│                         ││                              ││  con  MkPoint                        █│
+│                         ││                              ││  fn   Point.(.x)                     █│
+│                         ││                              ││  fn   Point.x                        ││
+│                         ││                              ││  fn   Point.(.y)                     ││
+│                         ││                              ││  fn   Point.y                        ││
+│                         ││                              ││  ifc  Named                          ││
+└─────────────────────────┘└──────────────────────────────┘└───────────────────────────────────────┘
+ Doc │ Type │ Stats │ Package
+┌──────────────────────────────────────────────────────────────────────────────────────────────────┐
+│fixture 0.1.0                                                                                    █│
+│                                                                                                 █│
+│- modules: 2 (0 failed, 1 with a module doc)                                                     █│
+│- TTC size: 20 KiB                                                                               █│
+│- definitions: data 2, record 1, interface 1, constructor 6, function 12, foreign 1              █│
+│- visibility: private 1, export 7, public export 15                                              █│
+│- totality: total 11, covering 11, partial 1                                                     ││
+│- documented: 10 of 22 exported (45%)                                                            ││
+│                                                                                                 ││
+│Environment                                                                                      ││
+│                                                                                                 ││
+│- prefix: /fixture/empty (from option)                                                           ││
+└──────────────────────────────────────────────────────────────────────────────────────────────────┘
+F1 Doc F2 Type F3 Stats F4 Package F5 Filter F6 Search F10 Quit

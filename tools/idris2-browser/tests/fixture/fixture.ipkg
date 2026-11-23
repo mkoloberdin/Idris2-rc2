@@ -1,0 +1,7 @@
+package fixture
+version = 0.1.0
+authors = "rc2 project"
+sourcedir = "src"
+depends = base
+
+modules = Fixture, Fixture.Shapes

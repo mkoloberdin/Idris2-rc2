@@ -1,0 +1,30 @@
+┌─────────────────────────┐┌──────────────────────────────┐┌───────────────────────────────────────┐
+│Packages                 ││Modules                       ││Definitions (exported)                 │
+│> fixture 0.1.0          ││  Fixture                     ││  data Shape                           │
+│  stale 0.1.0 !          ││> Fixture.Shapes              ││> con  Circle                          │
+│                         ││                              ││  con  Square                          │
+│                         ││                              ││  fn   area                            │
+│                         ││                              ││  fn   (|+|)                           │
+│                         ││                              ││                                       │
+│                         ││                              ││                                       │
+│                         ││                              ││                                       │
+│                         ││                              ││                                       │
+│                         ││                              ││                                       │
+│                         ││                              ││                                       │
+└─────────────────────────┘└──────────────────────────────┘└───────────────────────────────────────┘
+ Doc │ Type │ Stats │ Package
+┌──────────────────────────────────────────────────────────────────────────────────────────────────┐
+│ Fixture.Shapes.Circle : Double -> Shape                                                          │
+│                                                                                                  │
+│- kind: constructor                                                                               │
+│- visibility: public export                                                                       │
+│- totality: total                                                                                 │
+│- location: Fixture.Shapes line 4                                                                 │
+│                                                                                                  │
+│                                                                                                  │
+│                                                                                                  │
+│                                                                                                  │
+│                                                                                                  │
+│                                                                                                  │
+└──────────────────────────────────────────────────────────────────────────────────────────────────┘
+F1 Doc F2 Type F3 Stats F4 Package F5 Filter F6 Search F10 Quit
