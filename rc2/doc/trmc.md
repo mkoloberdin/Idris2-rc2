@@ -45,28 +45,54 @@ parameters are `f`'s parameters plus two more, `res` and `last`:
 - `res` is the first cell of the chain, returned at the end.
 - `last` is the cell whose hole is still open.
 
-Both are ordinary owned `Boxed` locals. `f#`'s body is `f`'s body with
+Both are ordinary owned `Boxed` locals, and both are NULL until the first
+site has built a cell ("no chain" below). `f#`'s body is `f`'s body with
 each tail rewritten:
 
 | Tail of `f` | Tail in `f#` |
 |---|---|
-| recursive site: `let v = call f as'; C [.., v, ..]` | `let c = C [.., NULL, ..]; fill last.k := c; call f# as' res c` |
+| recursive site: `let v = call f as'; C [.., v, ..]` | `let c = C [.., NULL, ..]; let res' = (no chain: c; else fill last.k := c; res); call f# as' res' c` |
 | plain self tail call `call f as'` | `call f# as' res last` |
-| any other tail `e` | `let r = e; fill last.k := r; drop last; res` |
+| any other tail `e` | no chain: `e`; else `let r = e; fill last.k := r; drop last; res` |
 | `crash` | unchanged |
 
 Here `k` is the hole's field index, which is static per function.
 
-**`f`** keeps its name and signature, so no caller changes. Its body is
-also `f`'s body, with only the recursive sites rewritten:
+"No chain" is a `case last of _builtin.NIL [nil] -> ...; _ -> ...`. An
+alt of a constructor represented by NULL is how rc2 tests a value for NULL
+whatever its type (`Emit.Util.conAltCondExpr` emits `NULL == last`), so the
+test needs no new node, and every pass already reads it right: a `[__]` is
+the NIL alt's value. At a site only `res'` is chosen by the `case`; the
+call that continues is written once.
+
+**`f`** keeps its name and signature, so no caller changes. Its body only
+starts the chain:
 
 ```
-let c = C [.., NULL, ..]
-call f# as' c c
+call f# as [__] [__]
 ```
 
-All of `f`'s base cases return exactly as before, so a call that never
-recurses costs nothing extra.
+LateInline splices this one call into every caller, so `f`'s body exists
+once, in `f#`. A call that never reaches a site returns `e` from the "no
+chain" branch: it allocates nothing more than `f` did, and costs one test
+of `last`.
+
+#### Why the entry holds no copy of the body (2026-11-24)
+
+The first version gave `f` its own body with the sites rewritten to start
+the chain (`let c = C [..]; call f# as' c c`), so that a call that never
+recurses did not test `last`. That copy is a peeled first iteration: the
+test cannot be hoisted, since `last` is NULL only on the first one. In
+`rc2-norepl` the copies cost more than the test:
+
+| | C of `rc2-norepl` |
+|---|---|
+| `--directive notrmc` | 101.5 MB |
+| entry with its own body | 111.7 MB |
+| entry that only starts the chain | 107.7 MB |
+
+The benchmarks of `rc2/tests/bench` run as fast as before (`BenchListFuse`,
+which maps and filters a long list through TRMC loops, within 0.3%).
 
 After Loop conversion, `f#` is a loop over the original parameters plus
 `res` and `last`. Each iteration does one allocation (usually a
@@ -96,7 +122,9 @@ so Loop keeps it as a native loop parameter.
 
 Of a site such as `Node (f l) x (f r)`, only the last-evaluated
 recursive call becomes the hole. The earlier ones stay ordinary calls
-to `f` (the entry, which uses `f#` in turn). A tree map therefore loops
+to `f`; once LateInline has spliced the entry, they call `f#` with no
+chain (`call f# l [__] [__]`). They are not tail calls, so `f` and `f#`
+never form a cycle that MutualLoop would merge. A tree map therefore loops
 down its right spine and recurses only as deep as the tree's left
 branches.
 
@@ -281,9 +309,9 @@ Phase 2 makes it a set, a *group*:
    - any other tail: fill `last` with it and return `res`.
 
    The fill dispatches on `hk` over the group's indexes (phase 3).
-5. **Entries.** Each `m` keeps its name and signature. Only its sites
-   change, to `let c = C [..]; call g# as' c c k`. Its tail calls to
-   other members stay calls to their entries, so no caller changes.
+5. **Entries.** Each `m` keeps its name and signature, and its body is
+   `call m# as [__] [__] #0` (`#0` for `hk` when the group has one), as in
+   phase 1.
 
 The `m#` functions now tail-call each other and nothing else in the
 group. MutualLoop runs after RC. It merges them into one function, as
