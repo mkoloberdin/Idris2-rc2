@@ -16,8 +16,11 @@ sees only its own definitions.
 
 1. **Candidates**: `MkRCFun` with at least one parameter. CAFs (`RMemoize`)
    are left alone, and so is a function holding an inlined FFI call or a
-   constant constructor with fields (`hasFatConst`): the first is not
-   compared structurally, the second can unfold to a huge tree.
+   constant of more than 64 nodes (`hasFatConst`, which counts no
+   further): the first is not compared structurally, the second is a tree
+   shared in memory that can unfold to a huge one. Most constants are a
+   few nodes, such as the `Right (SErased ..)` that 454 lambdas of
+   `Core.SchemeEval.Evaluate.snfVector` return.
 2. **Shallow key**: the parameter count, the number of nodes, the
    parameter and return representations with the worker flag, and the set
    of functions the body refers to, with the function's own name replaced
@@ -50,10 +53,21 @@ with an inlined FFI call on `libs/web/tests/TestWebAPI` (the same reason
 `dumprcexpr` runs out of memory on it), and text for every candidate costs
 far more than comparing two trees.
 
-A `RCConstCon`'s fields are not renamed (its erased proof cannot be
-rebuilt); a function named only there is kept, which is safe but less
-thorough. Test114Inline/FunDedup found this the hard way: dropping a
-merged function at once left a dangling `constclosure`.
+Closures inside constant constructors and inside the captures of constant
+closures are renamed too (`renameLocalN`). Their erased proofs, that every
+field is a constant, are taken again with `ConstFold.allConstLocal` after
+the renaming; renaming a closure leaves a constant a constant, so it always
+gives one. Before that, a function named only inside a constant was kept,
+and a merged one was never dropped at once: Test114Inline/FunDedup found
+that the hard way, as a dangling `constclosure`.
+
+### Constants (2026-11-24)
+
+Until then a function holding any constant constructor with fields was no
+candidate, and closures inside constants were not renamed. On `rc2-norepl`
+lifting both took the C from 107.7 MB to 107.0 MB and the definitions from
+12,662 to 11,884; the 454 copies of `snfVector`'s `\_ => pure (SErased ..)`
+became 22. The pass takes 1.8 s on it instead of 1.4 s.
 
 ## Results
 
