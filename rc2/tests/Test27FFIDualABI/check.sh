@@ -12,7 +12,7 @@ fail() { echo "FAIL  $name ($1)"; }
 # given to prim__ignoreClosure) is a static value that is never freed,
 # so the inlined call must not drop it. Invisible to an output diff:
 # dropping an immortal value is a no-op at run time.
-drops="$(grep -c 'idris2rc2_drop(((IDRIS2RC2_Value\*)&' "$TMP/${name}_rc2.c" || true)"
+drops="$(grep -cE 'idris2rc2_drop[0-9]?\(.*\(\(IDRIS2RC2_Value\*\)&' "$TMP/${name}_rc2.c" || true)"
 if [ "$drops" = "0" ]; then
     pass "FFI inline -- no drop of a constant argument"
 else

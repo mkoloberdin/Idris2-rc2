@@ -683,9 +683,42 @@ genConstant c cdef = case c of
 export
 data OutfileText : Type where
 
-public export
-Output : Type
-Output = DList String
+||| A definition's C lines so far, and the drops `removeVars` holds back so
+||| that a run of them goes out as few calls (rc2/doc/batched-drops.md): their
+||| variables, last first, and their indentation.
+export
+record Output where
+  constructor MkOutput
+  body : DList String
+  pendingDrops : List String
+  dropIndent : String
+
+export
+emptyOutput : Output
+emptyOutput = MkOutput DList.Nil [] ""
+
+dropCall : String -> List String -> String
+dropCall ind vs = ind ++ "idris2rc2_drop" ++ show (length vs) ++ "(" ++ concat (intersperse ", " vs) ++ ");"
+
+-- The held-back drops as lines: `idris2rc2_drop3`..`drop6` calls, seven and
+-- eight split so that no call takes fewer than three; one or two inline.
+dropLines : String -> List String -> List String
+dropLines ind (a :: b :: c :: d :: e :: f :: rest@(_ :: _ :: _ :: _)) = dropCall ind [a, b, c, d, e, f] :: dropLines ind rest
+dropLines ind [a, b, c, d, e, f, g] = [dropCall ind [a, b, c, d], dropCall ind [e, f, g]]
+dropLines ind [a, b, c, d, e, f, g, h] = [dropCall ind [a, b, c, d, e], dropCall ind [f, g, h]]
+dropLines ind vs@(_ :: _ :: _ :: _) = [dropCall ind vs]
+dropLines ind vs = map (\v => ind ++ "idris2rc2_drop(" ++ v ++ ");") vs
+
+flushDrops : Output -> Output
+flushDrops o = case o.pendingDrops of
+    [] => o
+    ds => { body $= \ls => DList.appendR ls (dropLines o.dropIndent (reverse ds)),
+            pendingDrops := [] } o
+
+||| Every line of `o`, the held-back drops included.
+export
+outputLines : Output -> List String
+outputLines o = reify (flushDrops o).body
 
 ------------------------------------------------------------------------
 
@@ -725,14 +758,14 @@ emit
     FC -> String -> Core ()
 emit EmptyFC line = do
     indent <- indentation
-    update OutfileText (flip snoc (indent ++ line))
+    update OutfileText (\o => { body $= flip DList.snoc (indent ++ line) } (flushDrops o))
 emit fc line = do
     let comment = "// " ++ show fc
     indent <- indentation
     let indentedLine = indent ++ line
-    update OutfileText $ case isLTE (length indentedLine) maxLineLengthForComment of
-        (Yes _) => flip snoc (padRight maxLineLengthForComment ' ' indentedLine ++ " " ++ comment)
-        (No _)  => flip appendR [indentedLine, (padRight maxLineLengthForComment ' ' "" ++ " " ++ comment)]
+    update OutfileText $ \o => { body $= case isLTE (length indentedLine) maxLineLengthForComment of
+        (Yes _) => flip DList.snoc (padRight maxLineLengthForComment ' ' indentedLine ++ " " ++ comment)
+        (No _)  => flip DList.appendR [indentedLine, (padRight maxLineLengthForComment ' ' "" ++ " " ++ comment)] } (flushDrops o)
 
 export
 applyFunctionToVars : {auto oft : Ref OutfileText Output}
@@ -747,7 +780,12 @@ removeVars : {auto oft : Ref OutfileText Output}
            -> {auto il : Ref IndentLevel Nat}
            -> List String
            -> Core ()
-removeVars = applyFunctionToVars "idris2rc2_drop"
+removeVars [] = pure ()
+removeVars vs = do
+    indent <- indentation
+    update OutfileText $ \o =>
+      let o' = if indent == o.dropIndent then o else flushDrops o
+      in { pendingDrops := reverse vs ++ o'.pendingDrops, dropIndent := indent } o'
 
 export
 dupVars : {auto oft : Ref OutfileText Output}
