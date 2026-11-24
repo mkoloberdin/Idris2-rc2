@@ -573,8 +573,9 @@ foldConst _ env (RDelay fc lr n caps) = RDelay fc lr n (map (resolveLocal env) c
 foldConst _ env (RForce fc lr v postDrop) = RForce fc lr (resolveLocal env v) postDrop
 foldConst _ env (RStructSet fc structVar sf value postDrop) =
     RStructSet fc (resolveLocal env structVar) sf (resolveLocal env value) postDrop
-foldConst _ env (RFill fc cell k value postDrop) =
-    RFill fc (resolveLocal env cell) k (resolveLocal env value) postDrop
+foldConst _ env (RFill fc cell field @{ok} value postDrop) =
+    let Element field' ok' = mapFillIndex (resolveLocal env) field ok
+    in RFill fc (resolveLocal env cell) field' @{ok'} (resolveLocal env value) postDrop
 foldConst _ env (ROp fc lazy op args postDrop) =
     let resolvedArgs = map (resolveLocal env) args
     in case resolveConsts env args of

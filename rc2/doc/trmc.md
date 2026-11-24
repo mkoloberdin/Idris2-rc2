@@ -103,20 +103,27 @@ refcount on the cell passed along as `last`.
 
 When the sites fill different field indexes, such as `Bind` and `App`
 in one term traversal, `f#` takes a third extra parameter, `hk`: the
-index of `last`'s hole. Each site passes its own index as a constant.
-A fill becomes a `case` over `hk` with one static `RFill` per index:
+index of `last`'s hole. Each site passes its own index as a constant,
+and a fill takes `hk` as its index:
 
 ```
-case hk of
-  0 -> let _ = fill last . 0 = c; call f# as' res c #1
-  _ -> let _ = fill last . 1 = c; call f# as' res c #1
+let _ = fill last . hk = c; call f# as' res c #1
 ```
 
-`RFill` itself keeps a static field, so no pass that knows it changes.
-The code after the fill (a tail call, or returning `res`) has no
-`let`s, so each branch gets its own copy of it. A function with a
-single index gets no `hk`, exactly as in phase 1. `hk` is always small,
-so Loop keeps it as a native loop parameter.
+`RFill`'s index is an `RCLocal` with a proof (`IsFillIndex`) that it is
+an `Int` constant or a local: `fill last . 1` with one index,
+`fill last . hk` with several. Emit writes `args[k]` or `args[hk]`; every
+constructor keeps its fields in `args` (`constructor-layout.md`), so one
+store does for every index. A pass that rewrites locals takes the proof
+again with `mapFillIndex`. A function with a single index gets no `hk`,
+exactly as in phase 1. `hk` stays boxed, as TRMC runs after native
+inference; it is an immediate `Int`, so reading it is a shift.
+
+Until 2026-11-24 the fill was a `case` over `hk` with one constant
+`RFill` per index, and the code after it was copied into every branch.
+On `rc2-norepl` those copies were 1,371 `case`s, 38k IR lines, about two
+thirds of what TRMC added. With the index in `RFill`, the C went from
+106.9 MB to 104.8 MB.
 
 ### Several recursive fields (phase 3)
 
@@ -308,7 +315,7 @@ Phase 2 makes it a set, a *group*:
    - a tail call to member `g`: `call g# as' res last hk`;
    - any other tail: fill `last` with it and return `res`.
 
-   The fill dispatches on `hk` over the group's indexes (phase 3).
+   The fill takes `hk` as its index when the group has several (phase 3).
 5. **Entries.** Each `m` keeps its name and signature, and its body is
    `call m# as [__] [__] #0` (`#0` for `hk` when the group has one), as in
    phase 1.

@@ -279,7 +279,7 @@ hasNonNativeUse ty loopSlots target (RStructGet _ structVar _ _) = structVar == 
 hasNonNativeUse ty loopSlots target (RDelay _ _ _ caps) = elem (RCLoc target) caps
 hasNonNativeUse ty loopSlots target (RForce _ _ v _) = v == RCLoc target
 hasNonNativeUse ty loopSlots target (RStructSet _ structVar _ value _) = structVar == RCLoc target || value == RCLoc target
-hasNonNativeUse ty loopSlots target (RFill _ cell _ value _) = cell == RCLoc target || value == RCLoc target
+hasNonNativeUse ty loopSlots target (RFill _ cell field value _) = cell == RCLoc target || field == RCLoc target || value == RCLoc target
 hasNonNativeUse ty loopSlots target (RCmpCase _ _ _ _ t f) = hasNonNativeUse ty loopSlots target t || hasNonNativeUse ty loopSlots target f
 hasNonNativeUse ty loopSlots target (RConCase _ sc alts mDef) =
     sc == RCLoc target || any (\(MkRConAlt _ _ _ _ body) => hasNonNativeUse ty loopSlots target body) alts

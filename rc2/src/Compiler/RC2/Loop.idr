@@ -331,7 +331,7 @@ usesInvariant p e = existsInvariantUse e
     existsInvariantUse (RForce _ _ v _) = v == RCLoc p
     existsInvariantUse (RStructSet _ structVar _ value _) =
         structVar == RCLoc p || value == RCLoc p
-    existsInvariantUse (RFill _ cell _ value _) = cell == RCLoc p || value == RCLoc p
+    existsInvariantUse (RFill _ cell field value _) = cell == RCLoc p || field == RCLoc p || value == RCLoc p
     existsInvariantUse (RCmpCase _ _ args _ t f) =
         any (== RCLoc p) (toList args) || existsInvariantUse t || existsInvariantUse f
     existsInvariantUse (RConCase _ sc alts mDef) =
