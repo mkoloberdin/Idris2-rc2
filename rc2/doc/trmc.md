@@ -171,14 +171,18 @@ Emit lowers it to
 Every pass that knows `RStructSet` gets a matching `RFill` case. That
 is 12 files today (`grep -c RStructSet`). The cases that matter are:
 
-- **RC (`annotate`):** `cell` is a borrowed operand with `postDrop`,
-  and `value` is a consumed operand.
+- **RC (`annotate`):** `cell`, and `field` when it is a local, are
+  borrowed operands with `postDrop`, and `value` is a consumed operand.
+  Every fold over the locals an expression reads counts `field`, and Loop
+  dups it as an invariant parameter like `cell`.
 - **DeadVars/Sink:** `RFill` has an effect. It must never be removed
   as a dead `let`, never sunk into a branch, and never moved past
   another `RFill`.
 - **DualABI:** `value` and `cell` are always `Boxed`, so `RFill` is
-  never a native read.
-- **Pretty, and rc2base's AST/Parser/Lint:** a `fill` line.
+  never a native read. A local `field` is `Boxed` too, and Emit unboxes it.
+- **Pretty, and rc2base's AST/Parser/Lint:** a `fill` line. rc2base keeps
+  the index as text, so `rcexpr-lint` does not check a local index as a
+  read.
 
 The hole itself is written as `RCNull` in the `RCon`'s argument list.
 That is safe because nothing after this pass projects fields out of a
@@ -323,8 +327,8 @@ Phase 2 makes it a set, a *group*:
 The `m#` functions now tail-call each other and nothing else in the
 group. MutualLoop runs after RC. It merges them into one function, as
 it does any mutual tail recursion, and Loop turns that into one loop.
-Nothing downstream changes: `hk`, `res` and `last` are ordinary
-parameters to MutualLoop's slot sharing.
+`hk`, `res` and `last` are ordinary parameters to MutualLoop's slot
+sharing; `hk` is read only as a fill's index.
 
 ### Why a group, not per-function rewriting
 

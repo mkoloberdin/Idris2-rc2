@@ -147,7 +147,7 @@ useInfo = go (MkUseInfo empty empty empty)
     go acc (RStructGet _ structVar _ _) = boxed [structVar] acc
     go acc (RForce _ _ v _) = boxed [v] acc
     go acc (RStructSet _ structVar _ value _) = boxed [structVar, value] acc
-    go acc (RFill _ cell _ value _) = boxed [cell, value] acc
+    go acc (RFill _ cell field value _) = reads [field] (boxed [cell, value] acc)
     go acc (RLet _ var rep value body) =
         let acc' = go (go acc value) body
         in case rep of

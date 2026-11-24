@@ -34,13 +34,13 @@ lazyPrefix : Maybe LazyReason -> String
 lazyPrefix Nothing = ""
 lazyPrefix (Just r) = "~" ++ show r ++ " "
 
-||| The ` postDrop= ...` tail of a node line; nothing when the list is empty.
--- A constant hole index prints bare (`fill v1 . 2`), as before it could be a
--- local (`fill v1 . v7`).
+-- A constant hole index prints bare (`fill v1 . 2`), a local as itself
+-- (`fill v1 . v7`).
 fieldText : RCLocal -> String
 fieldText (RCConst (I k)) = show k
 fieldText l = show l
 
+||| The ` postDrop= ...` tail of a node line; nothing when the list is empty.
 postDropNote : List LocalId -> String
 postDropNote [] = ""
 postDropNote pd = " postDrop= " ++ show pd
