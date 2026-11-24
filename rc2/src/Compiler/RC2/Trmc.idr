@@ -14,6 +14,7 @@ import Compiler.RC2.MutualLoop
 import Compiler.RC2.RCExp
 import Compiler.RC2.Util
 
+import Core.CompileExpr
 import Core.Context.Log
 
 import Data.SortedMap
@@ -102,11 +103,22 @@ trmcTailCallees _ _ = []
 -------------------------------------------------------------------------------
 -- Rewriting
 
-||| `Entry` rewrites a member itself; `Acc res last hk` rewrites the body
-||| of its accumulating twin, whose `res` is the chain's first cell and
-||| `last` the cell whose hole is open. `hk` holds that hole's field
-||| index when the group's sites use more than one.
-data Mode = Entry | Acc LocalId LocalId (Maybe LocalId)
+||| The locals of an accumulating twin: `res` is the chain's first cell and
+||| `last` the cell whose hole is open, both NULL until the first site has
+||| built a cell. `hk` holds that hole's field index when the group's sites
+||| use more than one.
+record Acc where
+  constructor MkAcc
+  res : LocalId
+  last : LocalId
+  hk : Maybe LocalId
+
+||| `noChain` when `last` is NULL (no cell built yet), else `withChain`. A
+||| `case` on a constructor represented by NULL is rc2's NULL test for a
+||| value of any type (`Emit.Util.conAltCondExpr`), so no new node is needed.
+ifNoChain : FC -> LocalId -> (noChain, withChain : RCExp) -> RCExp
+ifNoChain fc last noChain withChain =
+  RConCase fc (RCLoc last) [MkRConAlt (NS (mkNamespace "_builtin") (UN (Basic "NIL"))) NIL Nothing [] noChain] (Just withChain)
 
 ||| `value` without its final expression (the call), its leading lets
 ||| kept in front of `rest`.
@@ -118,8 +130,8 @@ withoutFinal _ rest = rest
 ||| this member's sites into the group. `ks` are the group's distinct
 ||| hole indexes; with more than one, every twin takes the current one
 ||| as an extra argument.
-rewriteBody : {auto v : Ref VarId Int} -> SortedMap Name Name -> List Nat -> Sites -> Mode -> RCExp -> Core RCExp
-rewriteBody acc ks sites mode = go
+rewriteBody : {auto v : Ref VarId Int} -> SortedMap Name Name -> List Nat -> Sites -> Acc -> RCExp -> Core RCExp
+rewriteBody acc ks sites (MkAcc res last hk) = go
   where
     fillAt : FC -> LocalId -> RCLocal -> RCExp -> Nat -> Core RCExp
     fillAt fc last value rest k = do
@@ -147,21 +159,21 @@ rewriteBody acc ks sites mode = go
                        [site] => Just site
                        _ => Nothing
 
-    finish : LocalId -> LocalId -> Maybe LocalId -> RCExp -> Core RCExp
-    finish res last hk e = do
+    -- With no chain yet the tail is the result as it stands, so a call that
+    -- never reaches a site returns as the original would.
+    finish : RCExp -> Core RCExp
+    finish e = do
         r <- freshVarId
-        RLet emptyFC r RBoxed e <$> fill emptyFC last hk (RCLoc r) (RV emptyFC (RCLoc res))
+        ifNoChain emptyFC last e . RLet emptyFC r RBoxed e <$> fill emptyFC last hk (RCLoc r) (RV emptyFC (RCLoc res))
 
     other : RCExp -> Core RCExp
-    other e = case mode of
-        Entry => pure e
-        Acc res last hk => case e of
-            RAppName fc Nothing g as' => case lookup g acc of
-                Just g' => pure (RAppName fc Nothing g' (as' ++ [RCLoc res, RCLoc last] ++ map RCLoc (toList hk)))
-                Nothing => finish res last hk e
-            RCrash _ _ => pure e
-            RV fc x => fill fc last hk x (RV fc (RCLoc res))
-            _ => finish res last hk e
+    other e = case e of
+        RAppName fc Nothing g as' => case lookup g acc of
+            Just g' => pure (RAppName fc Nothing g' (as' ++ [RCLoc res, RCLoc last] ++ map RCLoc (toList hk)))
+            Nothing => finish e
+        RCrash _ _ => pure e
+        RV fc x => ifNoChain fc last e <$> fill fc last hk x (RV fc (RCLoc res))
+        _ => finish e
 
     go : RCExp -> Core RCExp
     go (RLet fc var rep value rest) =
@@ -184,10 +196,14 @@ rewriteBody acc ks sites mode = go
                                         RCLoc x => if isJust (lookup x sites) then RCNull else a
                                         _ => a) args
                 cell = RCon fc n ci tag holed Nothing
-            case mode of
-                 Entry => pure $ RLet fc c RBoxed cell (RAppName fc Nothing g' (as' ++ [RCLoc c, RCLoc c] ++ holeArg k))
-                 Acc res last hk =>
-                     RLet fc c RBoxed cell <$> fill fc last hk (RCLoc c) (RAppName fc Nothing g' (as' ++ [RCLoc res, RCLoc c] ++ holeArg k))
+            -- The first cell becomes the chain's `res`; later ones fill the
+            -- open hole. Only the new `res` is chosen by the `case`, so the
+            -- call that continues stays one, not one per branch.
+            res' <- freshVarId
+            withChain <- fill fc last hk (RCLoc c) (RV fc (RCLoc res))
+            pure $ RLet fc c RBoxed cell
+                 $ RLet fc res' RBoxed (ifNoChain fc last (RV fc (RCLoc c)) withChain)
+                 $ RAppName fc Nothing g' (as' ++ [RCLoc res', RCLoc c] ++ holeArg k)
     go e = other e
 
 -------------------------------------------------------------------------------
@@ -261,8 +277,11 @@ applyTrmc defs = do
             res <- freshVarId
             last <- freshVarId
             hk <- if length ks > 1 then Just <$> freshVarId else pure Nothing
-            entry <- rewriteBody acc ks sites Entry body
-            accBody <- rewriteBody acc ks sites (Acc res last hk) body
+            accBody <- rewriteBody acc ks sites (MkAcc res last hk) body
+            -- The entry only starts the twin with no chain (`res`, `last`
+            -- NULL), so the body exists once; LateInline splices the call.
+            let entry = RAppName emptyFC Nothing n' (map (RCLoc . fst) args ++ [RCNull, RCNull]
+                                                       ++ map (const (RCConst (I 0))) (toList hk))
             pure [ (n, MkRCFun args ret w entry)
                  , (n', MkRCFun (args ++ [(res, RBoxed), (last, RBoxed)] ++ map (, RBoxed) (toList hk)) RBoxed False accBody) ]
     one _ nd = pure [nd]

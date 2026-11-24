@@ -13,17 +13,21 @@ dump="$TMP/${name}_rc2.rcexpr"
 # (doc/speculative-closure-specialization.md, "Iteration"). The closure
 # key `applyAll incr` only appears inside the clone the constant-
 # constructor half builds for `run`, i.e. it needs a second round. Asserts
-# the `run` clone calls a closure clone of `applyAll` and no longer the
+# the `run` clone uses a closure clone of `applyAll` and no longer the
 # generic one, so a cap of one round, `--directive nospecclosure` and
-# `--directive nospecconstcon` all make it FAIL by design.
+# `--directive nospecconstcon` all make it FAIL by design. The clone is
+# either called or, being `applyAll`'s TRMC twin with `run` as its one
+# caller, spliced into `run` by LateInline: then `incr`'s `+ 3` is in the
+# loop itself (doc/trmc.md, "Entries").
 it="Test106TransitiveSpec_SpecIterate"
-clones="$(grep -cE "^def .*rc2_specClosure_${it}_applyAll" "$dump" || true)"
-viaClone="$(awk -v r="rc2_specConst_${it}_run" '/^def /{ins = index($0, r) > 0} ins && /call .*rc2_specClosure_Test106TransitiveSpec_SpecIterate_applyAll/' "$dump" | wc -l)"
-generic="$(awk -v r="rc2_specConst_${it}_run" '/^def /{ins = index($0, r) > 0} ins && /call Test106TransitiveSpec\.SpecIterate\.applyAll/' "$dump" | wc -l)"
-if [ "$clones" -ge 2 ] && [ "$viaClone" -ge 1 ] && [ "$generic" = "0" ]; then
-    pass "second-round closure clone of applyAll: $clones clones kept, the run clone calls one ($viaClone site(s)), no generic call left"
+inRun() { PAT="$1" awk -v r="rc2_specConst_${it}_run" '/^def /{ins = index($0, r) > 0} ins && $0 ~ ENVIRON["PAT"]' "$dump" | wc -l; }
+viaClone="$(inRun 'call .*rc2_specClosure_Test106TransitiveSpec_SpecIterate_applyAll')"
+spliced="$(inRun 'op \+Int \[v[0-9]+, #3\]')"
+generic="$(inRun 'call (Test106TransitiveSpec\.SpecIterate\.applyAll|\{rc2_trmc_Test106TransitiveSpec_SpecIterate_applyAll)')"
+if [ $((viaClone + spliced)) -ge 1 ] && [ "$generic" = "0" ]; then
+    pass "second-round closure clone of applyAll: the run clone calls one ($viaClone site(s)) or has it spliced ($spliced), no generic call left"
 else
-    fail "expected >=2 applyAll closure clones ($clones), the run clone calling one ($viaClone) and not the generic one ($generic) in $dump"
+    fail "expected the run clone to call an applyAll closure clone ($viaClone) or have it spliced ($spliced), and not the generic one ($generic) in $dump"
 fi
 
 # MultiApplySpec: closure specialisation of callees that apply the
