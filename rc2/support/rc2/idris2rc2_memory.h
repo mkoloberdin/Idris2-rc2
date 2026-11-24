@@ -220,6 +220,14 @@ static inline void idris2rc2_dropString(IDRIS2RC2_Value *v) {
 // RCExp.idr/RC.idr's module notes on RFree). A no-op for unboxed/NULL.
 void idris2rc2_free(IDRIS2RC2_Value *v);
 
+// idris2rc2_drop of each argument, out of line (rc2/doc/batched-drops.md).
+void idris2rc2_drop3(IDRIS2RC2_Value *a, IDRIS2RC2_Value *b, IDRIS2RC2_Value *c);
+void idris2rc2_drop4(IDRIS2RC2_Value *a, IDRIS2RC2_Value *b, IDRIS2RC2_Value *c, IDRIS2RC2_Value *d);
+void idris2rc2_drop5(IDRIS2RC2_Value *a, IDRIS2RC2_Value *b, IDRIS2RC2_Value *c, IDRIS2RC2_Value *d,
+                     IDRIS2RC2_Value *e);
+void idris2rc2_drop6(IDRIS2RC2_Value *a, IDRIS2RC2_Value *b, IDRIS2RC2_Value *c, IDRIS2RC2_Value *d,
+                     IDRIS2RC2_Value *e, IDRIS2RC2_Value *f);
+
 // A cell whose size is known where it is made: the pool class is a constant
 // there, and the allocation is the pop of a free list, inline in the generated C
 // (rc2/doc/small-object-allocator.md, stage 2). An empty free list, and the

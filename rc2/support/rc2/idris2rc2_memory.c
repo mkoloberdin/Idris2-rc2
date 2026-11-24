@@ -367,6 +367,22 @@ again:
   }
 }
 
+void idris2rc2_drop3(IDRIS2RC2_Value *a, IDRIS2RC2_Value *b, IDRIS2RC2_Value *c) {
+  idris2rc2_drop(a); idris2rc2_drop(b); idris2rc2_drop(c);
+}
+void idris2rc2_drop4(IDRIS2RC2_Value *a, IDRIS2RC2_Value *b, IDRIS2RC2_Value *c, IDRIS2RC2_Value *d) {
+  idris2rc2_drop(a); idris2rc2_drop(b); idris2rc2_drop(c); idris2rc2_drop(d);
+}
+void idris2rc2_drop5(IDRIS2RC2_Value *a, IDRIS2RC2_Value *b, IDRIS2RC2_Value *c, IDRIS2RC2_Value *d,
+                     IDRIS2RC2_Value *e) {
+  idris2rc2_drop(a); idris2rc2_drop(b); idris2rc2_drop(c); idris2rc2_drop(d); idris2rc2_drop(e);
+}
+void idris2rc2_drop6(IDRIS2RC2_Value *a, IDRIS2RC2_Value *b, IDRIS2RC2_Value *c, IDRIS2RC2_Value *d,
+                     IDRIS2RC2_Value *e, IDRIS2RC2_Value *f) {
+  idris2rc2_drop(a); idris2rc2_drop(b); idris2rc2_drop(c); idris2rc2_drop(d); idris2rc2_drop(e);
+  idris2rc2_drop(f);
+}
+
 void idris2rc2_free(IDRIS2RC2_Value *v) {
   // No refcount check, no decrement: the caller (rc2's generated code,
   // via the RFree IR primitive) has already proven statically that `v` is

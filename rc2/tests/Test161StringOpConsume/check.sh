@@ -18,7 +18,7 @@ fi
 calls="$(grep -cE 'idris2rc2_(strAppend|strCons|strTail|strSubstr|strReverse|strIndex)\(' "$c" || true)"
 dropped="$(awk '
     /idris2rc2_(strAppend|strCons|strTail|strSubstr|strReverse|strIndex)\(/ { on = 1; next }
-    on && /^ *idris2rc2_drop\(/ { n++; next }
+    on && /^ *idris2rc2_drop[0-9]?\(/ { n++; next }
     { on = 0 }
     END { print n + 0 }' "$c")"
 if [ "$calls" -ge 10 ] && [ "$dropped" = "0" ]; then

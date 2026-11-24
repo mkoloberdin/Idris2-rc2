@@ -1476,8 +1476,8 @@ putLines outn h = traverse_ $ \l =>
 flushEmitBuffer : {auto oft : Ref OutfileText Output} -> (outn : String) -> File -> Core ()
 flushEmitBuffer outn h = do
     buf <- get OutfileText
-    put OutfileText DList.Nil
-    putLines outn h (reify buf)
+    put OutfileText emptyOutput
+    putLines outn h (outputLines buf)
 
 ||| Flushes every constant `boxedConstExpr`/`boxedConstConExpr` staged
 ||| while lowering the def just processed (`ConstConDef`'s own pending
@@ -1522,7 +1522,7 @@ generateCSourceFile defs0 exports noMain entryHelper dropUnimplementableForeign 
      _ <- newRef FunctionDefinitions []
      _ <- newRef ConstDef Data.SortedMap.empty
      _ <- newRef ConstConDef (Data.SortedMap.empty, [])
-     _ <- newRef OutfileText DList.Nil
+     _ <- newRef OutfileText emptyOutput
      _ <- newRef HeaderFiles empty
      _ <- newRef ForeignLibs empty
      _ <- newRef IndentLevel 0
@@ -1595,7 +1595,7 @@ generateCSourceFile defs0 exports noMain entryHelper dropUnimplementableForeign 
      -- (`flushStagedDecls`) always go out first, so they're declared
      -- before the def's own body text that references them.
      traverse_ (\(n, d) => do
-         put OutfileText DList.Nil
+         put OutfileText emptyOutput
          when (not (contains n unusedForeign)) $ createCFunctions n d
          flushStagedDecls outn h
          flushEmitBuffer outn h) defs
@@ -1605,7 +1605,7 @@ generateCSourceFile defs0 exports noMain entryHelper dropUnimplementableForeign 
      -- that ordering here, since Pass 1's own `collectDeclarations` already
      -- forward-declared every def's own prototype before Pass 2 even started.
      traverse_ (\(n, exportedCName, fargs, ret) => do
-         put OutfileText DList.Nil
+         put OutfileText emptyOutput
          emitExportWrapper n exportedCName fargs ret
          flushEmitBuffer outn h) exports
      -- The process entry point: calls `__mainExpression_0()` and trampolines
