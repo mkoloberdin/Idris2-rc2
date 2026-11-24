@@ -169,6 +169,29 @@ data IsAnyConstLocal : RCLocal -> Type where
      ItIsConstCon2    : IsAnyConstLocal (RCConstCon n ci t args)
      ItIsConstPartial2 : IsAnyConstLocal (RCConstPartial n missing caps)
 
+||| What `RFill` may take as the hole's index: an `Int` constant, or a local
+||| (doc/trmc.md). That the local holds an `Int` is the `Rep`'s business, which
+||| Emit reads it through.
+public export
+data IsFillIndex : RCLocal -> Type where
+     FixedIdx : IsFillIndex (RCConst (I k))
+     VarIdx   : IsFillIndex (RCLoc l)
+
+||| For a pass that rewrites `RFill`'s index: the proof again, if it still holds.
+export
+isFillIndex : (l : RCLocal) -> Maybe (IsFillIndex l)
+isFillIndex (RCConst (I _)) = Just FixedIdx
+isFillIndex (RCLoc _) = Just VarIdx
+isFillIndex _ = Nothing
+
+||| `f field` with its proof, or `field` itself when `f` maps it to something
+||| `RFill` cannot take.
+export
+mapFillIndex : (RCLocal -> RCLocal) -> (field : RCLocal) -> (0 _ : IsFillIndex field) -> Subset RCLocal IsFillIndex
+mapFillIndex f field ok = case isFillIndex (f field) of
+    Just ok' => Element (f field) ok'
+    Nothing => Element field ok
+
 export
 covering
 Eq RCLocal where
@@ -445,7 +468,11 @@ data RCExp : Type where
      ||| `value` is consumed; `cell` is only borrowed, so `postDrop` only
      ||| ever means "drop `cell`", as for `RStructSet`. Only produced by
      ||| `Compiler.RC2.Trmc`.
-     RFill : FC -> (cell : RCLocal) -> (field : Nat) -> (value : RCLocal) -> (postDrop : List LocalId) -> RCExp
+     ||| `field` is the hole's index: a constant, or a local holding it when
+     ||| one TRMC twin fills holes at several (doc/trmc.md); `fieldOk` says
+     ||| which.
+     RFill : FC -> (cell : RCLocal) -> (field : RCLocal) -> {auto 0 fieldOk : IsFillIndex field}
+           -> (value : RCLocal) -> (postDrop : List LocalId) -> RCExp
      ||| A comparison fused into a two-way branch with no Bool ever
      ||| materialised. Only produced by Phase 1's `tryFuseCompare` --
      ||| see `doc/native-type-inference.md`'s "Comparisons are a
@@ -598,7 +625,7 @@ freeLocalsR (ROp _ _ _ args _) = fromList (toList args)
 freeLocalsR (RExtPrim _ _ _ args _) = fromList args
 freeLocalsR (RStructGet _ structVar _ _) = singleton structVar
 freeLocalsR (RStructSet _ structVar _ value _) = fromList [structVar, value]
-freeLocalsR (RFill _ cell _ value _) = fromList [cell, value]
+freeLocalsR (RFill _ cell field value _) = fromList [cell, field, value]
 freeLocalsR (RCmpCase _ _ args _ t f) =
     union (fromList (toList args)) (union (freeLocalsR t) (freeLocalsR f))
 freeLocalsR (RConCase _ sc alts mDef) =
@@ -653,8 +680,8 @@ mentionedLocalsAcc acc (RExtPrim _ _ _ args postDrop) = insertAll args (insertAl
 mentionedLocalsAcc acc (RStructGet _ structVar _ postDrop) = insert structVar (insertAll (map RCLoc postDrop) acc)
 mentionedLocalsAcc acc (RStructSet _ structVar _ value postDrop) =
     insert structVar (insert value (insertAll (map RCLoc postDrop) acc))
-mentionedLocalsAcc acc (RFill _ cell _ value postDrop) =
-    insert cell (insert value (insertAll (map RCLoc postDrop) acc))
+mentionedLocalsAcc acc (RFill _ cell field value postDrop) =
+    insert cell (insert field (insert value (insertAll (map RCLoc postDrop) acc)))
 mentionedLocalsAcc acc (RCmpCase _ _ args postDrop t f) =
     mentionedLocalsAcc (mentionedLocalsAcc (insertAll (toList args) (insertAll (map RCLoc postDrop) acc)) t) f
 mentionedLocalsAcc acc (RConCase _ sc alts mDef) =
@@ -738,7 +765,7 @@ ownedUsedGo targets wanted st@(_, found) e =
     step (RExtPrim _ _ _ args _) = hits st args
     step (RStructGet _ structVar _ _) = hit st structVar
     step (RStructSet _ structVar _ value _) = hit (hit st structVar) value
-    step (RFill _ cell _ value _) = hit (hit st cell) value
+    step (RFill _ cell field value _) = hit (hit (hit st cell) field) value
     step (RLet _ _ _ value body) =
         ownedUsedGo targets wanted (ownedUsedGo targets wanted st value) body
     step (RCmpCase _ _ args _ t f) =
@@ -807,7 +834,7 @@ mentionsLocal l (ROp _ _ _ args _) = elem l (toList args)
 mentionsLocal l (RExtPrim _ _ _ args _) = elem l args
 mentionsLocal l (RStructGet _ structVar _ _) = structVar == l
 mentionsLocal l (RStructSet _ structVar _ value _) = structVar == l || value == l
-mentionsLocal l (RFill _ cell _ value _) = cell == l || value == l
+mentionsLocal l (RFill _ cell field value _) = cell == l || field == l || value == l
 mentionsLocal l (RCmpCase _ _ args _ t f) =
     elem l (toList args) || mentionsLocal l t || mentionsLocal l f
 mentionsLocal l (RConCase _ sc alts mDef) =
@@ -849,7 +876,7 @@ countUsesR l (ROp _ _ _ args _) = length (filter (== l) (toList args))
 countUsesR l (RExtPrim _ _ _ args _) = length (filter (== l) args)
 countUsesR l (RStructGet _ structVar _ _) = if structVar == l then 1 else 0
 countUsesR l (RStructSet _ structVar _ value _) = length (filter (== l) [structVar, value])
-countUsesR l (RFill _ cell _ value _) = length (filter (== l) [cell, value])
+countUsesR l (RFill _ cell field value _) = length (filter (== l) [cell, field, value])
 countUsesR l (RCmpCase _ _ args _ t f) =
     length (filter (== l) (toList args)) + countUsesR l t + countUsesR l f
 countUsesR l (RConCase _ sc alts mDef) =
@@ -980,7 +1007,7 @@ foldRCNamesR nf = go
     go (RExtPrim _ _ _ args postDrop) = ls args <+> ls (map RCLoc postDrop)
     go (RStructGet _ structVar _ postDrop) = l structVar <+> ls (map RCLoc postDrop)
     go (RStructSet _ structVar _ value postDrop) = l structVar <+> l value <+> ls (map RCLoc postDrop)
-    go (RFill _ cell _ value postDrop) = l cell <+> l value <+> ls (map RCLoc postDrop)
+    go (RFill _ cell field value postDrop) = l cell <+> l field <+> l value <+> ls (map RCLoc postDrop)
     go (RCmpCase _ _ args postDrop whenTrue whenFalse) =
         ls (toList args) <+> ls (map RCLoc postDrop) <+> go whenTrue <+> go whenFalse
     go (RConCase _ sc alts mDef) =
@@ -1033,7 +1060,7 @@ directReads (ROp _ _ _ args pd) = toList args ++ map RCLoc pd
 directReads (RExtPrim _ _ _ args pd) = args ++ map RCLoc pd
 directReads (RStructGet _ sv _ pd) = sv :: map RCLoc pd
 directReads (RStructSet _ sv _ val pd) = sv :: val :: map RCLoc pd
-directReads (RFill _ cell _ val pd) = cell :: val :: map RCLoc pd
+directReads (RFill _ cell field val pd) = cell :: field :: val :: map RCLoc pd
 directReads (RCmpCase _ _ args pd _ _) = toList args ++ map RCLoc pd
 directReads (RConCase _ sc _ _) = [sc]
 directReads (RConstCase _ sc _ _) = [sc]

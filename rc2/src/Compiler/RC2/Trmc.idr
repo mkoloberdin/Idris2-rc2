@@ -133,21 +133,15 @@ withoutFinal _ rest = rest
 rewriteBody : {auto v : Ref VarId Int} -> SortedMap Name Name -> List Nat -> Sites -> Acc -> RCExp -> Core RCExp
 rewriteBody acc ks sites (MkAcc res last hk) = go
   where
-    fillAt : FC -> LocalId -> RCLocal -> RCExp -> Nat -> Core RCExp
-    fillAt fc last value rest k = do
-        u <- freshVarId
-        pure $ RLet fc u RBoxed (RFill fc (RCLoc last) k value []) rest
-
-    -- `rest` is let-free (a result or a tail call), so each branch can
-    -- carry its own copy.
+    -- With several hole indexes the index is `hk` itself, read at run time:
+    -- one fill, not one per index under a `case` on `hk`.
     fill : FC -> LocalId -> Maybe LocalId -> RCLocal -> RCExp -> Core RCExp
-    fill fc last Nothing value rest = fillAt fc last value rest (fromMaybe 0 (head' ks))
-    fill fc last (Just hk) value rest = do
-        branches <- traverse (\k => (k,) <$> fillAt fc last value rest k) ks
-        case reverse branches of
-             ((_, dflt) :: others) =>
-                 pure $ RConstCase fc (RCLoc hk) (map (\(k, b) => MkRConstAlt (I (cast k)) b) (reverse others)) (Just dflt)
-             [] => pure rest
+    fill fc last hk value rest = do
+        u <- freshVarId
+        let filled = case hk of
+                          Just h => RFill fc (RCLoc last) (RCLoc h) value []
+                          Nothing => RFill fc (RCLoc last) (RCConst (I (cast (fromMaybe 0 (head' ks))))) value []
+        pure $ RLet fc u RBoxed filled rest
 
     holeArg : Nat -> List RCLocal
     holeArg k = if length ks > 1 then [RCConst (I (cast k))] else []

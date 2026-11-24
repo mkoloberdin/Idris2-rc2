@@ -1182,12 +1182,15 @@ emitRC sink (RStructSet fc structVar (MkStructField sn _ fn ty _) value postDrop
     finalizeSink fc sink "((IDRIS2RC2_Value *)NULL)"
 
 -- `value` moves into the hole; the hole held nothing to drop (doc/trmc.md).
-emitRC sink (RFill fc cell k value postDrop) _ = do
+emitRC sink (RFill fc cell field value postDrop) _ = do
     (cellC, p1) <- rcVarToBoxedC cell
     (valC, p2) <- rcVarToBoxedC value
-    emit fc $ "((IDRIS2RC2_Constructor *)\{cellC})->args[\{show k}] = \{valC};"
+    (fieldC, p3) <- case field of
+                         RCConst (I k) => pure (show k, the (List String) [])
+                         _ => rcVarToNativeC (TPrim IntType) field
+    emit fc $ "((IDRIS2RC2_Constructor *)\{cellC})->args[\{fieldC}] = \{valC};"
     removeVars $ map idName postDrop
-    removeVars (p1 ++ p2)
+    removeVars (p1 ++ p2 ++ p3)
     finalizeSink fc sink "((IDRIS2RC2_Value *)NULL)"
 
 emitRC sink (RCmpCase fc op args postDrop whenTrue whenFalse) _ = unreachableInEmitRC "RCmpCase"

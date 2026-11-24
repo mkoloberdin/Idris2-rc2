@@ -10,6 +10,7 @@ import Compiler.RC2.RCExp
 
 import Core.TT
 
+import Data.DPair
 import Data.List
 import Data.List1
 import Data.SortedMap
@@ -95,8 +96,9 @@ mutual
       RForce fc lr (f v) (mapIds f postDrop)
   mapLocalsRCExp f g (RStructSet fc structVar sf value postDrop) =
       RStructSet fc (f structVar) sf (f value) (mapIds f postDrop)
-  mapLocalsRCExp f g (RFill fc cell k value postDrop) =
-      RFill fc (f cell) k (f value) (mapIds f postDrop)
+  mapLocalsRCExp f g (RFill fc cell field @{ok} value postDrop) =
+      let Element field' ok' = mapFillIndex f field ok
+      in RFill fc (f cell) field' @{ok'} (f value) (mapIds f postDrop)
   mapLocalsRCExp f g (RCmpCase fc op args postDrop whenTrue whenFalse) =
       RCmpCase fc op (map f args) (mapIds f postDrop) (mapLocalsRCExp f g whenTrue) (mapLocalsRCExp f g whenFalse)
   mapLocalsRCExp f g (RConCase fc sc alts mDef) =

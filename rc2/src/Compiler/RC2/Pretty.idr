@@ -34,6 +34,12 @@ lazyPrefix : Maybe LazyReason -> String
 lazyPrefix Nothing = ""
 lazyPrefix (Just r) = "~" ++ show r ++ " "
 
+-- A constant hole index prints bare (`fill v1 . 2`), a local as itself
+-- (`fill v1 . v7`).
+fieldText : RCLocal -> String
+fieldText (RCConst (I k)) = show k
+fieldText l = show l
+
 ||| The ` postDrop= ...` tail of a node line; nothing when the list is empty.
 postDropNote : List LocalId -> String
 postDropNote [] = ""
@@ -80,8 +86,8 @@ mutual
   prettyExp d (RStructSet _ structVar (MkStructField sn _ fn _ _) value postDrop) =
       indent d ++ "structSet " ++ show structVar ++ " . " ++ fn ++ " ( " ++ sn ++ " ) = " ++ show value
         ++ postDropNote postDrop ++ "\n"
-  prettyExp d (RFill _ cell k value postDrop) =
-      indent d ++ "fill " ++ show cell ++ " . " ++ show k ++ " = " ++ show value
+  prettyExp d (RFill _ cell field value postDrop) =
+      indent d ++ "fill " ++ show cell ++ " . " ++ fieldText field ++ " = " ++ show value
         ++ postDropNote postDrop ++ "\n"
   prettyExp d (RCmpCase _ op args postDrop whenTrue whenFalse) =
       indent d ++ "cmp " ++ show op.fst ++ " " ++ show (toList args)

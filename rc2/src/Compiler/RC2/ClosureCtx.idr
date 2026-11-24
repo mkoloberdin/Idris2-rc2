@@ -135,7 +135,7 @@ rewriteBody f f' j c k exts sites mode = go
     fill : FC -> LocalId -> RCLocal -> RCExp -> Core RCExp
     fill fc last value rest = do
         u <- freshVarId
-        pure $ RLet fc u RBoxed (RFill fc (RCLoc last) k value []) rest
+        pure $ RLet fc u RBoxed (RFill fc (RCLoc last) (RCConst (I (cast k))) value []) rest
 
     replaceAt : Nat -> RCLocal -> List RCLocal -> List RCLocal
     replaceAt _ _ [] = []

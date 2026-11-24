@@ -103,20 +103,27 @@ refcount on the cell passed along as `last`.
 
 When the sites fill different field indexes, such as `Bind` and `App`
 in one term traversal, `f#` takes a third extra parameter, `hk`: the
-index of `last`'s hole. Each site passes its own index as a constant.
-A fill becomes a `case` over `hk` with one static `RFill` per index:
+index of `last`'s hole. Each site passes its own index as a constant,
+and a fill takes `hk` as its index:
 
 ```
-case hk of
-  0 -> let _ = fill last . 0 = c; call f# as' res c #1
-  _ -> let _ = fill last . 1 = c; call f# as' res c #1
+let _ = fill last . hk = c; call f# as' res c #1
 ```
 
-`RFill` itself keeps a static field, so no pass that knows it changes.
-The code after the fill (a tail call, or returning `res`) has no
-`let`s, so each branch gets its own copy of it. A function with a
-single index gets no `hk`, exactly as in phase 1. `hk` is always small,
-so Loop keeps it as a native loop parameter.
+`RFill`'s index is an `RCLocal` with a proof (`IsFillIndex`) that it is
+an `Int` constant or a local: `fill last . 1` with one index,
+`fill last . hk` with several. Emit writes `args[k]` or `args[hk]`; every
+constructor keeps its fields in `args` (`constructor-layout.md`), so one
+store does for every index. A pass that rewrites locals takes the proof
+again with `mapFillIndex`. A function with a single index gets no `hk`,
+exactly as in phase 1. `hk` stays boxed, as TRMC runs after native
+inference; it is an immediate `Int`, so reading it is a shift.
+
+Until 2026-11-24 the fill was a `case` over `hk` with one constant
+`RFill` per index, and the code after it was copied into every branch.
+On `rc2-norepl` those copies were 1,371 `case`s, 38k IR lines, about two
+thirds of what TRMC added. With the index in `RFill`, the C went from
+106.9 MB to 104.8 MB.
 
 ### Several recursive fields (phase 3)
 
@@ -164,14 +171,18 @@ Emit lowers it to
 Every pass that knows `RStructSet` gets a matching `RFill` case. That
 is 12 files today (`grep -c RStructSet`). The cases that matter are:
 
-- **RC (`annotate`):** `cell` is a borrowed operand with `postDrop`,
-  and `value` is a consumed operand.
+- **RC (`annotate`):** `cell`, and `field` when it is a local, are
+  borrowed operands with `postDrop`, and `value` is a consumed operand.
+  Every fold over the locals an expression reads counts `field`, and Loop
+  dups it as an invariant parameter like `cell`.
 - **DeadVars/Sink:** `RFill` has an effect. It must never be removed
   as a dead `let`, never sunk into a branch, and never moved past
   another `RFill`.
 - **DualABI:** `value` and `cell` are always `Boxed`, so `RFill` is
-  never a native read.
-- **Pretty, and rc2base's AST/Parser/Lint:** a `fill` line.
+  never a native read. A local `field` is `Boxed` too, and Emit unboxes it.
+- **Pretty, and rc2base's AST/Parser/Lint:** a `fill` line. rc2base keeps
+  the index as text, so `rcexpr-lint` does not check a local index as a
+  read.
 
 The hole itself is written as `RCNull` in the `RCon`'s argument list.
 That is safe because nothing after this pass projects fields out of a
@@ -308,7 +319,7 @@ Phase 2 makes it a set, a *group*:
    - a tail call to member `g`: `call g# as' res last hk`;
    - any other tail: fill `last` with it and return `res`.
 
-   The fill dispatches on `hk` over the group's indexes (phase 3).
+   The fill takes `hk` as its index when the group has several (phase 3).
 5. **Entries.** Each `m` keeps its name and signature, and its body is
    `call m# as [__] [__] #0` (`#0` for `hk` when the group has one), as in
    phase 1.
@@ -316,8 +327,8 @@ Phase 2 makes it a set, a *group*:
 The `m#` functions now tail-call each other and nothing else in the
 group. MutualLoop runs after RC. It merges them into one function, as
 it does any mutual tail recursion, and Loop turns that into one loop.
-Nothing downstream changes: `hk`, `res` and `last` are ordinary
-parameters to MutualLoop's slot sharing.
+`hk`, `res` and `last` are ordinary parameters to MutualLoop's slot
+sharing; `hk` is read only as a fill's index.
 
 ### Why a group, not per-function rewriting
 

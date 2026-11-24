@@ -53,15 +53,11 @@ renameLocalN cl c@(RCConstCon n ci tag args) =
             Nothing => c
 renameLocalN _ l = l
 
-||| `e` with every function name `f` maps changed, and the closures (`partial`,
-||| constant closures, also inside constant constructors) renamed by `cl`,
-||| which may change the number of arguments they miss.
-renameNamesG : (Name -> Name) -> ClosureRename -> RCExp -> RCExp
-renameNamesG f cl = go
+||| `e` with every function name `f` maps changed, every `partial` renamed by
+||| `cl` and every value by `l`.
+mapNamesG : (Name -> Name) -> ClosureRename -> (RCLocal -> RCLocal) -> RCExp -> RCExp
+mapNamesG f cl l = go
   where
-    l : RCLocal -> RCLocal
-    l = renameLocalN cl
-
     ls : List RCLocal -> List RCLocal
     ls = map l
 
@@ -82,7 +78,9 @@ renameNamesG f cl = go
     go (RExtPrim fc lazy p args postDrop) = RExtPrim fc lazy p (ls args) postDrop
     go (RStructGet fc sv sf postDrop) = RStructGet fc (l sv) sf postDrop
     go (RStructSet fc sv sf value postDrop) = RStructSet fc (l sv) sf (l value) postDrop
-    go (RFill fc cell k value postDrop) = RFill fc (l cell) k (l value) postDrop
+    go (RFill fc cell field @{ok} value postDrop) =
+        let Element field' ok' = mapFillIndex l field ok
+        in RFill fc (l cell) field' @{ok'} (l value) postDrop
     go (RCmpCase fc op args postDrop t e) = RCmpCase fc op (map l args) postDrop (go t) (go e)
     go (RConCase fc sc alts mDef) =
         RConCase fc (l sc) (map (\(MkRConAlt n ci tag as body) => MkRConAlt n ci tag as (go body)) alts) (map go mDef)
@@ -100,6 +98,17 @@ renameNamesG f cl = go
     go (RLoop {sameLen} fc params initial prologueDrop body) = mapLoop fc params initial id l prologueDrop (go body)
     go (RLoopContinue fc args postDrop) = RLoopContinue fc (ls args) postDrop
     go (RMemoize fc n rep body) = RMemoize fc n rep (go body)
+
+||| `e` with every function name `f` maps changed, and the closures (`partial`,
+||| constant closures, also inside constant constructors) renamed by `cl`,
+||| which may change the number of arguments they miss.
+renameNamesG : (Name -> Name) -> ClosureRename -> RCExp -> RCExp
+renameNamesG f cl = mapNamesG f cl (renameLocalN cl)
+
+||| `e` with every value (an operand, a field, a scrutinee, ...) mapped by `l`.
+export
+mapLocalsR : (RCLocal -> RCLocal) -> RCExp -> RCExp
+mapLocalsR = mapNamesG id (\n, m => (n, m))
 
 ------------------------------------------------------------------------
 -- Constants
@@ -375,7 +384,7 @@ mutual
   eqE env (RExtPrim _ l1 p1 a1 pd1) (RExtPrim _ l2 p2 a2 pd2) =
       if eqLazy l1 l2 && p1 == p2 && eqLs env a1 a2 && eqIds env pd1 pd2 then Just env else Nothing
   eqE env (RFill _ c1 k1 v1 pd1) (RFill _ c2 k2 v2 pd2) =
-      if k1 == k2 && eqL env c1 c2 && eqL env v1 v2 && eqIds env pd1 pd2 then Just env else Nothing
+      if eqL env k1 k2 && eqL env c1 c2 && eqL env v1 v2 && eqIds env pd1 pd2 then Just env else Nothing
   eqE env (RCmpCase _ o1 a1 pd1 t1 e1) (RCmpCase _ o2 a2 pd2 t2 e2) =
       if show (Subset.fst o1) == show (Subset.fst o2) && eqLs env (toList a1) (toList a2) && eqIds env pd1 pd2
          then eqE env t1 t2 >>= \env1 => eqE env1 e1 e2

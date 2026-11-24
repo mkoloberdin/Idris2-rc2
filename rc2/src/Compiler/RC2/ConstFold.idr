@@ -147,7 +147,7 @@ useInfo = go (MkUseInfo empty empty empty)
     go acc (RStructGet _ structVar _ _) = boxed [structVar] acc
     go acc (RForce _ _ v _) = boxed [v] acc
     go acc (RStructSet _ structVar _ value _) = boxed [structVar, value] acc
-    go acc (RFill _ cell _ value _) = boxed [cell, value] acc
+    go acc (RFill _ cell field value _) = reads [field] (boxed [cell, value] acc)
     go acc (RLet _ var rep value body) =
         let acc' = go (go acc value) body
         in case rep of
@@ -573,8 +573,9 @@ foldConst _ env (RDelay fc lr n caps) = RDelay fc lr n (map (resolveLocal env) c
 foldConst _ env (RForce fc lr v postDrop) = RForce fc lr (resolveLocal env v) postDrop
 foldConst _ env (RStructSet fc structVar sf value postDrop) =
     RStructSet fc (resolveLocal env structVar) sf (resolveLocal env value) postDrop
-foldConst _ env (RFill fc cell k value postDrop) =
-    RFill fc (resolveLocal env cell) k (resolveLocal env value) postDrop
+foldConst _ env (RFill fc cell field @{ok} value postDrop) =
+    let Element field' ok' = mapFillIndex (resolveLocal env) field ok
+    in RFill fc (resolveLocal env cell) field' @{ok'} (resolveLocal env value) postDrop
 foldConst _ env (ROp fc lazy op args postDrop) =
     let resolvedArgs = map (resolveLocal env) args
     in case resolveConsts env args of

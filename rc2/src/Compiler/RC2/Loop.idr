@@ -331,7 +331,7 @@ usesInvariant p e = existsInvariantUse e
     existsInvariantUse (RForce _ _ v _) = v == RCLoc p
     existsInvariantUse (RStructSet _ structVar _ value _) =
         structVar == RCLoc p || value == RCLoc p
-    existsInvariantUse (RFill _ cell _ value _) = cell == RCLoc p || value == RCLoc p
+    existsInvariantUse (RFill _ cell field value _) = cell == RCLoc p || field == RCLoc p || value == RCLoc p
     existsInvariantUse (RCmpCase _ _ args _ t f) =
         any (== RCLoc p) (toList args) || existsInvariantUse t || existsInvariantUse f
     existsInvariantUse (RConCase _ sc alts mDef) =
@@ -416,8 +416,8 @@ dupInvariantBoxed p (RForce fc lr v postDrop) =
     wrapInvariantDups fc p (countInvariantDups p [v]) (RForce fc lr v postDrop)
 dupInvariantBoxed p (RStructSet fc structVar sf value postDrop) =
     wrapInvariantDups fc p (countInvariantDups p [structVar, value]) (RStructSet fc structVar sf value postDrop)
-dupInvariantBoxed p (RFill fc cell k value postDrop) =
-    wrapInvariantDups fc p (countInvariantDups p [cell, value]) (RFill fc cell k value postDrop)
+dupInvariantBoxed p (RFill fc cell field value postDrop) =
+    wrapInvariantDups fc p (countInvariantDups p [cell, field, value]) (RFill fc cell field value postDrop)
 dupInvariantBoxed p (RCmpCase fc op args postDrop t f) =
     -- markInvariantNative already redirected every native-context
     -- occurrence in `args` to the shadow id -- args is left untouched

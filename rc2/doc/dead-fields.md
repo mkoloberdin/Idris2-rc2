@@ -64,3 +64,31 @@ functions, were most of the code; the instructions grew a little. With it, 26 sm
 and later inlining and `FunDedup` give back the same executable. Neither program has a deep
 recursion of this shape; what the pass is for is one like `myLTE` above, which it turns from a
 stack overflow into a loop.
+
+## Constant constructors (`Compiler.RC2.ConstFields`)
+
+The same question for the constants `ConstFold` folds a constructor into: a
+field no `case` alt of the whole program binds is never read, so a closure
+in it only keeps its function alive. Interface dictionaries are the usual
+case. In `rc2-norepl` an `Ord` dictionary reaches `Data.SortedMap` as one
+constant (`#MkOrd(..)`), and no alt binds its `>`, `<=`, `>=`, `max` or
+`min`.
+
+`applyConstFields` runs at the end of `toRCDefs`, after the last
+`DeadVars`, which leaves an unread alt field as `_`, and before
+`FunDedup`. It collects, for every constructor, the fields some alt binds;
+every field of a constructor also returned as a struct (`RRetPack`) counts
+as read, and newtypes are left alone. A constant closure in an unread field
+of a constant constructor then becomes `[erased]`, and `pruneDeadDefs`
+drops the functions nothing names any more. The erased proofs of the
+constants are taken again with `ConstFold.allConstLocal`, as in `FunDedup`.
+
+Only closures go: the runtime reads no closure out of a program's data,
+while it does read some fields (a list's cells in `fastConcat`). It needs
+the whole program, so it does not run in incremental mode. Off with
+`--directive noconstfields`.
+
+On `rc2-norepl` (2026-11-24) it drops 167 definitions, and the C goes
+from 107.0 MB to 106.9 MB. `Test114Inline/ConstFields` checks that an
+`Ord` dictionary's `max` and `min` go.
+
