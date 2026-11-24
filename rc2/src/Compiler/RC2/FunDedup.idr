@@ -8,6 +8,7 @@
 ||| This module was licensed by BSD3. see LICENSE file for detail.
 module Compiler.RC2.FunDedup
 
+import Compiler.RC2.ConstFold
 import Compiler.RC2.DeadCode
 import Compiler.RC2.Pretty
 import Compiler.RC2.RCExp
@@ -16,6 +17,7 @@ import Core.CompileExpr
 import Core.TT
 
 import Data.DPair
+import Data.List.Quantifiers
 import Data.List1
 import Data.SortedMap
 import Data.SortedSet
@@ -33,16 +35,27 @@ public export
 ClosureRename : Type
 ClosureRename = Name -> Nat -> (Name, Nat)
 
+||| A constant with its closures renamed, inside constant constructors and the
+||| captures of constant closures too. The erased proofs that the fields and
+||| captures are constants are taken again with `allConstLocal`: renaming a
+||| closure leaves a constant a constant, so it always gives one.
 renameLocalN : ClosureRename -> RCLocal -> RCLocal
-renameLocalN cl (RCConstPartial n missing caps {capsConst}) =
-    let (n', missing') = cl n missing in RCConstPartial n' missing' caps {capsConst}
+renameLocalN cl c@(RCConstPartial n missing caps) =
+    let (n', missing') = cl n missing
+        caps' = map (renameLocalN cl) caps
+    in case allConstLocal caps' of
+            Just prf => RCConstPartial n' missing' caps' {capsConst = prf}
+            Nothing => c
+renameLocalN cl c@(RCConstCon n ci tag args) =
+    let args' = map (renameLocalN cl) args
+    in case allConstLocal args' of
+            Just prf => RCConstCon n ci tag args' {argsConst = prf}
+            Nothing => c
 renameLocalN _ l = l
 
 ||| `e` with every function name `f` maps changed, and the closures (`partial`,
-||| constant closures) renamed by `cl`, which may change the number of arguments
-||| they miss. A `RCConstCon`'s fields are left as they are (its erased proof
-||| cannot be rebuilt): a closure constant inside one keeps its function alive,
-||| which is safe, only less thorough.
+||| constant closures, also inside constant constructors) renamed by `cl`,
+||| which may change the number of arguments they miss.
 renameNamesG : (Name -> Name) -> ClosureRename -> RCExp -> RCExp
 renameNamesG f cl = go
   where
@@ -92,15 +105,27 @@ renameNamesG f cl = go
 -- Constants
 ------------------------------------------------------------------------
 
-isFatConst : RCLocal -> Bool
-isFatConst (RCConstCon _ _ _ (_ :: _)) = True
-isFatConst (RCConstPartial _ _ caps) = any isFatConst caps
-isFatConst _ = False
+||| The most nodes a constant of a candidate may have. Constants are trees
+||| shared in memory whose unfolded size can be huge, so comparing a big one
+||| is no cheap matter; most are a few nodes (`Right (SErased ..)`).
+fatConstNodes : Nat
+fatConstNodes = 64
 
-||| `True` iff `e` holds a constant constructor with fields (a tree shared in
-||| memory, whose unfolded size can be huge, so comparing it is no cheap
-||| matter) or an inlined FFI call (not compared structurally). Such a
-||| function is no candidate.
+||| Whether `l` has more than `fatConstNodes` nodes, counted no further.
+isFatConst : RCLocal -> Bool
+isFatConst l = count [l] 0 > fatConstNodes
+  where
+    count : List RCLocal -> Nat -> Nat
+    count [] n = n
+    count (x :: xs) n =
+      if n > fatConstNodes then n
+      else case x of
+             RCConstCon _ _ _ args => count (args ++ xs) (S n)
+             RCConstPartial _ _ caps => count (caps ++ xs) (S n)
+             _ => count xs (S n)
+
+||| `True` iff `e` holds a constant over `fatConstNodes` nodes or an inlined
+||| FFI call (not compared structurally). Such a function is no candidate.
 hasFatConst : RCExp -> Bool
 hasFatConst = go
 where
