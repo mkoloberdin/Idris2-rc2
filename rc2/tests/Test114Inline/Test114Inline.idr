@@ -12,6 +12,7 @@ import Test114Inline.CompareFusionThroughCall
 import Test114Inline.DeadCodeInline
 import Test114Inline.InlineCalleeFirst
 import Test114Inline.FunDedup
+import Test114Inline.ConstFields
 
 main : IO ()
 main = do
@@ -20,3 +21,4 @@ main = do
     DeadCodeInline.run
     InlineCalleeFirst.run
     FunDedup.run
+    ConstFields.run

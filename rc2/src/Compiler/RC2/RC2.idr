@@ -38,6 +38,7 @@ import Compiler.RC2.Trmc
 import Compiler.RC2.CC
 import Compiler.RC2.CmpMerge
 import Compiler.RC2.ConAltNative
+import Compiler.RC2.ConstFields
 import Compiler.RC2.ConstFold
 import Compiler.RC2.DeadCode
 import Compiler.RC2.DualABI
@@ -464,9 +465,16 @@ toRCDefs strict directives incremental roots thunks preFolded0 = do
                            pure (map (\(n, d) => (n, applyCancelDupDrop d)) erased)
     -- rc2/doc/fun-dedup.md: functions with equal bodies become one. Not in
     -- incremental mode, where a module only sees its own definitions.
+    -- rc2/doc/dead-fields.md, "Constant constructors": closures in fields
+    -- no alt binds go, and so do the functions only they named. Whole
+    -- program only, like the dedup below.
+    unreadDropped <- if (stageOff NoConstFields directives) || incremental
+                        then pure cancelled
+                        else logTime 2 "rc2: Unread constant fields" $
+                               pure (pruneDeadDefs roots (applyConstFields cancelled))
     deduped <- if (stageOff NoFunDedup directives) || incremental
-                  then pure cancelled
-                  else logTime 2 "rc2: Function dedup" $ pure (dedupFuns roots cancelled)
+                  then pure unreadDropped
+                  else logTime 2 "rc2: Function dedup" $ pure (dedupFuns roots unreadDropped)
     if stageOff NoStackCon directives
        then pure deduped
        else logTime 2 "rc2: Stack constructors" $ pure (applyStackCon deduped)

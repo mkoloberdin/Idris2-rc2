@@ -55,3 +55,16 @@ if [ "$sums" = "1" ] && [ "$wraps" -le 1 ] && [ "$lasts" -ge 1 ]; then
 else
     fail "FunDedup: sumA/sumB defs $sums (want 1), wrapA/wrapB defs $wraps (want <=1), lastOne's *4 ops $lasts (want >=1) in $dump"
 fi
+
+# ConstFields (rc2/doc/dead-fields.md, "Constant constructors"): the `Ord Key`
+# dictionary reaches Data.SortedMap as one constant whose `max`/`min` fields
+# no alt binds, so their closures become `[erased]` and the functions (the
+# only ones adding 7 and 9) are gone. `--directive noconstfields` makes this
+# FAIL by design.
+maxmin="$(grep -cE '^ *op \+Int \[v[0-9]+, #(7|9)\]' "$dump" || true)"
+erasedOrd="$(grep -cE '#Prelude\.EqOrd\.MkOrd@Just 0\(.*\[erased\]' "$dump" || true)"
+if [ "$maxmin" = "0" ] && [ "$erasedOrd" -ge 1 ]; then
+    pass "ConstFields: max/min of Ord Key dropped, the dictionary holds [erased] fields"
+else
+    fail "ConstFields: $maxmin max/min op(s) left (want 0), $erasedOrd Ord constant(s) with [erased] fields (want >=1) in $dump"
+fi

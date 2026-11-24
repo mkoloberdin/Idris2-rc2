@@ -53,15 +53,11 @@ renameLocalN cl c@(RCConstCon n ci tag args) =
             Nothing => c
 renameLocalN _ l = l
 
-||| `e` with every function name `f` maps changed, and the closures (`partial`,
-||| constant closures, also inside constant constructors) renamed by `cl`,
-||| which may change the number of arguments they miss.
-renameNamesG : (Name -> Name) -> ClosureRename -> RCExp -> RCExp
-renameNamesG f cl = go
+||| `e` with every function name `f` maps changed, every `partial` renamed by
+||| `cl` and every value by `l`.
+mapNamesG : (Name -> Name) -> ClosureRename -> (RCLocal -> RCLocal) -> RCExp -> RCExp
+mapNamesG f cl l = go
   where
-    l : RCLocal -> RCLocal
-    l = renameLocalN cl
-
     ls : List RCLocal -> List RCLocal
     ls = map l
 
@@ -100,6 +96,17 @@ renameNamesG f cl = go
     go (RLoop {sameLen} fc params initial prologueDrop body) = mapLoop fc params initial id l prologueDrop (go body)
     go (RLoopContinue fc args postDrop) = RLoopContinue fc (ls args) postDrop
     go (RMemoize fc n rep body) = RMemoize fc n rep (go body)
+
+||| `e` with every function name `f` maps changed, and the closures (`partial`,
+||| constant closures, also inside constant constructors) renamed by `cl`,
+||| which may change the number of arguments they miss.
+renameNamesG : (Name -> Name) -> ClosureRename -> RCExp -> RCExp
+renameNamesG f cl = mapNamesG f cl (renameLocalN cl)
+
+||| `e` with every value (an operand, a field, a scrutinee, ...) mapped by `l`.
+export
+mapLocalsR : (RCLocal -> RCLocal) -> RCExp -> RCExp
+mapLocalsR = mapNamesG id (\n, m => (n, m))
 
 ------------------------------------------------------------------------
 -- Constants
