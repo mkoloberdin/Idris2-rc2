@@ -5,6 +5,14 @@ scattered code comments. Nothing below is a known correctness bug in
 what's implemented -- see `rc2/tests/refc-suite/README.md` for bugs that
 were found and already fixed.
 
+
+## `ShareSubtrees`の取りこぼし(2026-11-25)
+
+`rc2/doc/shared-subtrees.md`。`rc2-norepl`の最終IRで、同じ定義の中の繰り返しはまだ16.8%残る。
+
+- 大半は再帰関数の中にある(`TTImp.PartialEval.mkSpecDef`だけで7,651行)。末尾位置の複製が自分の循環を末尾で呼ぶので、外に出すとループがトランポリンに変わるため除外している。
+- 21個以上の局所を読む複製は外に出さない。`MaxExtractFunArgs`を上げれば広がる。
+
 ## 上流の#3915が取り込まれたら`NatMagic`を見直す(2026-11-23)
 
 上流のPR idris-lang/Idris2#3915(未マージ)は、`Data.Nat`の`isLTE`・`lte`・`minimum`・`maximum`を

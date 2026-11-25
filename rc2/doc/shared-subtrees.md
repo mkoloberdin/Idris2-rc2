@@ -23,12 +23,14 @@ and a new function of no arguments is no CAF.
 
 1. `FunDedup.dedupFuns` runs first. A lambda in a copied subtree is
    lifted once per copy, under a name of its own, and the copies only
-   become equal once those twins are one function. The merge reaches
-   further than that: two clones `SpecConstCon` made for dictionaries with
-   equal methods become one too (`Test87SpecConstCon` turns this pass off
-   for that reason).
+   become equal once those twins are one function. It reaches further
+   than that (two clones `SpecConstCon` made for dictionaries with equal
+   methods become one), and drops what it leaves unreferenced, as at the
+   end of `toRCDefs` (`fun-dedup.md`); `--directive nofundedup` turns it
+   off here too.
 2. Every subtree of at least `minNodes` nodes is a candidate, with its
-   free locals in the order a walk first reads them. Candidates are
+   free locals in the order a walk first reads them, and whether it is in
+   tail position. Candidates are
    grouped by size, and the largest go first.
 3. Two candidates are equal when `FunDedup.sameUpToLocals` says so: their
    free locals paired in that order, the locals they bind paired as
@@ -43,10 +45,12 @@ A copy that reads more than `MaxExtractFunArgs` (20) locals stays too: a
 function of more arguments takes them as one array, and every call of it
 builds a closure and runs it through the trampoline.
 
-A copy that tail-calls a function of the enclosing function's own cycle
-in the tail-call graph (`MutualLoop.tarjanSCCs`) stays where it is: in a
-new function, that call would join the cycle, which Loop makes a loop
-and the rest leaves to a trampoline. A call of a new function is a leaf
+A copy in tail position that tail-calls a function of the enclosing
+function's own cycle in the tail-call graph (`MutualLoop.tarjanSCCs`)
+stays where it is: in a new function, that call would join the cycle,
+which Loop makes a loop and the rest leaves to a trampoline. A copy in a
+`let`'s value can go: its tail calls are no tail calls of the function,
+so the new function's are no edge back into the cycle. A call of a new function is a leaf
 tail call when it is in tail position, so it is a direct C call
 (`leaf-tail-calls.md`).
 
@@ -60,10 +64,10 @@ mode.
 | | C | `.o` text | binary |
 |---|---|---|---|
 | master | 101.4 MB | 18.62 MB | 20.13 MB |
-| shared subtrees | 88.7 MB (−12.5%) | 17.36 MB (−6.8%) | 18.91 MB (−6.1%) |
+| shared subtrees | 88.8 MB (−12.5%) | 17.37 MB (−6.7%) | 18.93 MB (−6.0%) |
 
-154 functions; 23% of the IR lines were repeated subtrees, 16.5% still
-are. The pass takes 3.5 s, the merge before it included, and `rc2-norepl`
+154 functions; 23% of the IR lines were repeated subtrees, 16.8% still
+are. The pass takes 3.3 s, the merge before it included, and `rc2-norepl`
 generating its own C (`--directive nocc`) took 98 s against master's 102 s:
 the later passes have less to do. `bench.sh` is within noise.
 
@@ -77,12 +81,3 @@ Tried and dropped:
   pairing after the merge: 13 more functions, 10 KB.
 - The same at `Emit` with a `goto` to the first copy, kept out of the IR:
   91.1 MB of C, but the IR dump then no longer shows what the C does.
-
-## Not shared yet
-
-Most of what is left is in recursive functions (`TTImp.PartialEval.mkSpecDef`
-alone holds 7,651 lines of copies), whose copies tail-call their own cycle.
-A function of more than 20 arguments called directly with positional
-parameters (task: a wrapper taking the array only for closure calls)
-would lift the 20-local limit.
-

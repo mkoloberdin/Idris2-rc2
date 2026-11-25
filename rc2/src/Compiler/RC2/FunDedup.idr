@@ -1,5 +1,5 @@
 ||| Merges functions whose bodies are the same up to the numbering of
-||| their local variables (a structural comparison, never printed text), the last whole-program step of `toRCDefs`
+||| their local variables (a structural comparison, never printed text), the last whole-program step of `toRCDefs` (it also runs before `ShareSubtrees`, rc2/doc/shared-subtrees.md)
 ||| (rc2/doc/fun-dedup.md). Cloning and lifting leave many such
 ||| functions: closures lifted from identical lambdas, specialisation
 ||| clones that ended up the same, DualABI workers of equal wrappers.
@@ -232,6 +232,7 @@ noKey = (0, 0, 0, "", [])
 ||| A hash of the constants and constructors in `e`, in walk order (equal
 ||| bodies walk alike), so that functions differing only in a constant
 ||| land in different buckets.
+export
 leafHash : RCExp -> Int
 leafHash e = go 7 [e]
   where

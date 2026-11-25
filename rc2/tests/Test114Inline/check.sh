@@ -74,10 +74,13 @@ fi
 # one function, called from each of those places: its one string literal
 # is in the program once. `--directive nosharesubtrees` makes this FAIL by
 # design.
+# `score`'s three alts compute alike over a different field each: one
+# function, called with that field (its constant 4099 once).
 shareDefs="$(grep -cE '^def .*rc2_share_Test114Inline_ShareSubtrees' "$dump" || true)"
 mixed="$(grep -c '#"mixed "' "$dump" || true)"
-if [ "$shareDefs" -ge 1 ] && [ "$mixed" = "1" ]; then
-    pass "ShareSubtrees: pairUp's fallback clause is $shareDefs shared function(s), written once"
+k4099="$(grep -c '#4099\]' "$dump" || true)"
+if [ "$shareDefs" -ge 1 ] && [ "$mixed" = "1" ] && [ "$k4099" = "1" ]; then
+    pass "ShareSubtrees: pairUp's fallback clause and score's alts each written once"
 else
-    fail "ShareSubtrees: $shareDefs shared function(s) (want >=1), the fallback written $mixed time(s) (want 1) in $dump"
+    fail "ShareSubtrees: $shareDefs pairUp share(s) (want >=1), the fallback written $mixed time(s) (want 1), score's body $k4099 time(s) (want 1) in $dump"
 fi
