@@ -79,6 +79,7 @@ history, not there.
   `fwd-alias.md` for pointing every reference at the target of a function that only
   forwards its parameters to another,
   `batched-drops.md` for making a run of drops in the generated C an out-of-line call per six,
+  `shared-subtrees.md` for making the repeated subtrees of a function one new function each copy calls,
   `stack-con.md` for building a constructor that never leaves its function in the C frame,
   `concurrency.md` for the runtime's
   multi-step move to thread-safety -- atomic reference count, then real

@@ -39,6 +39,7 @@ import Compiler.RC2.CC
 import Compiler.RC2.CmpMerge
 import Compiler.RC2.ConAltNative
 import Compiler.RC2.ConstFields
+import Compiler.RC2.ShareSubtrees
 import Compiler.RC2.ConstFold
 import Compiler.RC2.DeadCode
 import Compiler.RC2.DualABI
@@ -371,7 +372,9 @@ toRCDefs strict directives incremental roots thunks preFolded0 = do
         logTime 2 "rc2: Arity raise (after early inline)" $ applyArityRaise lazyFolded
     trmced <- unlessOff [NoTrmc] directives reraised $ logTime 2 "rc2: TRMC" $ applyTrmc reraised
     ctxed <- unlessOff [NoCtx] directives trmced $ logTime 2 "rc2: Closure contexts" $ applyClosureCtx trmced
-    memoized <- logTime 2 "rc2: CAF memoization" $ pure (insertMemoize thunks ctxed)
+    memoized0 <- logTime 2 "rc2: CAF memoization" $ pure (insertMemoize thunks ctxed)
+    memoized <- if stageOff NoShareSubtrees directives || incremental then pure memoized0
+                  else logTime 2 "rc2: Shared subtrees" $ pure (applyShareSubtrees (dedupFuns roots memoized0))
     reused <- logTime 2 "rc2: RC annotate + Reuse + ConAltNative" $
                 traverse (\(n, d) => do
                   d1 <- toRCDefPostFold (not (stageOff NoBoolCase directives)) d

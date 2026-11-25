@@ -68,3 +68,16 @@ if [ "$maxmin" = "0" ] && [ "$erasedOrd" -ge 1 ]; then
 else
     fail "ConstFields: $maxmin max/min op(s) left (want 0), $erasedOrd Ord constant(s) with [erased] fields (want >=1) in $dump"
 fi
+
+# ShareSubtrees (rc2/doc/shared-subtrees.md): `pairUp`'s last clause, which
+# the case tree holds once for each alt of its first `case` that misses, is
+# one function, called from each of those places: its one string literal
+# is in the program once. `--directive nosharesubtrees` makes this FAIL by
+# design.
+shareDefs="$(grep -cE '^def .*rc2_share_Test114Inline_ShareSubtrees' "$dump" || true)"
+mixed="$(grep -c '#"mixed "' "$dump" || true)"
+if [ "$shareDefs" -ge 1 ] && [ "$mixed" = "1" ]; then
+    pass "ShareSubtrees: pairUp's fallback clause is $shareDefs shared function(s), written once"
+else
+    fail "ShareSubtrees: $shareDefs shared function(s) (want >=1), the fallback written $mixed time(s) (want 1) in $dump"
+fi

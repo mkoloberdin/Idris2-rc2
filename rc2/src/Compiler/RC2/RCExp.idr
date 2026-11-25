@@ -1086,6 +1086,28 @@ children (RLoop _ _ _ _ k) = [k]
 children (RMemoize _ _ _ k) = [k]
 children _ = []
 
+||| `e` with its `children` replaced, in the same order.
+export
+withChildren : RCExp -> List RCExp -> RCExp
+withChildren (RLet fc v r _ _) [value, body] = RLet fc v r value body
+withChildren (RCmpCase fc op args pd _ _) [t, f] = RCmpCase fc op args pd t f
+withChildren (RConCase fc sc alts mDef) ks =
+    let (as, rest) = splitAt (length alts) ks
+    in RConCase fc sc (zipWith (\(MkRConAlt n ci t a _), b => MkRConAlt n ci t a b) alts as)
+                (case (mDef, rest) of { (Just _, [d]) => Just d; _ => mDef })
+withChildren (RConstCase fc sc alts mDef) ks =
+    let (as, rest) = splitAt (length alts) ks
+    in RConstCase fc sc (zipWith (\(MkRConstAlt c _), b => MkRConstAlt c b) alts as)
+                  (case (mDef, rest) of { (Just _, [d]) => Just d; _ => mDef })
+withChildren (RDup fc v x _) [k] = RDup fc v x k
+withChildren (RDrop fc vs _) [k] = RDrop fc vs k
+withChildren (RFree fc v _) [k] = RFree fc v k
+withChildren (RReleaseReuse fc v _) [k] = RReleaseReuse fc v k
+withChildren (RReuseOffer fc sc ds us _) [k] = RReuseOffer fc sc ds us k
+withChildren (RLoop fc ps i pd _) [k] = RLoop fc ps i pd k
+withChildren (RMemoize fc n r _) [k] = RMemoize fc n r k
+withChildren e _ = e
+
 ||| The tail positions directly below a node that only passes its value on:
 ||| a `let` body, an ownership wrapper's continuation, every arm of a branch.
 ||| `Nothing` for any other node, which is itself a tail (or is not one).

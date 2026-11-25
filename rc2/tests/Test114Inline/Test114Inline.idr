@@ -13,6 +13,7 @@ import Test114Inline.DeadCodeInline
 import Test114Inline.InlineCalleeFirst
 import Test114Inline.FunDedup
 import Test114Inline.ConstFields
+import Test114Inline.ShareSubtrees
 
 main : IO ()
 main = do
@@ -22,3 +23,4 @@ main = do
     InlineCalleeFirst.run
     FunDedup.run
     ConstFields.run
+    ShareSubtrees.run

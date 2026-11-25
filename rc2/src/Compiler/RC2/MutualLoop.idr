@@ -54,6 +54,7 @@ import Data.SortedSet
 -- silently drifting apart on what counts as a tail position), this is
 -- just `mapTailAppNames` itself with an always-declining `f`, keeping
 -- only the name set it collects and discarding the (unmodified) tree.
+export
 tailCallTargets : RCExp -> SortedSet Name
 tailCallTargets body = let (names, _, _) = mapTailAppNames (\_, _, _ => Nothing) body in names
 

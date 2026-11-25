@@ -2,6 +2,8 @@ module Test87SpecConstCon.ConstConForwarding
 
 import System
 
+%cg rc2 nosharesubtrees
+
 -- Transitive constant-constructor specialization
 -- (`Compiler.RC2.SpecClosure.applySpecConstCon`, see
 -- `doc/constant-constructor-specialization.md`, "Transitive
@@ -11,6 +13,9 @@ import System
 --
 -- Everything on the chain is `%noinline`; otherwise
 -- `Compiler.RC2.Inline` erases the very shape under test.
+-- For the same reason ShareSubtrees is off: the function merge it starts
+-- with makes the two `countAll` clones one, which LateInline then folds
+-- into its caller (doc/shared-subtrees.md).
 --
 --   chain2 -> chain1 -> classify      pure forwarders, then the one
 --                                     function that scrutinises

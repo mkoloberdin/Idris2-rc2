@@ -430,6 +430,15 @@ mutual
       if c1 == c2 then eqE env b1 b2 >>= \env1 => eqCAlts env1 r1 r2 else Nothing
   eqCAlts _ _ _ = Nothing
 
+||| Whether `a` and `b` are equal when the free locals `fa` of `a` pair with
+||| `fb` of `b`, and the locals they bind pair up (rc2/doc/shared-subtrees.md).
+export
+sameUpToLocals : List LocalId -> List LocalId -> RCExp -> RCExp -> Bool
+sameUpToLocals fa fb a b =
+    case bindAll (MkEnv empty empty selfName selfName) fa fb of
+         Just env => isJust (eqE env a b)
+         Nothing => False
+
 ||| Whether two candidates are the same function up to the numbering of
 ||| their locals (`b` may stand in for `a`).
 sameFun : Cand -> Cand -> Bool
