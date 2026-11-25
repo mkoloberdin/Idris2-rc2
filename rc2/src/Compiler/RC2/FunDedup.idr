@@ -1,5 +1,5 @@
 ||| Merges functions whose bodies are the same up to the numbering of
-||| their local variables (a structural comparison, never printed text), the last whole-program step of `toRCDefs`
+||| their local variables (a structural comparison, never printed text), the last whole-program step of `toRCDefs` (it also runs before `ShareSubtrees`, rc2/doc/shared-subtrees.md)
 ||| (rc2/doc/fun-dedup.md). Cloning and lifting leave many such
 ||| functions: closures lifted from identical lambdas, specialisation
 ||| clones that ended up the same, DualABI workers of equal wrappers.
@@ -232,6 +232,7 @@ noKey = (0, 0, 0, "", [])
 ||| A hash of the constants and constructors in `e`, in walk order (equal
 ||| bodies walk alike), so that functions differing only in a constant
 ||| land in different buckets.
+export
 leafHash : RCExp -> Int
 leafHash e = go 7 [e]
   where
@@ -429,6 +430,15 @@ mutual
   eqCAlts env (MkRConstAlt c1 b1 :: r1) (MkRConstAlt c2 b2 :: r2) =
       if c1 == c2 then eqE env b1 b2 >>= \env1 => eqCAlts env1 r1 r2 else Nothing
   eqCAlts _ _ _ = Nothing
+
+||| Whether `a` and `b` are equal when the free locals `fa` of `a` pair with
+||| `fb` of `b`, and the locals they bind pair up (rc2/doc/shared-subtrees.md).
+export
+sameUpToLocals : List LocalId -> List LocalId -> RCExp -> RCExp -> Bool
+sameUpToLocals fa fb a b =
+    case bindAll (MkEnv empty empty selfName selfName) fa fb of
+         Just env => isJust (eqE env a b)
+         Nothing => False
 
 ||| Whether two candidates are the same function up to the numbering of
 ||| their locals (`b` may stand in for `a`).

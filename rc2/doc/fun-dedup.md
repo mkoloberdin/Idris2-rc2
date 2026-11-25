@@ -7,7 +7,8 @@ wrappers. On idris2-lsp's final IR (17,370 definitions) 5,157 definitions
 (30%, 4.3% of the IR lines) had a twin; most were 3-line stubs, 239
 groups had bodies over 6 lines.
 
-`dedupFuns` is the last whole-program step of `toRCDefs` (after the final
+`dedupFuns` runs twice. First before `ShareSubtrees` (`doc/shared-subtrees.md`), on
+the IR before RC, with its `pruneDeadDefs`; then as the last whole-program step of `toRCDefs` (after the final
 Dup/drop cancel, before the program is emitted). Off with
 `--directive nofundedup`, and not run in incremental mode, where a module
 sees only its own definitions.
