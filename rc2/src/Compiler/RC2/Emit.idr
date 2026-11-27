@@ -79,6 +79,11 @@ import Compiler.RC2.WorkerName
 
 %default covering
 
+||| A case of no alt and no default (none of which can be reached), written
+||| as a crash: as nothing, the function it ends would have no `return`.
+noAltCrash : FC -> RCExp
+noAltCrash fc = RCrash fc "[rc2] Emit: a case of no alt"
+
 ||| The auto-implicit `Ref`s nearly every function in this module
 ||| threads through -- see each `Ref`'s own tag type (`ArgCounter`,
 ||| `OutfileText`, etc.) for what it tracks. `EmitDeps retTy` stands in
@@ -465,9 +470,9 @@ mutual
     emitRetInto sink tailPosition (RAppNameRep fc n argReps retRep postDrop args) =
         emitAppNameRepInto sink tailPosition fc n argReps retRep postDrop args
     emitRetInto sink _ (RV fc l@(RCLoc _)) = finalizeSink fc sink (varName l)
-    emitRetInto sink _ (RCrash fc _) = case sink of
-        SinkReturn (RRet n _) => finalizeSink fc sink "(\{retCType n}){ 0 } /* CRASH */"
-        SinkVar _ _ (RRet n _) => finalizeSink fc sink "(\{retCType n}){ 0 } /* CRASH */"
+    emitRetInto sink _ (RCrash fc msg) = case sink of
+        SinkReturn (RRet n _) => finalizeSink fc sink (crashExpr msg "(\{retCType n}){ 0 }")
+        SinkVar _ _ (RRet n _) => finalizeSink fc sink (crashExpr msg "(\{retCType n}){ 0 }")
         _ => retUnsupported "RCrash into a non-struct sink"
     emitRetInto _ _ _ = retUnsupported "a struct sink"
 
@@ -605,11 +610,13 @@ mutual
             reachable (MkRConAlt _ _ _ args _) = case scRep of
                                                       RRet n _ => length args <= n
                                                       _ => True
-        emitAltChain resolvedSink
-            (\alt => (\s => (s, [])) <$> condFor alt)
-            (emitConAltBody resolvedSink tailPosition sc)
-            (map (\body => branchBody resolvedSink body tailPosition) mDef)
-            (filter reachable alts)
+        case (filter reachable alts, mDef) of
+             ([], Nothing) => emitInto fc resolvedSink tailPosition (noAltCrash fc)
+             (live, _) => emitAltChain resolvedSink
+                              (\alt => (\s => (s, [])) <$> condFor alt)
+                              (emitConAltBody resolvedSink tailPosition sc)
+                              (map (\body => branchBody resolvedSink body tailPosition) mDef)
+                              live
 
     ||| Lower a constant/tag switch: same "each alt writes straight into
     ||| the once-resolved `sink`, via `emitAltChain`'s shared `if`-chain
@@ -617,6 +624,7 @@ mutual
     ||| dispatch strategies (a fast integer switch via `extractIntExpr`,
     ||| or the string/double equality chain).
     emitConstCaseInto : EmitDeps (Sink -> TailPositionStatus -> FC -> RCLocal -> List RConstAlt -> Maybe RCExp -> Core ())
+    emitConstCaseInto sink tailPosition fc sc [] Nothing = emitInto fc sink tailPosition (noAltCrash fc)
     emitConstCaseInto sink tailPosition fc sc alts def = do
         let sc' = varName sc
         resolvedSink <- resolveSink fc sink
@@ -941,7 +949,7 @@ mutual
         removeReuseConstructors [reuseVarName (RCLoc loc)]
         emitNativeValue ty cont
     -- A crash in a native position (`DualABI.tailLeaves` lets one through).
-    emitNativeValue ty (RCrash fc _) = pure ("0 /* CRASH */", [])
+    emitNativeValue ty (RCrash fc msg) = pure (crashExpr msg (case ty of { TPtr => "NULL"; _ => "0" }), [])
     emitNativeValue ty e = throw $ InternalError "[rc2] internal: expected a native-producing expression"
 
 emitAppNameRepInto sink tailPosition fc n argReps retRep postDrop args = do
@@ -1254,7 +1262,7 @@ emitRC sink (RPrimVal fc (I x)) tailPosition = emitRC sink (RPrimVal fc (I64 $ c
 emitRC sink (RPrimVal fc c) _ = finalizeSink fc sink !(boxedConstExpr c)
 
 emitRC sink (RErased fc) _ = finalizeSink fc sink "NULL"
-emitRC sink (RCrash fc x) _ = finalizeSink fc sink "(NULL /* CRASH */)"
+emitRC sink (RCrash fc msg) _ = finalizeSink fc sink (crashExpr msg "NULL")
 emitRC sink (RRetPack fc _ _ _) _ = unreachableInEmitRC "RRetPack"
 emitRC sink (RLoopContinue fc _ _) _ = unreachableInEmitRC "RLoopContinue"
 emitRC sink (RLoop fc loopParams initial prologueDrop body) _ = unreachableInEmitRC "RLoop"
