@@ -248,16 +248,51 @@ case trees repeat such a `case` where they destructure a record again (an
 interface dictionary, `MkApplicative`) and in the clauses copied into a
 default: in `rc2-norepl` 1,269 of them were in an alt of a `case` on the
 same local and 1,862 in its default, with 577 alts that could not run.
-A constant `case` that loses every alt this way and has no default (one in
-`Libraries.Text.Parser.Core`'s `map`, in `rc2-norepl`) becomes an
-`RCrash` ("no alt of this case can be reached"): left as a `case` of no
-alt, `Emit` wrote nothing for it, and the function it ended had no
-`return` (`rc2-norepl`'s C did not compile, under `-Werror=return-type`).
+
+When no alt is left and the `case` has no default, no value of the
+local's type reaches it, and it becomes an `RCrash` ("no alt of this case
+can be reached"): the case trees put a default after alts that already
+cover the type (a record's one constructor, say), and a `case` in that
+default on the same local has only alts that default is past. Left as it
+was, a value that did reach it (through `believe_me`) would take its last
+alt, which `Emit` does not test. The enclosing default stays: an
+`RCrash` there could be a genuine error branch, and dropping a default
+would lose that crash the same way. In `rc2-norepl` 146 such `case`s
+became crashes; the 3 left are made by `LateInline`, after the last
+`ConstFold`.
+
+A constant `case` that loses every alt and has no default (one in
+`Libraries.Text.Parser.Core`'s `map`, in `rc2-norepl`) becomes one too:
+left as a `case` of no alt, `Emit` wrote nothing for it, and the function
+it ended had no `return` (`rc2-norepl`'s C did not compile, under
+`-Werror=return-type`).
 
 The same pass folds a comparison of a local with itself: `<` and `>`
 are false, `==`, `<=` and `>=` true, but for a `Double` (NaN). Left to
 C, clang's `-Wtautological-compare` rejects `x == x` under `-Werror`
 (`libs/rc2base`'s `TestPosixErrno`). Test: `Test190ConstAltFold`.
+
+### Casts between `Char` and integers
+
+`foldableOp` folds a `Cast` only between integer types, so
+`cast-Int-Char [#160]` stayed (29 such casts in `rc2-norepl`). A cast of
+an integer constant to `Char` now folds as rc2's runtime computes it,
+`idris2rc2_charFromCodepoint`: the codepoint, or NUL for a surrogate,
+a negative or a too-large value. The host's `getOp` would not agree on
+those. A cast from `Char` folds only to a type every codepoint fits in
+(`Int`, `Int32`, `Int64`, `Integer`, `Bits32`, `Bits64`), so no wrap-around
+is evaluated on the host.
+
+### Identities
+
+`x + 0`, `0 + x` and `x - 0` of an `Integer`, and `"" ++ s` and
+`s ++ ""`, are the other operand. Only those: their `let` is Boxed, so the
+operand's ownership moves into it as at any `let y = x`. A fixed-width
+`x + 0` has a native `let`, and the `RV` of a Boxed `x` there would read it
+without the drop the `op`'s `postDrop` gave, leaking a boxed `Int64` or
+`Bits64` beyond 62 bits. Nor a `Double`: `-0.0 + 0.0` is `0.0`. In
+`rc2-norepl` there were 15 fixed-width ones and 1 `"" ++ s`. Test:
+`Test192SmallFolds`.
 
 ## Bugs found and fixed
 
