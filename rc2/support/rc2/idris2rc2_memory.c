@@ -217,8 +217,12 @@ IDRIS2RC2_Array *idris2rc2_mkArray(int length) {
 //   costs no memory of its own: a released field links the cell before
 //   it, and the cell's dead reference count holds the field to go on
 //   from (Koka's `kk_block_drop_free_recx` keeps its parents the same way).
-// A dying child without children is torn down by a call that does not
-// recurse further.
+// A dying child of any other kind is torn down by a call of its own. That
+// call does not come back here for a string, a number or a buffer, but
+// does for an array's items, a GCPointer's value (or the finalizer run on
+// it) and a channel's queued values, which it drops one by one: the C
+// stack then grows with how deeply arrays, GCPointers and channels nest
+// inside each other, not with the size of what they hold.
 // Not a general worklist: that cost 5-7% more instructions on a
 // free-heavy benchmark, since every teardown paid to set it up; the
 // waiting chain lives out of line for the same reason, so the common path
@@ -283,7 +287,7 @@ again:
           idris2rc2_teardownWaiting(v, i, args[i]); // the rest of the walk
           return;
         }
-        idris2rc2_teardown(args[i]); // a leaf: does not recurse further
+        idris2rc2_teardown(args[i]); // nothing this walk follows (see IDRIS2RC2_TAGS_WITH_CHILDREN)
       }
     if (n > 0 && idris2rc2_releaseLast(args[n - 1])) {
       IDRIS2RC2_Value *x = args[n - 1];
@@ -408,6 +412,13 @@ static inline IDRIS2RC2_Value **idris2rc2_fieldsOf(IDRIS2RC2_Value *v, int *n) {
 }
 
 // Whether `v` is a value whose last reference was released already.
+// Relies on no live value having a count of 0: a static or stack-built
+// value is immortal (IDRIS2RC2_REFCOUNT_MAX), a fresh cell starts at 1.
+// idris2rc2_teardownWaiting tells a kept cell (its first field dead) from
+// one not yet entered (its first field still held) by this alone, so a
+// value that lived at count 0 (were borrowing ever to make one) would make
+// it take a cell not yet entered for a kept one and free that live
+// first field. Such a value must not reach it.
 static inline int idris2rc2_isDead(IDRIS2RC2_Value *v) {
   return v && !idris2rc2_is_unboxed(v) && atomic_load_explicit(&v->header.refCount, memory_order_relaxed) == 0;
 }
@@ -440,7 +451,7 @@ fields:
     if (!idris2rc2_releaseLast(c))
       continue;
     if (__builtin_expect(!idris2rc2_hasChildren(c), 0)) {
-      idris2rc2_teardown(c); // a leaf: does not recurse further
+      idris2rc2_teardown(c); // nothing this walk follows (see IDRIS2RC2_TAGS_WITH_CHILDREN)
       continue;
     }
   child:
@@ -489,7 +500,7 @@ fields:
           }
           goto walked;
         }
-        idris2rc2_teardown(d); // a leaf: does not recurse further
+        idris2rc2_teardown(d); // nothing this walk follows (see IDRIS2RC2_TAGS_WITH_CHILDREN)
       }
     }
     idris2rc2_cellFreeInline(c);
@@ -510,7 +521,8 @@ fields:
     return;
   // Back to the innermost waiting cell, at the field it is to go on from.
   // That field is dead already: the one it waited at, still whole, or the
-  // cell that was kept when it began to wait, whose first field is dead too.
+  // cell that was kept when it began to wait, whose first field is dead too
+  // (told apart by idris2rc2_isDead, whose comment says what that needs).
   v = parent;
   i = v->header.rc;
   args = idris2rc2_fieldsOf(v, &n);

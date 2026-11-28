@@ -10,6 +10,7 @@ module Main
 import Test113DeepRecursion.Trmc
 import Test113DeepRecursion.TeardownDeep
 import Test113DeepRecursion.TeardownShapes
+import Test113DeepRecursion.TeardownRandom
 import Test113DeepRecursion.ClosureCtx
 import Test113DeepRecursion.TrmcHoles
 import Test113DeepRecursion.TrmcMutual
@@ -19,6 +20,7 @@ main = do
     Trmc.run
     TeardownDeep.run
     TeardownShapes.run
+    TeardownRandom.run
     ClosureCtx.run
     TrmcHoles.run
     TrmcMutual.run
